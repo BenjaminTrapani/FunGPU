@@ -1,0 +1,7 @@
+(letrec ((sum-range (lambda (rangeBegin rangeEnd)
+  (if (> rangeBegin rangeEnd) 0
+    (if (= ( + 1 rangeBegin) rangeEnd)
+      rangeBegin
+    (let ((midpoint (floor (+ rangeBegin (/ (- rangeEnd rangeBegin) 2)))))
+      (+ (sum-range rangeBegin midpoint) (sum-range midpoint rangeEnd))))))))
+  (sum-range 0 128))
