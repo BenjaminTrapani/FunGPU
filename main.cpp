@@ -1,6 +1,6 @@
 #include "Parser.h"
 #include "Compiler.h"
-#include "SerialCPUEvaluator.h"
+#include "CPUEvaluator.h"
 #include <iostream>
 
 using namespace FunGPU;
@@ -18,7 +18,7 @@ int main(int argc, char** argv)
 	auto compiledResult = compiler.Compile();
 	compiler.DebugPrintAST(compiledResult);
 
-	SerialCPUEvaluator evaluator(compiledResult);
+	CPUEvaluator evaluator(compiledResult);
 	const auto programResult = evaluator.EvaluateProgram();
 	std::cout << std::endl;
 	std::cout << std::endl;

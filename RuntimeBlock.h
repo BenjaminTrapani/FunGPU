@@ -1,5 +1,6 @@
 #include "Compiler.h"
 #include "List.hpp"
+#include <atomic>
 
 namespace FunGPU
 {
@@ -46,10 +47,6 @@ namespace FunGPU
 			RuntimeBlock* parent, DependencyTracker_t* depTracker, RuntimeValue* dest) :
 			m_astNode(astNode), m_bindingParent(bindingParent), m_parent(parent),
 			m_depTracker(depTracker), m_dest(dest) {
-			if (m_parent == nullptr)
-			{
-				int x = 1;
-			}
 		}
 
 		Compiler::ASTNode* GetASTNode()
@@ -353,15 +350,10 @@ namespace FunGPU
 			m_dest->SetValue(type, data);
 			if (m_parent)
 			{
-				--m_parent->m_dependenciesRemaining;
-				if (m_parent->m_dependenciesRemaining <= 0)
+				if (--m_parent->m_dependenciesRemaining == 0)
 				{
 					m_depTracker->AddActiveBlock(m_parent);
 				}
-			}
-			else
-			{
-				int x = 1;
 			}
 		}
 
@@ -371,7 +363,6 @@ namespace FunGPU
 		RuntimeBlock* m_parent = nullptr;
 		DependencyTracker_t* m_depTracker;
 		RuntimeValue* m_dest;
-		bool m_createdDependencies = false;
-		int m_dependenciesRemaining = 0;
+		std::atomic<int> m_dependenciesRemaining = 0;
 	};
 }
