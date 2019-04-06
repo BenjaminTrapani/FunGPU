@@ -103,8 +103,8 @@ namespace FunGPU
 				const auto identString = identExpr->GetSymbol();
 				updatedBindings.push_front(*identString);
 
-				const auto debruijnIndex = bindingExprs->size() - i - 1;
-				bindNode->m_bindings.Set(debruijnIndex, Compile(bindExprChildren->at(1), isRec ? updatedBindings : boundIdentifiers));
+				//const auto debruijnIndex = bindingExprs->size() - i - 1;
+				bindNode->m_bindings.Set(i, Compile(bindExprChildren->at(1), isRec ? updatedBindings : boundIdentifiers));
 			}
 
 			bindNode->m_childExpr = Compile(sexprChildren->at(2), updatedBindings);
@@ -233,12 +233,13 @@ namespace FunGPU
 			{
 				std::cout << "(letrec ";
 			}
+			std::cout << "(";
 			for (Index_t i = 0; i < bindNode->m_bindings.size(); ++i)
 			{
 				DebugPrintAST(bindNode->m_bindings.Get(i));
 				std::cout << " ";
 			}
-			std::cout << " ";
+			std::cout << ")";
 			std::cout << std::endl;
 			DebugPrintAST(bindNode->m_childExpr);
 			std::cout << ")";

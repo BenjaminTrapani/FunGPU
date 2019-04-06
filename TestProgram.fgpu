@@ -1,7 +1,14 @@
-(letrec ((sum-range (lambda (rangeBegin rangeEnd)
-  (if (> rangeBegin rangeEnd) 0
-    (if (= ( + 1 rangeBegin) rangeEnd)
-      rangeBegin
-    (let ((midpoint (floor (+ rangeBegin (/ (- rangeEnd rangeBegin) 2)))))
-      (+ (sum-range rangeBegin midpoint) (sum-range midpoint rangeEnd))))))))
-  (sum-range 0 8))
+(letrec ((get-nth-prime (lambda (cur-maybe-prime remaining-primes-count)
+  (letrec ((test-prime (lambda (cur x)
+	(if (> (* cur cur) x)
+		1
+		(let ((div-res (/ x cur)))
+		(if (> 0.00001 (- div-res (floor div-res)))
+			0
+			(test-prime (+ cur 1) x)))))))
+	(if (> (test-prime 2 cur-maybe-prime) 0)
+		(if (> 0 (- remaining-primes-count 1))
+			cur-maybe-prime
+			(get-nth-prime (+ cur-maybe-prime 1) (- remaining-primes-count 1)))
+		(get-nth-prime (+ cur-maybe-prime 1) remaining-primes-count))))))
+  (get-nth-prime 3 2048))
