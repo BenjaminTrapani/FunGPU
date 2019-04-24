@@ -12,12 +12,19 @@ namespace FunGPU
 
 	CPUEvaluator::RuntimeBlock_t::RuntimeValue CPUEvaluator::EvaluateProgram()
 	{
-		while (m_newActiveBlocks.size() > 0)
+		while (m_newActiveBlocks.size() > 0 || m_resultValue.m_type == RuntimeBlock_t::RuntimeValue::Type::Lazy)
 		{
 			{
 				std::lock_guard<std::mutex> guard(m_newActiveBlockMtx);
-				m_currentBlocks = m_newActiveBlocks;
-				m_newActiveBlocks.clear();
+				if (m_newActiveBlocks.size() == 0)
+				{
+					m_currentBlocks = { m_resultValue.m_data.lazyVal };
+				}
+				else
+				{
+					m_currentBlocks = m_newActiveBlocks;
+					m_newActiveBlocks.clear();
+				}
 			}
 
 			size_t runningBlocks = m_currentBlocks.size();

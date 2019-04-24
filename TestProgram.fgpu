@@ -11,4 +11,4 @@
 			cur-maybe-prime
 			(get-nth-prime (+ cur-maybe-prime 1) (- remaining-primes-count 1)))
 		(get-nth-prime (+ cur-maybe-prime 1) remaining-primes-count))))))
-  (get-nth-prime 3 2048))
+  (get-nth-prime 3 16))
