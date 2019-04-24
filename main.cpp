@@ -7,7 +7,7 @@ using namespace FunGPU;
 
 int main(int argc, char** argv)
 {
-	Parser parser("TestProgram.fgpu");
+	Parser parser("FastGetNPrimeSum.fgpu");
 	auto parsedResult = parser.ParseProgram();
 	parsedResult->DebugPrint(0);
 

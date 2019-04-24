@@ -7,9 +7,9 @@ namespace FunGPU
 	Compiler::ASTNode* Compiler::CompileListOfSExpr(std::shared_ptr<const SExpr> sexpr, std::list<std::string> boundIdentifiers)
 	{
 		auto sexprChildren = sexpr->GetChildren();
-		if (sexprChildren->size() < 2)
+		if (sexprChildren->size() < 1)
 		{
-			throw CompileException("List of sexpr is less than 2, invalid expr");
+			throw CompileException("List of sexpr is less than 1, invalid expr");
 		}
 
 		auto firstChild = sexprChildren->at(0);
@@ -56,7 +56,7 @@ namespace FunGPU
 			result = new BinaryOpNode(ASTNode::Type::Div, Compile(sexprChildren->at(1), boundIdentifiers),
 				Compile(sexprChildren->at(2), boundIdentifiers));
 		}
-		else if (firstChildSym == "=")
+		else if (firstChildSym == "=" || firstChildSym == "eq?")
 		{
 			if (sexprChildren->size() != 3)
 			{

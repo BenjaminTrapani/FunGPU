@@ -13,6 +13,10 @@ namespace FunGPU
 		public:
 			FunctionValue() : m_expr(nullptr), m_bindingParent(nullptr) {}
 			FunctionValue(Compiler::ASTNode* expr, RuntimeBlock* bindingParent) : m_expr(expr), m_bindingParent(bindingParent) {}
+			bool operator==(const FunctionValue& other) const
+			{
+				return m_expr == other.m_expr && m_bindingParent == other.m_bindingParent;
+			}
 
 			Compiler::ASTNode* m_expr;
 			RuntimeBlock* m_bindingParent;
@@ -36,6 +40,26 @@ namespace FunGPU
 			Type m_type;
 			Data m_data;
 
+			bool operator==(const RuntimeValue& other) const
+			{
+				if (other.m_type != m_type)
+				{
+					return false;
+				}
+				switch (m_type)
+				{
+				case Type::Double:
+				{
+					return m_data.doubleVal == other.m_data.doubleVal;
+				}
+				case Type::Function:
+				{
+					return m_data.functionVal == other.m_data.functionVal;
+				}
+				default:
+					throw std::invalid_argument("Unexpected type in == operator for RuntimeValue");
+				}
+			}
 			void SetValue(const Type type, const Data data)
 			{
 				m_type = type;
@@ -206,14 +230,14 @@ namespace FunGPU
 			{
 				if (!MaybeAddBinaryOp())
 				{
-					struct EqualFunctor
-					{
-						double operator()(const double l, const double r)
-						{
-							return l == r;
-						}
-					};
-					PerformBinaryOp<EqualFunctor>();
+					auto lArg = m_runtimeValues.front();
+					m_runtimeValues.pop_front();
+					auto rArg = m_runtimeValues.front();
+					m_runtimeValues.pop_front();
+					const bool areEq = lArg == rArg;
+					RuntimeValue::Data dataVal;
+					dataVal.doubleVal = static_cast<double>(areEq);
+					FillDestValue(RuntimeValue::Type::Double, dataVal);
 				}
 				break;
 			}
@@ -327,7 +351,7 @@ namespace FunGPU
 			m_runtimeValues.pop_front();
 			auto rArg = m_runtimeValues.front();
 			m_runtimeValues.pop_front();
-			if (lArg.m_type != RuntimeValue::Type::Double && rArg.m_type != RuntimeValue::Type::Double)
+			if (lArg.m_type != RuntimeValue::Type::Double || rArg.m_type != RuntimeValue::Type::Double)
 			{
 				throw std::invalid_argument("Expected both operands to add to be double");
 			}

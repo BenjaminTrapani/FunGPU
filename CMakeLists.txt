@@ -15,3 +15,5 @@ cuda_add_executable(FunGPU ${SOURCES})
 set_property(TARGET FunGPU PROPERTY CXX_STANDARD 17)
 
 configure_file(TestProgram.fgpu TestProgram.fgpu COPYONLY)
+configure_file(FastGetNPrimeSum.fgpu FastGetNPrimeSum.fgpu COPYONLY)
+configure_file(ListExample.fgpu ListExample.fgpu COPYONLY)

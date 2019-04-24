@@ -124,34 +124,40 @@ namespace FunGPU
 			else
 			{
 				auto parenExpr = std::dynamic_pointer_cast<ParenthesizedExpr>(curState.m_parsedForWorking);
+				std::shared_ptr<SExpr> sexprForThisNode;
+				if (parenExpr->m_currentChildIndex == 0)
+				{
+					ParsedToSExprState stateForThisNode;
+					stateForThisNode.m_parsedForWorking = curState.m_parsedForWorking;
+					stateForThisNode.m_workingExpr = std::make_shared<SExpr>();
+					if (curState.m_workingExpr)
+					{
+						curState.m_workingExpr->AddChild(stateForThisNode.m_workingExpr);
+					}
+					if (!resultRoot)
+					{
+						resultRoot = stateForThisNode.m_workingExpr;
+					}
+					sexprForThisNode = stateForThisNode.m_workingExpr;
+					workingStack.push(stateForThisNode);
+				}
+				else
+				{
+					sexprForThisNode = curState.m_workingExpr;
+				}
+
 				if (parenExpr->m_currentChildIndex >= parenExpr->m_childExprs->size())
 				{
+					if (parenExpr->m_currentChildIndex == 0)
+					{
+						workingStack.pop();
+					}
 					workingStack.pop();
 				}
 				else
 				{
 					auto curChildParsedExpr = parenExpr->m_childExprs->at(parenExpr->m_currentChildIndex);
-					std::shared_ptr<SExpr> sexprForThisNode;
-					if (parenExpr->m_currentChildIndex == 0)
-					{
-						ParsedToSExprState stateForThisNode;
-						stateForThisNode.m_parsedForWorking = curState.m_parsedForWorking;
-						stateForThisNode.m_workingExpr = std::make_shared<SExpr>();
-						if (curState.m_workingExpr)
-						{
-							curState.m_workingExpr->AddChild(stateForThisNode.m_workingExpr);
-						}
-						if (!resultRoot)
-						{
-							resultRoot = stateForThisNode.m_workingExpr;
-						}
-						sexprForThisNode = stateForThisNode.m_workingExpr;
-						workingStack.push(stateForThisNode);
-					}
-					else
-					{
-						sexprForThisNode = curState.m_workingExpr;
-					}
+					
 					ParsedToSExprState childState;
 					childState.m_parsedForWorking = curChildParsedExpr;
 					childState.m_workingExpr = sexprForThisNode;

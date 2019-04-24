@@ -1,0 +1,13 @@
+(letrec ((get-sum-of-primes-between (lambda (cur-maybe-prime max-val)
+  (letrec ((test-prime (lambda (cur x)
+            (if (+ (> (* cur cur) x) (= x 2))
+                1
+                (let ((div-res (/ x cur)))
+                  (if (> 0.00001 (- div-res (floor div-res)))
+                      0
+                      (test-prime (+ cur 1) x)))))))
+	(let ((get-prime-val-or-0 (lambda () (if (> (test-prime 2 cur-maybe-prime) 0) cur-maybe-prime 0))))
+		(if (> 0 (- max-val 1))
+			(get-prime-val-or-0)
+			(+ (get-prime-val-or-0) (get-sum-of-primes-between (+ cur-maybe-prime 1) (- max-val 1)))))))))
+  (get-sum-of-primes-between 2 18831))

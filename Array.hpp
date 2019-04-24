@@ -6,7 +6,17 @@ namespace FunGPU
 	class Array
 	{
 	public:
-		Array(const Index_t size) : m_data(new T[size]), m_size(size) {}
+		Array(const Index_t size) : m_size(size) 
+		{
+			if (m_size == 0)
+			{
+				m_data = nullptr;
+			}
+			else
+			{
+				m_data = new T[m_size];
+			}
+		}
 		T& Get(const Index_t index)
 		{
 			return m_data[index];

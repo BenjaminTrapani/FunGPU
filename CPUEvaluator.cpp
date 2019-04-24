@@ -1,6 +1,7 @@
 #include "CPUEvaluator.h"
 #include <algorithm>
 #include <execution>
+#include <iostream>
 
 namespace FunGPU
 {
@@ -12,11 +13,13 @@ namespace FunGPU
 
 	CPUEvaluator::RuntimeBlock_t::RuntimeValue CPUEvaluator::EvaluateProgram()
 	{
+		size_t maxConcurrentBlocks = 0;
 		while (m_newActiveBlocks.size() > 0)
 		{
 			{
 				std::lock_guard<std::mutex> guard(m_newActiveBlockMtx);
 				m_currentBlocks = m_newActiveBlocks;
+				maxConcurrentBlocks = std::max(maxConcurrentBlocks, m_currentBlocks.size());
 				m_newActiveBlocks.clear();
 			}
 
@@ -35,7 +38,8 @@ namespace FunGPU
 			std::unique_lock<std::mutex> lk(runningBlockMtx);
 			cv.wait(lk, [&runningBlocks] {return runningBlocks == 0; });
 		}
-
+		std::cout << std::endl;
+		std::cout << "Max concurrent blocks during exec: " << maxConcurrentBlocks << std::endl;
 		return m_resultValue;
 	}
 
