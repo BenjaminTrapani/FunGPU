@@ -7,36 +7,30 @@ namespace FunGPU
 {
 	CPUEvaluator::CPUEvaluator(Compiler::ASTNode* rootNode): m_rootASTNode(rootNode)
 	{
-		std::lock_guard<std::mutex> guard(m_newActiveBlockMtx);
-		m_newActiveBlocks.push_back(new RuntimeBlock_t(rootNode, nullptr, nullptr, this, &m_resultValue));
+		m_newActiveBlocks[0] = new RuntimeBlock_t(rootNode, nullptr, nullptr, this, &m_resultValue);
+		m_activeBlockCount = 1;
 	}
 
 	CPUEvaluator::RuntimeBlock_t::RuntimeValue CPUEvaluator::EvaluateProgram()
 	{
 		size_t maxConcurrentBlocks = 0;
-		while (m_newActiveBlocks.size() > 0)
+		while (m_activeBlockCount > 0)
 		{
-			{
-				std::lock_guard<std::mutex> guard(m_newActiveBlockMtx);
-				m_currentBlocks = m_newActiveBlocks;
-				maxConcurrentBlocks = std::max(maxConcurrentBlocks, m_currentBlocks.size());
-				m_newActiveBlocks.clear();
-			}
+			m_currentBlocks.clear();
+			m_currentBlocks.insert(m_currentBlocks.end(), m_newActiveBlocks.begin(), 
+				m_newActiveBlocks.begin() + m_activeBlockCount);
+			maxConcurrentBlocks = std::max(maxConcurrentBlocks, m_currentBlocks.size());
+			m_activeBlockCount = 0;
 
-			size_t runningBlocks = m_currentBlocks.size();
-			std::mutex runningBlockMtx;
-			std::condition_variable cv;
+			std::atomic<size_t> runningBlocks = m_currentBlocks.size();
 			std::for_each(std::execution::par_unseq, m_currentBlocks.begin(), m_currentBlocks.end(),
-				[&runningBlocks, &runningBlockMtx, &cv](const auto currentBlock) {
+				[&runningBlocks](const auto currentBlock) {
 				currentBlock->PerformEvalPass();
-				{
-					std::lock_guard<std::mutex> guard(runningBlockMtx);
-					--runningBlocks;
-				}
-				cv.notify_one();
+				--runningBlocks;
 			});
-			std::unique_lock<std::mutex> lk(runningBlockMtx);
-			cv.wait(lk, [&runningBlocks] {return runningBlocks == 0; });
+			while (runningBlocks > 0)
+			{
+			}
 		}
 		std::cout << std::endl;
 		std::cout << "Max concurrent blocks during exec: " << maxConcurrentBlocks << std::endl;
@@ -44,8 +38,7 @@ namespace FunGPU
 	}
 
 	void CPUEvaluator::AddActiveBlock(RuntimeBlock_t* block)
-	{
-		std::lock_guard<std::mutex> guard(m_newActiveBlockMtx);
-		m_newActiveBlocks.push_back(block);
+	{ 
+		m_newActiveBlocks.at(m_activeBlockCount++) = block;
 	}
 }

@@ -1,6 +1,7 @@
 #include "RuntimeBlock.h"
 #include "Compiler.h"
 #include <mutex>
+#include <array>
 
 namespace FunGPU
 {
@@ -17,7 +18,7 @@ namespace FunGPU
 		Compiler::ASTNode* m_rootASTNode;
 		RuntimeBlock_t::RuntimeValue m_resultValue;
 		std::vector<RuntimeBlock_t*> m_currentBlocks;
-		std::mutex m_newActiveBlockMtx;
-		std::vector<RuntimeBlock_t*> m_newActiveBlocks;
+		std::atomic<size_t> m_activeBlockCount = 0;
+		std::array<RuntimeBlock_t*, 4096> m_newActiveBlocks;
 	};
 }
