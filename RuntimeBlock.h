@@ -25,15 +25,12 @@ namespace FunGPU
 			{
 				Double,
 				Function,
-				Lazy,
 			};
 			union Data
 			{
 				double doubleVal;
 				FunctionValue functionVal;
-				RuntimeBlock* lazyVal;
 				Data() : functionVal(FunctionValue()) {}
-				Data(const Data& other) : functionVal(other.functionVal) {}
 			};
 
 			Type m_type;
@@ -52,10 +49,6 @@ namespace FunGPU
 			m_depTracker(depTracker), m_dest(dest) {
 		}
 
-		RuntimeBlock(const RuntimeBlock& other): m_astNode(other.m_astNode), m_bindingParent(other.m_bindingParent), m_parent(other.m_parent),
-			m_depTracker(other.m_depTracker), m_dest(other.m_dest) {
-		}
-
 		Compiler::ASTNode* GetASTNode()
 		{
 			return m_astNode;
@@ -70,18 +63,22 @@ namespace FunGPU
 			{
 				const bool isRec = m_astNode->m_type == Compiler::ASTNode::Type::BindRec;
 				auto bindNode = static_cast<Compiler::BindNode*>(m_astNode);
-				for (Index_t i = 0; i < bindNode->m_bindings.size(); ++i)
+				if (m_runtimeValues.size() == 0)
 				{
-					m_runtimeValues.push_front(RuntimeValue());
-					auto targetRuntimeValue = &m_runtimeValues.front();
-					auto dependencyOnBinding = new RuntimeBlock(bindNode->m_bindings.Get(i),
-						isRec ? this : m_bindingParent, this, m_depTracker, targetRuntimeValue);
-					targetRuntimeValue->m_data.lazyVal = dependencyOnBinding;
-					targetRuntimeValue->m_type = RuntimeValue::Type::Lazy;
+					for (Index_t i = 0; i < bindNode->m_bindings.size(); ++i)
+					{
+						m_runtimeValues.push_front(RuntimeValue());
+						auto targetRuntimeValue = &m_runtimeValues.front();
+						auto dependencyOnBinding = new RuntimeBlock(bindNode->m_bindings.Get(i),
+							isRec ? this : m_bindingParent, this, m_depTracker, targetRuntimeValue);
+						AddDependentActiveBlock(dependencyOnBinding);
+					}
 				}
-
-				auto depOnExpr = new RuntimeBlock(bindNode->m_childExpr, this, m_parent, m_depTracker, m_dest);
-				AddDependentActiveBlock(depOnExpr, false);
+				else
+				{
+					auto depOnExpr = new RuntimeBlock(bindNode->m_childExpr, this, m_parent, m_depTracker, m_dest);
+					AddDependentActiveBlock(depOnExpr, false);
+				}
 
 				break;
 			}
@@ -106,19 +103,17 @@ namespace FunGPU
 				}
 				else
 				{
-					RuntimeValue& lambdaVal = m_runtimeValues.front();
-					if (ForceVal(lambdaVal))
+					RuntimeValue lambdaVal = m_runtimeValues.front();
+					m_runtimeValues.pop_front();
+
+					if (lambdaVal.m_type != RuntimeValue::Type::Function)
 					{
-						if (lambdaVal.m_type != RuntimeValue::Type::Function)
-						{
-							throw std::invalid_argument("Cannot call non-function");
-						}
-						auto lambdaBlock = new RuntimeBlock(lambdaVal.m_data.functionVal.m_expr,
-							this, m_parent, m_depTracker, m_dest);
-						m_bindingParent = lambdaVal.m_data.functionVal.m_bindingParent;
-						AddDependentActiveBlock(lambdaBlock, false);
-						m_runtimeValues.pop_front();
+						throw std::invalid_argument("Cannot call non-function");
 					}
+					auto lambdaBlock = new RuntimeBlock(lambdaVal.m_data.functionVal.m_expr,
+						this, m_parent, m_depTracker, m_dest);
+					m_bindingParent = lambdaVal.m_data.functionVal.m_bindingParent;
+					AddDependentActiveBlock(lambdaBlock, false);
 				}
 
 				break;
@@ -134,19 +129,16 @@ namespace FunGPU
 				}
 				else
 				{
-					auto& predValue = m_runtimeValues.front();
-					if (ForceVal(predValue))
+					auto predValue = m_runtimeValues.front();
+					m_runtimeValues.pop_front();
+					if (predValue.m_type != RuntimeValue::Type::Double)
 					{
-						if (predValue.m_type != RuntimeValue::Type::Double)
-						{
-							throw std::invalid_argument("Double is the only supported boolean type");
-						}
-						const bool isPredTrue = static_cast<bool>(predValue.m_data.doubleVal);
-						Compiler::ASTNode* branchToTake = isPredTrue ? ifNode->m_then : ifNode->m_else;
-						auto dependencyOnBranch = new RuntimeBlock(branchToTake, m_bindingParent, m_parent, m_depTracker, m_dest);
-						AddDependentActiveBlock(dependencyOnBranch, false);
-						m_runtimeValues.pop_front();
+						throw std::invalid_argument("Double is the only supported boolean type");
 					}
+					const bool isPredTrue = static_cast<bool>(predValue.m_data.doubleVal);
+					Compiler::ASTNode* branchToTake = isPredTrue ? ifNode->m_then : ifNode->m_else;
+					auto dependencyOnBranch = new RuntimeBlock(branchToTake, m_bindingParent, m_parent, m_depTracker, m_dest);
+					AddDependentActiveBlock(dependencyOnBranch, false);
 				}
 				break;
 			}
@@ -251,17 +243,14 @@ namespace FunGPU
 				}
 				else
 				{
-					auto& argVal = m_runtimeValues.front();
-					if (ForceVal(argVal))
+					const auto argVal = m_runtimeValues.front();
+					if (argVal.m_type != RuntimeValue::Type::Double)
 					{
-						if (argVal.m_type != RuntimeValue::Type::Double)
-						{
-							throw std::invalid_argument("Expected double in floor op");
-						}
-						RuntimeValue::Data dataToSet;
-						dataToSet.doubleVal = floor(argVal.m_data.doubleVal);
-						FillDestValue(RuntimeValue::Type::Double, dataToSet);
+						throw std::invalid_argument("Expected double in floor op");
 					}
+					RuntimeValue::Data dataToSet;
+					dataToSet.doubleVal = floor(argVal.m_data.doubleVal);
+					FillDestValue(RuntimeValue::Type::Double, dataToSet);
 				}
 				break;
 			}
@@ -311,21 +300,6 @@ namespace FunGPU
 			return &tempParent->m_runtimeValues.GetItemAtIndex(index);
 		}
 
-		bool ForceVal(RuntimeValue& val)
-		{
-			if (val.m_type == RuntimeValue::Type::Lazy)
-			{
-				// TODO this duplicates evaluation of lazy expressions.
-				RuntimeBlock* cpyBlock = new RuntimeBlock(*val.m_data.lazyVal);
-				cpyBlock->m_parent = this;
-				cpyBlock->m_dest = &val;
-				AddDependentActiveBlock(cpyBlock);
-
-				return false;
-			}
-			return true;
-		}
-
 		bool MaybeAddBinaryOp()
 		{
 			if (m_runtimeValues.size() == 0)
@@ -349,20 +323,17 @@ namespace FunGPU
 		template<class BinaryOpFunctor>
 		void PerformBinaryOp()
 		{
-			auto& lArg = m_runtimeValues.front();
-			auto& rArg = m_runtimeValues.front();
-			if (ForceVal(lArg) && ForceVal(rArg))
+			auto lArg = m_runtimeValues.front();
+			m_runtimeValues.pop_front();
+			auto rArg = m_runtimeValues.front();
+			m_runtimeValues.pop_front();
+			if (lArg.m_type != RuntimeValue::Type::Double && rArg.m_type != RuntimeValue::Type::Double)
 			{
-				if (lArg.m_type != RuntimeValue::Type::Double || rArg.m_type != RuntimeValue::Type::Double)
-				{
-					throw std::invalid_argument("Expected both operands to add to be double");
-				}
-				RuntimeValue::Data dataVal;
-				dataVal.doubleVal = BinaryOpFunctor()(lArg.m_data.doubleVal, rArg.m_data.doubleVal);
-				FillDestValue(RuntimeValue::Type::Double, dataVal);
-				m_runtimeValues.pop_front();
-				m_runtimeValues.pop_front();
+				throw std::invalid_argument("Expected both operands to add to be double");
 			}
+			RuntimeValue::Data dataVal;
+			dataVal.doubleVal = BinaryOpFunctor()(lArg.m_data.doubleVal, rArg.m_data.doubleVal);
+			FillDestValue(RuntimeValue::Type::Double, dataVal);
 		}
 
 		void AddDependentActiveBlock(RuntimeBlock* block, const bool isNewDependency = true)
@@ -392,7 +363,6 @@ namespace FunGPU
 		RuntimeBlock* m_parent = nullptr;
 		DependencyTracker_t* m_depTracker;
 		RuntimeValue* m_dest;
-
 		std::atomic<int> m_dependenciesRemaining = 0;
 	};
 }
