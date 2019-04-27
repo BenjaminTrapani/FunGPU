@@ -11,8 +11,9 @@ namespace FunGPU
 		class FunctionValue
 		{
 		public:
-			FunctionValue() : m_expr(nullptr), m_bindingParent(nullptr) {}
-			FunctionValue(Compiler::ASTNode* expr, RuntimeBlock* bindingParent) : m_expr(expr), m_bindingParent(bindingParent) {}
+			FunctionValue() : m_expr(nullptr), m_bindingParent(nullptr), m_argCount(0) {}
+			FunctionValue(Compiler::ASTNode* expr, RuntimeBlock* bindingParent, const Index_t argCount) : 
+				m_expr(expr), m_bindingParent(bindingParent), m_argCount(argCount) {}
 			bool operator==(const FunctionValue& other) const
 			{
 				return m_expr == other.m_expr && m_bindingParent == other.m_bindingParent;
@@ -20,6 +21,7 @@ namespace FunGPU
 
 			Compiler::ASTNode* m_expr;
 			RuntimeBlock* m_bindingParent;
+			Index_t m_argCount;
 		};
 
 		class RuntimeValue
@@ -129,10 +131,13 @@ namespace FunGPU
 				{
 					RuntimeValue lambdaVal = m_runtimeValues.front();
 					m_runtimeValues.pop_front();
-					// TODO verify lambda arg count matches call node arg count
 					if (lambdaVal.m_type != RuntimeValue::Type::Function)
 					{
 						throw std::invalid_argument("Cannot call non-function");
+					}
+					if (lambdaVal.m_data.functionVal.m_argCount != callNode->m_args.size())
+					{
+						throw std::invalid_argument("Incorrect number of args to call of lambda expr");
 					}
 					auto lambdaBlock = new RuntimeBlock(lambdaVal.m_data.functionVal.m_expr,
 						this, m_parent, m_depTracker, m_dest);
@@ -297,7 +302,7 @@ namespace FunGPU
 			{
 				auto lambdaNode = static_cast<Compiler::LambdaNode*>(m_astNode);
 				RuntimeValue::Data dataVal;
-				dataVal.functionVal = FunctionValue(lambdaNode->m_childExpr, m_bindingParent);
+				dataVal.functionVal = FunctionValue(lambdaNode->m_childExpr, m_bindingParent, lambdaNode->m_argCount);
 				FillDestValue(RuntimeValue::Type::Function, dataVal);
 				break;
 			}
