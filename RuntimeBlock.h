@@ -129,7 +129,7 @@ namespace FunGPU
 				{
 					RuntimeValue lambdaVal = m_runtimeValues.front();
 					m_runtimeValues.pop_front();
-
+					// TODO verify lambda arg count matches call node arg count
 					if (lambdaVal.m_type != RuntimeValue::Type::Function)
 					{
 						throw std::invalid_argument("Cannot call non-function");

@@ -87,9 +87,8 @@ namespace FunGPU
 			auto bindNode = new BindNode(bindingExprs->size(), isRec);
 
 			auto updatedBindings = boundIdentifiers;
-			for (size_t i = 0; i < bindingExprs->size(); ++i)
+			for (const auto& bindExpr : *bindingExprs)
 			{
-				auto bindExpr = bindingExprs->at(i);
 				auto bindExprChildren = bindExpr->GetChildren();
 				if (bindExprChildren->size() != 2)
 				{
@@ -100,10 +99,15 @@ namespace FunGPU
 				{
 					throw CompileException("Expected first component of bind expr to be an identifier");
 				}
+
 				const auto identString = identExpr->GetSymbol();
 				updatedBindings.push_front(*identString);
+			}
 
-				//const auto debruijnIndex = bindingExprs->size() - i - 1;
+			for (size_t i = 0; i < bindingExprs->size(); ++i)
+			{
+				auto bindExpr = bindingExprs->at(i);
+				auto bindExprChildren = bindExpr->GetChildren();
 				bindNode->m_bindings.Set(i, Compile(bindExprChildren->at(1), isRec ? updatedBindings : boundIdentifiers));
 			}
 

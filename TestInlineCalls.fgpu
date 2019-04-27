@@ -1,0 +1,2 @@
+(let ((ident-lambda (lambda (x) x)))
+  (+ (ident-lambda 1) 2))
