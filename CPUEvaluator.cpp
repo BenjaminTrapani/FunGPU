@@ -5,9 +5,12 @@
 
 namespace FunGPU
 {
-	CPUEvaluator::CPUEvaluator(Compiler::ASTNode* rootNode): m_rootASTNode(rootNode)
+	CPUEvaluator::CPUEvaluator(const Compiler::ASTNodeHandle rootNode,
+		const std::shared_ptr<PortableMemPool>& memPool): m_rootASTNode(rootNode),
+		m_memPool(memPool)
 	{
-		m_newActiveBlocks[0] = new RuntimeBlock_t(rootNode, nullptr, nullptr, this, &m_resultValue);
+		m_newActiveBlocks[0] = m_memPool->Alloc<RuntimeBlock_t>(rootNode, RuntimeBlock_t::RuntimeBlockHandle_t(), 
+			RuntimeBlock_t::RuntimeBlockHandle_t(), this, &m_resultValue, m_memPool);
 		m_activeBlockCount = 1;
 	}
 
@@ -24,8 +27,9 @@ namespace FunGPU
 
 			std::atomic<size_t> runningBlocks = m_currentBlocks.size();
 			std::for_each(std::execution::par_unseq, m_currentBlocks.begin(), m_currentBlocks.end(),
-				[&runningBlocks](const auto currentBlock) {
-				currentBlock->PerformEvalPass();
+				[&runningBlocks, this](const auto currentBlock) {
+				auto derefdCurrentBlock = m_memPool->derefHandle(currentBlock);
+				derefdCurrentBlock->PerformEvalPass();
 				--runningBlocks;
 			});
 			while (runningBlocks > 0)
@@ -37,7 +41,7 @@ namespace FunGPU
 		return m_resultValue;
 	}
 
-	void CPUEvaluator::AddActiveBlock(RuntimeBlock_t* block)
+	void CPUEvaluator::AddActiveBlock(RuntimeBlock_t::RuntimeBlockHandle_t block)
 	{ 
 		m_newActiveBlocks.at(m_activeBlockCount++) = block;
 	}

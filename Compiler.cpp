@@ -4,7 +4,7 @@
 
 namespace FunGPU
 {
-	Compiler::ASTNode* Compiler::CompileListOfSExpr(std::shared_ptr<const SExpr> sexpr, std::list<std::string> boundIdentifiers)
+	Compiler::ASTNodeHandle Compiler::CompileListOfSExpr(std::shared_ptr<const SExpr> sexpr, std::list<std::string> boundIdentifiers)
 	{
 		auto sexprChildren = sexpr->GetChildren();
 		if (sexprChildren->size() < 1)
@@ -19,14 +19,14 @@ namespace FunGPU
 		}
 
 		const auto firstChildSym = *firstChild->GetSymbol();
-		ASTNode* result = nullptr;
+		ASTNodeHandle result;
 		if (firstChildSym == "+")
 		{
 			if (sexprChildren->size() != 3)
 			{
 				throw CompileException("Expected + to have 2 args");
 			}
-			result = new BinaryOpNode(ASTNode::Type::Add, Compile(sexprChildren->at(1), boundIdentifiers),
+			result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::Add, Compile(sexprChildren->at(1), boundIdentifiers),
 				Compile(sexprChildren->at(2), boundIdentifiers));
 		}
 		else if (firstChildSym == "-")
@@ -35,7 +35,7 @@ namespace FunGPU
 			{
 				throw CompileException("Expected - to have 2 args");
 			}
-			result = new BinaryOpNode(ASTNode::Type::Sub, Compile(sexprChildren->at(1), boundIdentifiers),
+			result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::Sub, Compile(sexprChildren->at(1), boundIdentifiers),
 				Compile(sexprChildren->at(2), boundIdentifiers));
 		}
 		else if (firstChildSym == "*")
@@ -44,7 +44,7 @@ namespace FunGPU
 			{
 				throw CompileException("Expected * to have 2 args");
 			}
-			result = new BinaryOpNode(ASTNode::Type::Mul, Compile(sexprChildren->at(1), boundIdentifiers),
+			result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::Mul, Compile(sexprChildren->at(1), boundIdentifiers),
 				Compile(sexprChildren->at(2), boundIdentifiers));
 		}
 		else if (firstChildSym == "/")
@@ -53,7 +53,7 @@ namespace FunGPU
 			{
 				throw CompileException("Expected / to have 2 args");
 			}
-			result = new BinaryOpNode(ASTNode::Type::Div, Compile(sexprChildren->at(1), boundIdentifiers),
+			result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::Div, Compile(sexprChildren->at(1), boundIdentifiers),
 				Compile(sexprChildren->at(2), boundIdentifiers));
 		}
 		else if (firstChildSym == "=" || firstChildSym == "eq?")
@@ -62,7 +62,7 @@ namespace FunGPU
 			{
 				throw CompileException("Expected = to have 2 args");
 			}
-			result = new BinaryOpNode(ASTNode::Type::Equal, Compile(sexprChildren->at(1), boundIdentifiers),
+			result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::Equal, Compile(sexprChildren->at(1), boundIdentifiers),
 				Compile(sexprChildren->at(2), boundIdentifiers));
 		}
 		else if (firstChildSym == ">")
@@ -71,7 +71,7 @@ namespace FunGPU
 			{
 				throw CompileException("Expected > to have 2 args");
 			}
-			result = new BinaryOpNode(ASTNode::Type::GreaterThan, Compile(sexprChildren->at(1), boundIdentifiers),
+			result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::GreaterThan, Compile(sexprChildren->at(1), boundIdentifiers),
 				Compile(sexprChildren->at(2), boundIdentifiers));
 		}
 		else if (firstChildSym == "let" || firstChildSym == "letrec")
@@ -84,7 +84,8 @@ namespace FunGPU
 
 			auto bindingExprs = sexprChildren->at(1)->GetChildren();
 			auto exprToEvalInBindingEnv = sexprChildren->at(2);
-			auto bindNode = new BindNode(bindingExprs->size(), isRec);
+			const auto bindNodeHandle = m_memPool->Alloc<BindNode>(bindingExprs->size(), isRec);
+			auto bindNode = m_memPool->derefHandle(bindNodeHandle);
 
 			auto updatedBindings = boundIdentifiers;
 			for (const auto& bindExpr : *bindingExprs)
@@ -112,7 +113,7 @@ namespace FunGPU
 			}
 
 			bindNode->m_childExpr = Compile(sexprChildren->at(2), updatedBindings);
-			result = bindNode;
+			result = bindNodeHandle;
 		}
 		else if (firstChildSym == "lambda")
 		{
@@ -136,7 +137,7 @@ namespace FunGPU
 			}
 			auto exprToEval = sexprChildren->at(2);
 			auto compiledASTNode = Compile(exprToEval, boundIdentifiers);
-			result = new LambdaNode(identifierListChildren->size(), compiledASTNode);
+			result = m_memPool->Alloc<LambdaNode>(identifierListChildren->size(), compiledASTNode);
 		}
 		else if (firstChildSym == "if")
 		{
@@ -147,7 +148,7 @@ namespace FunGPU
 			auto predChild = sexprChildren->at(1);
 			auto thenChild = sexprChildren->at(2);
 			auto elseChild = sexprChildren->at(3);
-			result = new IfNode(Compile(predChild, boundIdentifiers), Compile(thenChild, boundIdentifiers),
+			result = m_memPool->Alloc<IfNode>(Compile(predChild, boundIdentifiers), Compile(thenChild, boundIdentifiers),
 				Compile(elseChild, boundIdentifiers));
 		}
 		else if (firstChildSym == "floor")
@@ -156,23 +157,24 @@ namespace FunGPU
 			{
 				throw CompileException("Expected floor to get 1 argument");
 			}
-			result = new UnaryOpNode(ASTNode::Type::Floor, 
+			result = m_memPool->Alloc<UnaryOpNode>(ASTNode::Type::Floor,
 				Compile(sexprChildren->at(1), boundIdentifiers));
 		}
 		else // This is hopefully a call to user-defined function.
 		{
 			auto argCount = sexprChildren->size() - 1;
 			auto targetLambdaExpr = sexprChildren->at(0);
-			auto callNode = new CallNode(argCount, Compile(targetLambdaExpr, boundIdentifiers));
+			const auto callNodeHandle = m_memPool->Alloc<CallNode>(argCount, Compile(targetLambdaExpr, boundIdentifiers));
+			auto callNode = m_memPool->derefHandle(callNodeHandle);
 			for (size_t i = 1; i < sexprChildren->size(); ++i)
 			{
 				auto curArg = sexprChildren->at(i);
 				callNode->m_args.Set(i - 1, Compile(curArg, boundIdentifiers));
 			}
-			result = callNode;
+			result = callNodeHandle;
 		}
 
-		if (result == nullptr)
+		if (result == ASTNodeHandle())
 		{
 			throw CompileException("Failed to compile list of sexpr");
 		}
@@ -180,10 +182,10 @@ namespace FunGPU
 		return result;
 	}
 
-	Compiler::ASTNode* Compiler::Compile(std::shared_ptr<const SExpr> sexpr,
+	Compiler::ASTNodeHandle Compiler::Compile(std::shared_ptr<const SExpr> sexpr,
 		std::list<std::string> boundIdentifiers)
 	{
-		ASTNode* result = nullptr;
+		ASTNodeHandle result;
 		switch (sexpr->GetType())
 		{
 		case SExpr::Type::Symbol:
@@ -195,12 +197,12 @@ namespace FunGPU
 				sstream << "Unbound identifier " << *sexpr->GetSymbol() << std::endl;
 				throw CompileException(sstream.str());
 			}
-			result = new IdentifierNode(std::distance(boundIdentifiers.begin(), identPos));
+			result = m_memPool->Alloc<IdentifierNode>(std::distance(boundIdentifiers.begin(), identPos));
 			break;
 		}
 		case SExpr::Type::Number:
 		{
-			result = new NumberNode(sexpr->GetDoubleVal());
+			result = m_memPool->Alloc<NumberNode>(sexpr->GetDoubleVal());
 			break;
 		}
 		case SExpr::Type::ListOfSExpr:
@@ -213,7 +215,7 @@ namespace FunGPU
 			break;
 		}
 
-		if (result == nullptr)
+		if (result == ASTNodeHandle())
 		{
 			throw CompileException("Failed to compile sexpr");
 		}
@@ -221,8 +223,9 @@ namespace FunGPU
 		return result;
 	}
 
-	void Compiler::DebugPrintAST(ASTNode* rootOfAST)
+	void Compiler::DebugPrintAST(ASTNodeHandle rootOfASTHandle)
 	{
+		auto rootOfAST = m_memPool->derefHandle(rootOfASTHandle);
 		switch (rootOfAST->m_type)
 		{
 		case ASTNode::Type::Bind:
