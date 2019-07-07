@@ -56,6 +56,8 @@ namespace FunGPU
 			m_freeListHead = m_listNodeStorage.at(nextListIndex);
 		}
 
+		++m_totalAllocations;
+
 		return result;
 	}
 
@@ -65,6 +67,8 @@ namespace FunGPU
 
 		m_listNodeStorage.at(indexInStorage).m_nextNode = m_freeListHead.m_indexInStorage;
 		m_freeListHead = m_listNodeStorage.at(indexInStorage);
+
+		--m_totalAllocations;
 	}
 
 	unsigned char* PortableMemPool::Arena::GetBytes(const size_t allocIndex)
@@ -85,5 +89,17 @@ namespace FunGPU
 			throw std::invalid_argument("Tried to alloc a size larger than largest pool in mem pool");
 		}
 		return std::distance(m_arenas.begin(), iter);
+	}
+
+	size_t PortableMemPool::GetTotalAllocationCount()
+	{
+		size_t totalAllocationCount = 0;
+		for (auto& arena : m_arenas)
+		{
+			SpinLockGuard guard(arena.m_lock);
+			totalAllocationCount += arena.m_totalAllocations;
+		}
+
+		return totalAllocationCount;
 	}
 }

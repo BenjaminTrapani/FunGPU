@@ -9,9 +9,18 @@ namespace FunGPU
 		const std::shared_ptr<PortableMemPool>& memPool): m_rootASTNode(rootNode),
 		m_memPool(memPool)
 	{
-		m_newActiveBlocks[0] = m_memPool->Alloc<RuntimeBlock_t>(rootNode, RuntimeBlock_t::RuntimeBlockHandle_t(), 
-			RuntimeBlock_t::RuntimeBlockHandle_t(), this, &m_resultValue, m_memPool);
+		m_resultValue = m_memPool->Alloc<RuntimeBlock_t::RuntimeValue>();
+
+		const RuntimeBlock_t::SharedRuntimeBlockHandle_t emptyBlock;
+		const auto sharedInitialBlock = m_memPool->AllocShared<RuntimeBlock_t>(rootNode, emptyBlock,
+			emptyBlock, this, m_resultValue, m_memPool);
+		m_newActiveBlocks[0] = sharedInitialBlock;
 		m_activeBlockCount = 1;
+	}
+
+	CPUEvaluator::~CPUEvaluator()
+	{
+		m_memPool->Dealloc(m_resultValue);
 	}
 
 	CPUEvaluator::RuntimeBlock_t::RuntimeValue CPUEvaluator::EvaluateProgram()
@@ -38,10 +47,11 @@ namespace FunGPU
 		}
 		std::cout << std::endl;
 		std::cout << "Max concurrent blocks during exec: " << maxConcurrentBlocks << std::endl;
-		return m_resultValue;
+
+		return *m_memPool->derefHandle(m_resultValue);
 	}
 
-	void CPUEvaluator::AddActiveBlock(RuntimeBlock_t::RuntimeBlockHandle_t block)
+	void CPUEvaluator::AddActiveBlock(const RuntimeBlock_t::SharedRuntimeBlockHandle_t& block)
 	{ 
 		m_newActiveBlocks.at(m_activeBlockCount++) = block;
 	}

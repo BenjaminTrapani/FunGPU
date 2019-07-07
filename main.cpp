@@ -24,11 +24,15 @@ int main(int argc, char** argv)
 
 	auto memPoolCpy = std::make_shared<PortableMemPool>(*memPool);
 	// Verify that we can move the mem pool without breaking outstanding references.
-	CPUEvaluator evaluator(compiledResult, memPoolCpy);
-	const auto programResult = evaluator.EvaluateProgram();
-	std::cout << std::endl;
-	std::cout << std::endl;
-	std::cout << "Program result: " << programResult.m_data.doubleVal;
+	{
+		CPUEvaluator evaluator(compiledResult, memPoolCpy);
+		std::cout << "Will evaluate program" << std::endl;
+		const auto programResult = evaluator.EvaluateProgram();
+		std::cout << std::endl;
+		std::cout << std::endl;
+		std::cout << "Program result: " << programResult.m_data.doubleVal;
+	}
+	std::cout << "Final allocation count: " << memPool->GetTotalAllocationCount();
 
 	return 0;
 }
