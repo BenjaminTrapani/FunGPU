@@ -127,6 +127,7 @@ namespace FunGPU
 		}
 
 		void DebugPrintAST(ASTNodeHandle rootOfAST);
+		void DeallocateAST(const ASTNodeHandle rootOfAST);
 
 	private:
 		ASTNodeHandle Compile(std::shared_ptr<const SExpr> sexpr,

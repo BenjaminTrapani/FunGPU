@@ -30,9 +30,11 @@ int main(int argc, char** argv)
 		const auto programResult = evaluator.EvaluateProgram();
 		std::cout << std::endl;
 		std::cout << std::endl;
-		std::cout << "Program result: " << programResult.m_data.doubleVal;
+		std::cout << "Program result: " << programResult.m_data.doubleVal << std::endl;
 	}
-	std::cout << "Final allocation count: " << memPool->GetTotalAllocationCount();
+	compiler.DeallocateAST(compiledResult);
+
+	std::cout << "Final allocation count: " << memPool->GetTotalAllocationCount() << std::endl;
 
 	return 0;
 }

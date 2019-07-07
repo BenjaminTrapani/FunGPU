@@ -365,4 +365,103 @@ namespace FunGPU
 			throw CompileException("Unexpected AST node type during debug print");
 		}
 	}
+
+	void Compiler::DeallocateAST(const ASTNodeHandle rootOfASTHandle)
+	{
+		auto rootOfAST = m_memPool->derefHandle(rootOfASTHandle);
+		switch (rootOfAST->m_type)
+		{
+		case ASTNode::Type::Bind:
+		case ASTNode::Type::BindRec:
+		{
+			auto bindNode = static_cast<BindNode*>(rootOfAST);
+			for (Index_t i = 0; i < bindNode->m_bindings.size(); ++i)
+			{
+				DeallocateAST(bindNode->m_bindings.Get(i));
+			}
+			DeallocateAST(bindNode->m_childExpr);
+			break;
+		}
+		case ASTNode::Type::If:
+		{
+			auto ifNode = static_cast<IfNode*>(rootOfAST);
+			DeallocateAST(ifNode->m_pred);
+			DeallocateAST(ifNode->m_then);
+			DeallocateAST(ifNode->m_else);
+			break;
+		}
+		case ASTNode::Type::Add:
+		{
+			auto binaryOpNode = static_cast<BinaryOpNode*>(rootOfAST);
+			DeallocateAST(binaryOpNode->m_arg0);
+			DeallocateAST(binaryOpNode->m_arg1);
+			break;
+		}
+		case ASTNode::Type::Sub:
+		{
+			auto binaryOpNode = static_cast<BinaryOpNode*>(rootOfAST);
+			DeallocateAST(binaryOpNode->m_arg0);
+			DeallocateAST(binaryOpNode->m_arg1);
+			break;
+		}
+		case ASTNode::Type::Mul:
+		{
+			auto binaryOpNode = static_cast<BinaryOpNode*>(rootOfAST);
+			DeallocateAST(binaryOpNode->m_arg0);
+			DeallocateAST(binaryOpNode->m_arg1);
+			break;
+		}
+		case ASTNode::Type::Div:
+		{
+			auto binaryOpNode = static_cast<BinaryOpNode*>(rootOfAST);
+			DeallocateAST(binaryOpNode->m_arg0);
+			DeallocateAST(binaryOpNode->m_arg1);
+			break;
+		}
+		case ASTNode::Type::Equal:
+		{
+			auto binaryOpNode = static_cast<BinaryOpNode*>(rootOfAST);
+			DeallocateAST(binaryOpNode->m_arg0);
+			DeallocateAST(binaryOpNode->m_arg1);
+			break;
+		}
+		case ASTNode::Type::GreaterThan:
+		{
+			auto binaryOpNode = static_cast<BinaryOpNode*>(rootOfAST);
+			DeallocateAST(binaryOpNode->m_arg0);
+			DeallocateAST(binaryOpNode->m_arg1);
+			break;
+		}
+		case ASTNode::Type::Floor:
+		{
+			auto unaryOpNode = static_cast<UnaryOpNode*>(rootOfAST);
+			DeallocateAST(unaryOpNode->m_arg0);
+			break;
+		}
+		case ASTNode::Type::Number:
+			break;
+		case ASTNode::Type::Identifier:
+			break;
+		case ASTNode::Type::Lambda:
+		{
+			auto lambdaNode = static_cast<LambdaNode*>(rootOfAST);
+			DeallocateAST(lambdaNode->m_childExpr);
+			break;
+		}
+		case ASTNode::Type::Call:
+		{
+			auto callExpr = static_cast<CallNode*>(rootOfAST);
+			DeallocateAST(callExpr->m_target);
+			for (Index_t i = 0; i < callExpr->m_args.size(); ++i)
+			{
+				DeallocateAST(callExpr->m_args.Get(i));
+			}
+			break;
+		}
+		default:
+			throw CompileException("Unexpected AST node type during debug print");
+		}
+
+		m_memPool->Dealloc(rootOfASTHandle);
+	}
 }
