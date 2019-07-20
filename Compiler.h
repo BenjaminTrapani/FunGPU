@@ -42,9 +42,9 @@ namespace FunGPU
 		class BindNode : public ASTNode
 		{
 		public:
-			BindNode(const Index_t numBindings, const bool isRec) : ASTNode(isRec ? Type::BindRec : Type::Bind), 
-				m_bindings(numBindings) {}
-			Array<ASTNodeHandle> m_bindings;
+			BindNode(const Index_t numBindings, const bool isRec, PortableMemPool* pool) : ASTNode(isRec ? Type::BindRec : Type::Bind), 
+				m_bindings(pool->AllocArray<ASTNodeHandle>(numBindings)) {}
+			PortableMemPool::ArrayHandle<ASTNodeHandle> m_bindings;
 			ASTNodeHandle m_childExpr;
 		};
 
@@ -102,10 +102,10 @@ namespace FunGPU
 		class CallNode : public ASTNode
 		{
 		public:
-			CallNode(const Index_t argCount, ASTNodeHandle target): ASTNode(ASTNode::Type::Call),
-				m_target(target), m_args(argCount) {}
+			CallNode(const Index_t argCount, ASTNodeHandle target, PortableMemPool* pool): ASTNode(ASTNode::Type::Call),
+				m_target(target), m_args(pool->AllocArray<ASTNodeHandle>(argCount)) {}
 			ASTNodeHandle m_target;
-			Array<ASTNodeHandle> m_args;
+			PortableMemPool::ArrayHandle<ASTNodeHandle> m_args;
 		};
 
 		class CompileException

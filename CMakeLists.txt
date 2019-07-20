@@ -1,18 +1,27 @@
-cmake_minimum_required(VERSION 3.3)
+cmake_minimum_required(VERSION 3.4.3)
 
 project(FunGPU)
 
-find_package(CUDA REQUIRED)
+set(ComputeCpp_DIR "C:/Program Files/Codeplay/ComputeCpp/")
 
-include_directories(${CUDA_INCLUDE_DIRS})
-link_directories(${CUDA_LIBRARY_DIRS})
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/Modules)
 
-set(CUDA_HOST_COMPILATION_CPP ON)
-set(CUDA_NVCC_FLAGS -lineinfo)
+find_package(OpenCL REQUIRED)
+find_package(ComputeCpp REQUIRED)
 
-FILE(GLOB SOURCES *.cpp *.h *.hpp *.cu)
-cuda_add_executable(FunGPU ${SOURCES})
+include_directories(SYSTEM "${ComputeCpp_INCLUDE_DIRS}")
+include_directories(SYSTEM "${OpenCL_INCLUDE_DIR}")
+
+FILE(GLOB SOURCE_LIST *.cpp *.h *.hpp)
+add_executable(FunGPU ${SOURCE_LIST})
+
+add_sycl_to_target(
+    TARGET "FunGPU"
+    SOURCES ${SOURCE_LIST})
+
 set_property(TARGET FunGPU PROPERTY CXX_STANDARD 17)
+
+add_subdirectory(TestSycl)
 
 configure_file(TestProgram.fgpu TestProgram.fgpu COPYONLY)
 configure_file(FastGetNPrimeSum.fgpu FastGetNPrimeSum.fgpu COPYONLY)

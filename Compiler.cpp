@@ -13,163 +13,163 @@ namespace FunGPU
 		}
 
 		auto firstChild = sexprChildren->at(0);
-		if (firstChild->GetType() != SExpr::Type::Symbol)
-		{
-			throw CompileException("First child in sexpr list is not a symbol, invalid expr");
-		}
-
-		const auto firstChildSym = *firstChild->GetSymbol();
 		ASTNodeHandle result;
-		if (firstChildSym == "+")
+		if (firstChild->GetType() == SExpr::Type::Symbol)
 		{
-			if (sexprChildren->size() != 3)
+			const auto firstChildSym = *firstChild->GetSymbol();
+			if (firstChildSym == "+")
 			{
-				throw CompileException("Expected + to have 2 args");
-			}
-			result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::Add, Compile(sexprChildren->at(1), boundIdentifiers),
-				Compile(sexprChildren->at(2), boundIdentifiers));
-		}
-		else if (firstChildSym == "-")
-		{
-			if (sexprChildren->size() != 3)
-			{
-				throw CompileException("Expected - to have 2 args");
-			}
-			result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::Sub, Compile(sexprChildren->at(1), boundIdentifiers),
-				Compile(sexprChildren->at(2), boundIdentifiers));
-		}
-		else if (firstChildSym == "*")
-		{
-			if (sexprChildren->size() != 3)
-			{
-				throw CompileException("Expected * to have 2 args");
-			}
-			result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::Mul, Compile(sexprChildren->at(1), boundIdentifiers),
-				Compile(sexprChildren->at(2), boundIdentifiers));
-		}
-		else if (firstChildSym == "/")
-		{
-			if (sexprChildren->size() != 3)
-			{
-				throw CompileException("Expected / to have 2 args");
-			}
-			result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::Div, Compile(sexprChildren->at(1), boundIdentifiers),
-				Compile(sexprChildren->at(2), boundIdentifiers));
-		}
-		else if (firstChildSym == "=" || firstChildSym == "eq?")
-		{
-			if (sexprChildren->size() != 3)
-			{
-				throw CompileException("Expected = to have 2 args");
-			}
-			result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::Equal, Compile(sexprChildren->at(1), boundIdentifiers),
-				Compile(sexprChildren->at(2), boundIdentifiers));
-		}
-		else if (firstChildSym == ">")
-		{
-			if (sexprChildren->size() != 3)
-			{
-				throw CompileException("Expected > to have 2 args");
-			}
-			result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::GreaterThan, Compile(sexprChildren->at(1), boundIdentifiers),
-				Compile(sexprChildren->at(2), boundIdentifiers));
-		}
-		else if (firstChildSym == "let" || firstChildSym == "letrec")
-		{
-			if (sexprChildren->size() != 3)
-			{
-				throw CompileException("Expected let to have 2 args");
-			}
-			const bool isRec = firstChildSym == "letrec";
-
-			auto bindingExprs = sexprChildren->at(1)->GetChildren();
-			auto exprToEvalInBindingEnv = sexprChildren->at(2);
-			const auto bindNodeHandle = m_memPool->Alloc<BindNode>(bindingExprs->size(), isRec);
-			auto bindNode = m_memPool->derefHandle(bindNodeHandle);
-
-			auto updatedBindings = boundIdentifiers;
-			for (const auto& bindExpr : *bindingExprs)
-			{
-				auto bindExprChildren = bindExpr->GetChildren();
-				if (bindExprChildren->size() != 2)
+				if (sexprChildren->size() != 3)
 				{
-					throw CompileException("Expected binding expr to have 2 elements (identifier, value expr)");
+					throw CompileException("Expected + to have 2 args");
 				}
-				auto identExpr = bindExprChildren->at(0);
-				if (identExpr->GetType() != SExpr::Type::Symbol)
+				result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::Add, Compile(sexprChildren->at(1), boundIdentifiers),
+					Compile(sexprChildren->at(2), boundIdentifiers));
+			}
+			else if (firstChildSym == "-")
+			{
+				if (sexprChildren->size() != 3)
 				{
-					throw CompileException("Expected first component of bind expr to be an identifier");
+					throw CompileException("Expected - to have 2 args");
 				}
-
-				const auto identString = identExpr->GetSymbol();
-				updatedBindings.push_front(*identString);
+				result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::Sub, Compile(sexprChildren->at(1), boundIdentifiers),
+					Compile(sexprChildren->at(2), boundIdentifiers));
 			}
-
-			for (size_t i = 0; i < bindingExprs->size(); ++i)
+			else if (firstChildSym == "*")
 			{
-				auto bindExpr = bindingExprs->at(i);
-				auto bindExprChildren = bindExpr->GetChildren();
-				bindNode->m_bindings.Set(i, Compile(bindExprChildren->at(1), isRec ? updatedBindings : boundIdentifiers));
-			}
-
-			bindNode->m_childExpr = Compile(sexprChildren->at(2), updatedBindings);
-			result = bindNodeHandle;
-		}
-		else if (firstChildSym == "lambda")
-		{
-			if (sexprChildren->size() != 3)
-			{
-				throw CompileException("Expected lambda to have 2 child exprs");
-			}
-			auto identifierList = sexprChildren->at(1);
-			if (identifierList->GetType() != SExpr::Type::ListOfSExpr)
-			{
-				throw CompileException("Lambda arg list expected to be list of sexpr");
-			}
-			auto identifierListChildren = identifierList->GetChildren();
-			for (auto identifier : *identifierListChildren)
-			{
-				if (identifier->GetType() != SExpr::Type::Symbol)
+				if (sexprChildren->size() != 3)
 				{
-					throw CompileException("Expected arguments in lambda expression to be symbols");
+					throw CompileException("Expected * to have 2 args");
 				}
-				boundIdentifiers.push_front(*identifier->GetSymbol());
+				result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::Mul, Compile(sexprChildren->at(1), boundIdentifiers),
+					Compile(sexprChildren->at(2), boundIdentifiers));
 			}
-			auto exprToEval = sexprChildren->at(2);
-			auto compiledASTNode = Compile(exprToEval, boundIdentifiers);
-			result = m_memPool->Alloc<LambdaNode>(identifierListChildren->size(), compiledASTNode);
-		}
-		else if (firstChildSym == "if")
-		{
-			if (sexprChildren->size() != 4)
+			else if (firstChildSym == "/")
 			{
-				throw CompileException("Expected if expr to have 3 arguments");
+				if (sexprChildren->size() != 3)
+				{
+					throw CompileException("Expected / to have 2 args");
+				}
+				result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::Div, Compile(sexprChildren->at(1), boundIdentifiers),
+					Compile(sexprChildren->at(2), boundIdentifiers));
 			}
-			auto predChild = sexprChildren->at(1);
-			auto thenChild = sexprChildren->at(2);
-			auto elseChild = sexprChildren->at(3);
-			result = m_memPool->Alloc<IfNode>(Compile(predChild, boundIdentifiers), Compile(thenChild, boundIdentifiers),
-				Compile(elseChild, boundIdentifiers));
-		}
-		else if (firstChildSym == "floor")
-		{
-			if (sexprChildren->size() != 2)
+			else if (firstChildSym == "=" || firstChildSym == "eq?")
 			{
-				throw CompileException("Expected floor to get 1 argument");
+				if (sexprChildren->size() != 3)
+				{
+					throw CompileException("Expected = to have 2 args");
+				}
+				result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::Equal, Compile(sexprChildren->at(1), boundIdentifiers),
+					Compile(sexprChildren->at(2), boundIdentifiers));
 			}
-			result = m_memPool->Alloc<UnaryOpNode>(ASTNode::Type::Floor,
-				Compile(sexprChildren->at(1), boundIdentifiers));
+			else if (firstChildSym == ">")
+			{
+				if (sexprChildren->size() != 3)
+				{
+					throw CompileException("Expected > to have 2 args");
+				}
+				result = m_memPool->Alloc<BinaryOpNode>(ASTNode::Type::GreaterThan, Compile(sexprChildren->at(1), boundIdentifiers),
+					Compile(sexprChildren->at(2), boundIdentifiers));
+			}
+			else if (firstChildSym == "let" || firstChildSym == "letrec")
+			{
+				if (sexprChildren->size() != 3)
+				{
+					throw CompileException("Expected let to have 2 args");
+				}
+				const bool isRec = firstChildSym == "letrec";
+
+				auto bindingExprs = sexprChildren->at(1)->GetChildren();
+				auto exprToEvalInBindingEnv = sexprChildren->at(2);
+				const auto bindNodeHandle = m_memPool->Alloc<BindNode>(bindingExprs->size(), isRec, m_memPool.get());
+				auto bindNode = m_memPool->derefHandle(bindNodeHandle);
+
+				auto updatedBindings = boundIdentifiers;
+				for (const auto& bindExpr : *bindingExprs)
+				{
+					auto bindExprChildren = bindExpr->GetChildren();
+					if (bindExprChildren->size() != 2)
+					{
+						throw CompileException("Expected binding expr to have 2 elements (identifier, value expr)");
+					}
+					auto identExpr = bindExprChildren->at(0);
+					if (identExpr->GetType() != SExpr::Type::Symbol)
+					{
+						throw CompileException("Expected first component of bind expr to be an identifier");
+					}
+
+					const auto identString = identExpr->GetSymbol();
+					updatedBindings.push_front(*identString);
+				}
+
+				auto bindingsData = m_memPool->derefHandle(bindNode->m_bindings);
+				for (size_t i = 0; i < bindingExprs->size(); ++i)
+				{
+					auto bindExpr = bindingExprs->at(i);
+					auto bindExprChildren = bindExpr->GetChildren();
+					bindingsData[i] = Compile(bindExprChildren->at(1), isRec ? updatedBindings : boundIdentifiers);
+				}
+
+				bindNode->m_childExpr = Compile(sexprChildren->at(2), updatedBindings);
+				result = bindNodeHandle;
+			}
+			else if (firstChildSym == "lambda")
+			{
+				if (sexprChildren->size() != 3)
+				{
+					throw CompileException("Expected lambda to have 2 child exprs");
+				}
+				auto identifierList = sexprChildren->at(1);
+				if (identifierList->GetType() != SExpr::Type::ListOfSExpr)
+				{
+					throw CompileException("Lambda arg list expected to be list of sexpr");
+				}
+				auto identifierListChildren = identifierList->GetChildren();
+				for (auto identifier : *identifierListChildren)
+				{
+					if (identifier->GetType() != SExpr::Type::Symbol)
+					{
+						throw CompileException("Expected arguments in lambda expression to be symbols");
+					}
+					boundIdentifiers.push_front(*identifier->GetSymbol());
+				}
+				auto exprToEval = sexprChildren->at(2);
+				auto compiledASTNode = Compile(exprToEval, boundIdentifiers);
+				result = m_memPool->Alloc<LambdaNode>(identifierListChildren->size(), compiledASTNode);
+			}
+			else if (firstChildSym == "if")
+			{
+				if (sexprChildren->size() != 4)
+				{
+					throw CompileException("Expected if expr to have 3 arguments");
+				}
+				auto predChild = sexprChildren->at(1);
+				auto thenChild = sexprChildren->at(2);
+				auto elseChild = sexprChildren->at(3);
+				result = m_memPool->Alloc<IfNode>(Compile(predChild, boundIdentifiers), Compile(thenChild, boundIdentifiers),
+					Compile(elseChild, boundIdentifiers));
+			}
+			else if (firstChildSym == "floor")
+			{
+				if (sexprChildren->size() != 2)
+				{
+					throw CompileException("Expected floor to get 1 argument");
+				}
+				result = m_memPool->Alloc<UnaryOpNode>(ASTNode::Type::Floor,
+					Compile(sexprChildren->at(1), boundIdentifiers));
+			}
 		}
-		else // This is hopefully a call to user-defined function.
+		if (result == ASTNodeHandle()) // This is hopefully a call to user-defined function.
 		{
 			auto argCount = sexprChildren->size() - 1;
 			auto targetLambdaExpr = sexprChildren->at(0);
-			const auto callNodeHandle = m_memPool->Alloc<CallNode>(argCount, Compile(targetLambdaExpr, boundIdentifiers));
+			const auto callNodeHandle = m_memPool->Alloc<CallNode>(argCount, Compile(targetLambdaExpr, boundIdentifiers), m_memPool.get());
 			auto callNode = m_memPool->derefHandle(callNodeHandle);
+			auto argsData = m_memPool->derefHandle(callNode->m_args);
 			for (size_t i = 1; i < sexprChildren->size(); ++i)
 			{
 				auto curArg = sexprChildren->at(i);
-				callNode->m_args.Set(i - 1, Compile(curArg, boundIdentifiers));
+				argsData[i - 1] = Compile(curArg, boundIdentifiers);
 			}
 			result = callNodeHandle;
 		}
@@ -241,9 +241,10 @@ namespace FunGPU
 				std::cout << "(letrec ";
 			}
 			std::cout << "(";
-			for (Index_t i = 0; i < bindNode->m_bindings.size(); ++i)
+			auto bindingsData = m_memPool->derefHandle(bindNode->m_bindings);
+			for (Index_t i = 0; i < bindNode->m_bindings.GetCount(); ++i)
 			{
-				DebugPrintAST(bindNode->m_bindings.Get(i));
+				DebugPrintAST(bindingsData[i]);
 				std::cout << " ";
 			}
 			std::cout << ")";
@@ -353,9 +354,10 @@ namespace FunGPU
 			std::cout << "(call ";
 			DebugPrintAST(callExpr->m_target);
 			std::cout << " ";
-			for (Index_t i = 0; i < callExpr->m_args.size(); ++i)
+			auto argsData = m_memPool->derefHandle(callExpr->m_args);
+			for (Index_t i = 0; i < callExpr->m_args.GetCount(); ++i)
 			{
-				DebugPrintAST(callExpr->m_args.Get(i));
+				DebugPrintAST(argsData[i]);
 				std::cout << " ";
 			}
 			std::cout << ")";
@@ -375,11 +377,15 @@ namespace FunGPU
 		case ASTNode::Type::BindRec:
 		{
 			auto bindNode = static_cast<BindNode*>(rootOfAST);
-			for (Index_t i = 0; i < bindNode->m_bindings.size(); ++i)
+			auto bindingData = m_memPool->derefHandle(bindNode->m_bindings);
+			for (Index_t i = 0; i < bindNode->m_bindings.GetCount(); ++i)
 			{
-				DeallocateAST(bindNode->m_bindings.Get(i));
+				DeallocateAST(bindingData[i]);
 			}
 			DeallocateAST(bindNode->m_childExpr);
+			m_memPool->DeallocArray(bindNode->m_bindings);
+
+			m_memPool->Dealloc(static_cast<PortableMemPool::Handle<BindNode>>(rootOfASTHandle));
 			break;
 		}
 		case ASTNode::Type::If:
@@ -388,6 +394,8 @@ namespace FunGPU
 			DeallocateAST(ifNode->m_pred);
 			DeallocateAST(ifNode->m_then);
 			DeallocateAST(ifNode->m_else);
+
+			m_memPool->Dealloc(static_cast<PortableMemPool::Handle<IfNode>>(rootOfASTHandle));
 			break;
 		}
 		case ASTNode::Type::Add:
@@ -395,6 +403,8 @@ namespace FunGPU
 			auto binaryOpNode = static_cast<BinaryOpNode*>(rootOfAST);
 			DeallocateAST(binaryOpNode->m_arg0);
 			DeallocateAST(binaryOpNode->m_arg1);
+
+			m_memPool->Dealloc(static_cast<PortableMemPool::Handle<BinaryOpNode>>(rootOfASTHandle));
 			break;
 		}
 		case ASTNode::Type::Sub:
@@ -402,6 +412,8 @@ namespace FunGPU
 			auto binaryOpNode = static_cast<BinaryOpNode*>(rootOfAST);
 			DeallocateAST(binaryOpNode->m_arg0);
 			DeallocateAST(binaryOpNode->m_arg1);
+
+			m_memPool->Dealloc(static_cast<PortableMemPool::Handle<BinaryOpNode>>(rootOfASTHandle));
 			break;
 		}
 		case ASTNode::Type::Mul:
@@ -409,6 +421,8 @@ namespace FunGPU
 			auto binaryOpNode = static_cast<BinaryOpNode*>(rootOfAST);
 			DeallocateAST(binaryOpNode->m_arg0);
 			DeallocateAST(binaryOpNode->m_arg1);
+
+			m_memPool->Dealloc(static_cast<PortableMemPool::Handle<BinaryOpNode>>(rootOfASTHandle));
 			break;
 		}
 		case ASTNode::Type::Div:
@@ -416,6 +430,8 @@ namespace FunGPU
 			auto binaryOpNode = static_cast<BinaryOpNode*>(rootOfAST);
 			DeallocateAST(binaryOpNode->m_arg0);
 			DeallocateAST(binaryOpNode->m_arg1);
+
+			m_memPool->Dealloc(static_cast<PortableMemPool::Handle<BinaryOpNode>>(rootOfASTHandle));
 			break;
 		}
 		case ASTNode::Type::Equal:
@@ -423,6 +439,8 @@ namespace FunGPU
 			auto binaryOpNode = static_cast<BinaryOpNode*>(rootOfAST);
 			DeallocateAST(binaryOpNode->m_arg0);
 			DeallocateAST(binaryOpNode->m_arg1);
+
+			m_memPool->Dealloc(static_cast<PortableMemPool::Handle<BinaryOpNode>>(rootOfASTHandle));
 			break;
 		}
 		case ASTNode::Type::GreaterThan:
@@ -430,38 +448,50 @@ namespace FunGPU
 			auto binaryOpNode = static_cast<BinaryOpNode*>(rootOfAST);
 			DeallocateAST(binaryOpNode->m_arg0);
 			DeallocateAST(binaryOpNode->m_arg1);
+
+			m_memPool->Dealloc(static_cast<PortableMemPool::Handle<BinaryOpNode>>(rootOfASTHandle));
 			break;
 		}
 		case ASTNode::Type::Floor:
 		{
 			auto unaryOpNode = static_cast<UnaryOpNode*>(rootOfAST);
 			DeallocateAST(unaryOpNode->m_arg0);
+
+			m_memPool->Dealloc(static_cast<PortableMemPool::Handle<UnaryOpNode>>(rootOfASTHandle));
 			break;
 		}
 		case ASTNode::Type::Number:
+			m_memPool->Dealloc(static_cast<PortableMemPool::Handle<NumberNode>>(rootOfASTHandle));
 			break;
 		case ASTNode::Type::Identifier:
+			m_memPool->Dealloc(static_cast<PortableMemPool::Handle<IdentifierNode>>(rootOfASTHandle));
 			break;
 		case ASTNode::Type::Lambda:
 		{
 			auto lambdaNode = static_cast<LambdaNode*>(rootOfAST);
 			DeallocateAST(lambdaNode->m_childExpr);
+
+			m_memPool->Dealloc(static_cast<PortableMemPool::Handle<LambdaNode>>(rootOfASTHandle));
 			break;
 		}
 		case ASTNode::Type::Call:
 		{
 			auto callExpr = static_cast<CallNode*>(rootOfAST);
+			
 			DeallocateAST(callExpr->m_target);
-			for (Index_t i = 0; i < callExpr->m_args.size(); ++i)
+			auto argsData = m_memPool->derefHandle(callExpr->m_args);
+			for (Index_t i = 0; i < callExpr->m_args.GetCount(); ++i)
 			{
-				DeallocateAST(callExpr->m_args.Get(i));
+				DeallocateAST(argsData[i]);
 			}
+
+			m_memPool->DeallocArray(callExpr->m_args);
+
+			m_memPool->Dealloc(static_cast<PortableMemPool::Handle<CallNode>>(rootOfASTHandle));
 			break;
 		}
 		default:
 			throw CompileException("Unexpected AST node type during debug print");
 		}
-
-		m_memPool->Dealloc(rootOfASTHandle);
 	}
 }

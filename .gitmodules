@@ -1,0 +1,3 @@
+[submodule "deps/triSYCL"]
+	path = deps/triSYCL
+	url = https://github.com/triSYCL/triSYCL.git

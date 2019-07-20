@@ -1,2 +1,3 @@
-(let ((ident-lambda (lambda (x) x)))
-  (+ (ident-lambda 1) 2))
+(let ((my-fun (lambda (x) (+ x 1))))
+  (let ((my-fun-2 (lambda (fun y) (lambda (f) (f (fun y))))))
+    ((my-fun-2 my-fun 1) (lambda (x) (+ x 1)))))

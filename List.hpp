@@ -1,6 +1,7 @@
 #include "Types.h"
 #include "PortableMemPool.h"
 #include <memory>
+#include "SYCL/sycl.hpp"
 
 namespace FunGPU
 {
@@ -8,13 +9,13 @@ namespace FunGPU
 	class List
 	{
 	public:
-		List(const std::shared_ptr<PortableMemPool>& memPool): m_portableMemPool(memPool)
+		List(const PortableMemPool::DeviceAccessor_t& memPool): m_portableMemPool(memPool)
 		{
 		}
 
 		~List()
 		{
-			while (m_head != ListNode::ListNodeHandle_t())
+			while (m_head != PortableMemPool::Handle<ListNode>())
 			{
 				auto derefdHead = m_portableMemPool->derefHandle(m_head);
 				auto nextRef = derefdHead->m_next;
@@ -49,10 +50,11 @@ namespace FunGPU
 
 		void pop_front()
 		{
-			if (m_head == ListNode::ListNodeHandle_t())
+			if (m_head == PortableMemPool::Handle<ListNode>())
 			{
 				throw std::invalid_argument("Cannot delete head from list when it doesn't exist");
 			}
+
 			auto derefdHead = m_portableMemPool->derefHandle(m_head);
 			auto nextHead = derefdHead->m_next;
 			m_portableMemPool->Dealloc(m_head);
@@ -63,13 +65,13 @@ namespace FunGPU
 		PortableMemPool::Handle<T> GetItemAtIndex(Index_t index)
 		{
 			auto tempHead = m_head;
-			while (index > 0 && tempHead != ListNode::ListNodeHandle_t())
+			while (index > 0 && tempHead != PortableMemPool::Handle<ListNode>())
 			{
 				auto tempHeadDerefd = m_portableMemPool->derefHandle(tempHead);
 				tempHead = tempHeadDerefd->m_next;
 				--index;
 			}
-			if (tempHead == ListNode::ListNodeHandle_t())
+			if (tempHead == PortableMemPool::Handle<ListNode>())
 			{
 				throw std::invalid_argument("Index out of range in list");
 			}
@@ -77,6 +79,7 @@ namespace FunGPU
 		}
 
 	private:
+
 		class ListNode : public T
 		{
 		public:
@@ -88,6 +91,6 @@ namespace FunGPU
 
 		typename ListNode::ListNodeHandle_t m_head;
 		Index_t m_listSize = 0;
-		std::shared_ptr<PortableMemPool> m_portableMemPool;
+		PortableMemPool::DeviceAccessor_t m_portableMemPool;
 	};
 }

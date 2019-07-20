@@ -8,7 +8,7 @@ using namespace FunGPU;
 
 int main(int argc, char** argv)
 {
-	Parser parser("MergeSort.fgpu");
+	Parser parser("TestInlineCalls.fgpu");
 	auto parsedResult = parser.ParseProgram();
 	parsedResult->DebugPrint(0);
 
@@ -22,10 +22,10 @@ int main(int argc, char** argv)
 	auto compiledResult = compiler.Compile();
 	compiler.DebugPrintAST(compiledResult);
 
-	auto memPoolCpy = std::make_shared<PortableMemPool>(*memPool);
+	//auto memPoolCpy = std::make_shared<PortableMemPool>(*memPool);
 	// Verify that we can move the mem pool without breaking outstanding references.
 	{
-		CPUEvaluator evaluator(compiledResult, memPoolCpy);
+		CPUEvaluator evaluator(compiledResult, memPool);
 		std::cout << "Will evaluate program" << std::endl;
 		const auto programResult = evaluator.EvaluateProgram();
 		std::cout << std::endl;

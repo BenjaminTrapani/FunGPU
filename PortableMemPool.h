@@ -6,6 +6,8 @@
 #include <type_traits>
 #include "SpinLock.h"
 #include <atomic>
+#include <SYCL\sycl.hpp>
+#include "Sycl1DBufferAccessors.hpp"
 
 namespace FunGPU
 {
@@ -13,9 +15,10 @@ namespace FunGPU
 	* Arena-based memory pool that can be moved around without invalidating references to objects in it.
 	* Required to alloc compiled nodes on host and reference them on device.
 	*/
-	class PortableMemPool : public std::enable_shared_from_this<PortableMemPool>
+	class PortableMemPool
 	{
 	public:
+		using DeviceAccessor_t = cl::sycl::accessor<PortableMemPool, 1, cl::sycl::access::mode::read_write, cl::sycl::access::target::global_buffer>;
 
 		template<class T>
 		class Handle
@@ -61,8 +64,8 @@ namespace FunGPU
 			template<class OtherT>
 			void operator=(const Handle<OtherT>& other)
 			{
-				static_assert(std::is_base_of<T, OtherT>::value, 
-					"Cannot assign handle to a handle to a type that is not a subclass of the destination handle's type");
+				static_assert(std::is_base_of<T, OtherT>::value || std::is_base_of<OtherT, T>::value,
+					"Cannot assign handle to handle of unrelated type");
 				m_arenaIndex = other.GetArenaIndex();
 				m_allocIndex = other.GetAllocIndex();
 				m_allocSize = other.GetAllocSize();
@@ -75,20 +78,39 @@ namespace FunGPU
 		};
 
 		template<class T>
-		class SharedHandle : public Handle<T>
+		class ArrayHandle
 		{
 			friend class PortableMemPool;
 		public:
-			SharedHandle() : Handle<T>() {}
+			ArrayHandle() : m_count(std::numeric_limits<size_t>::max()) {}
+			ArrayHandle(const size_t arenaIndex, const size_t allocIndex, const size_t allocSize, const size_t count): 
+				m_handle(arenaIndex, allocIndex, allocSize), m_count(count) {}
 
-			SharedHandle(const Handle<T>& handle, const std::shared_ptr<PortableMemPool>& pool) : Handle<T>(handle),
+			size_t GetCount() const
+			{
+				return m_count;
+			}
+
+		private:
+			Handle<T> m_handle;
+			size_t m_count;
+		};
+
+		template<class T>
+		class SharedHandle
+		{
+			friend class PortableMemPool;
+		public:
+			SharedHandle() {}
+
+			SharedHandle(const Handle<T>& handle, PortableMemPool* pool) : m_wrappedHandle(handle),
 				m_pool(pool), 
 				m_refCountHandle(pool->Alloc<std::atomic<size_t>>(1))
 			{
 			}
 
 			SharedHandle(const SharedHandle<T>& other):
-				Handle<T>(other),
+				m_wrappedHandle(other.m_wrappedHandle),
 				m_pool(other.m_pool), m_refCountHandle(other.m_refCountHandle)
 			{
 				IncrementRefCount();
@@ -99,7 +121,7 @@ namespace FunGPU
 				DecrementRefCount();
 			}
 
-			void SetPool(const std::shared_ptr<PortableMemPool>& pool)
+			void SetPool(PortableMemPool* pool)
 			{
 				m_pool = pool;
 			}
@@ -113,8 +135,7 @@ namespace FunGPU
 			{
 				DecrementRefCount();
 
-				*(static_cast<Handle<T>*>(this)) = other;
-
+				m_wrappedHandle = other.m_wrappedHandle;
 				m_pool = other.m_pool;
 				m_refCountHandle = other.m_refCountHandle;
 
@@ -123,11 +144,20 @@ namespace FunGPU
 				return *this;
 			}
 
+			bool operator==(const SharedHandle<T>& other) const
+			{
+				return m_wrappedHandle == other.m_wrappedHandle;
+			}
+			bool operator!=(const SharedHandle<T>& other) const
+			{
+				return !(*this == other);
+			}
+
 		private:
 
 			void IncrementRefCount()
 			{
-				if (*this != Handle<T>())
+				if (m_wrappedHandle != Handle<T>())
 				{
 					auto derefdRefCount = m_pool->derefHandle(m_refCountHandle);
 					++(*derefdRefCount);
@@ -136,79 +166,62 @@ namespace FunGPU
 
 			void DecrementRefCount()
 			{
-				if (m_isAttached && *this != Handle<T>())
+				if (m_isAttached && m_wrappedHandle != Handle<T>())
 				{
 					auto derefdRefCount = m_pool->derefHandle(m_refCountHandle);
 					if (--(*derefdRefCount) == 0)
 					{
-						// Problem is double-free from shared_from_this code
 						m_pool->Dealloc(m_refCountHandle);
-						m_pool->Dealloc(*this);
+						m_pool->Dealloc(m_wrappedHandle);
 					}
 				}
 			}
 
-			std::shared_ptr<PortableMemPool> m_pool;
+			Handle<T> m_wrappedHandle;
+			PortableMemPool* m_pool;
 			Handle<std::atomic<size_t>> m_refCountHandle;
+
 			bool m_isAttached = true;
 		};
 
+		// Implementers must define a public m_handle member. 
+		// Can't define it for you here because then your class would not be a standard layout class :(
 		template<class T>
-		class GetHandleFromThis
+		class EnableSharedHandleFromThis
 		{
-			friend class PortableMemPool;
-		protected:
-			Handle<T> GetHandle()
-			{
-				return m_handle;
-			}
-		private:
-			Handle<T> m_handle;
+			//SharedHandle<T> m_handle;
 		};
 
-		template<class T>
-		class GetSharedHandleFromThis
-		{
-			friend class PortableMemPool;
-		protected:
-			SharedHandle<T> GetHandle()
-			{
-				return m_handle;
-			}
-		private:
-			SharedHandle<T> m_handle;
-		};
-
-		PortableMemPool(std::vector<std::pair<size_t, size_t>> arenaSizesAndBytesPerArena);
+		PortableMemPool(std::vector<std::pair<size_t, size_t>> arenaSizesAndBytesPerArena, cl::sycl::handler* handler);
 		
-		template<class T, class ...Args_t>
+		void ConfigureForHostAccess(cl::sycl::handler& handler);
+		void ConfigureForDeviceAccess(cl::sycl::handler& handler);
+
+		template<cl::sycl::access::target target, class T, class ...Args_t>
 		Handle<T> Alloc(const Args_t&... args)
 		{
-			const auto arenaIndex = FindArenaForAllocSize(sizeof(T));
-			auto& arena = m_arenas.at(arenaIndex);
-			const auto allocdListNode = arena.AllocFromArena();
-			const Handle<T> resultHandle(arenaIndex, allocdListNode.m_indexInStorage, arena.m_sizeOfEachUnit);
-			auto bytesForHandle = reinterpret_cast<unsigned char*>(derefHandle(resultHandle));
-			
-			// invoke T's constructor via placement new on allocated bytes
-			auto allocdT = new (bytesForHandle) T(args...);
-
-			using SetHandleFunctor_t = typename std::conditional<std::is_base_of<GetHandleFromThis<T>, T>::value, SetHandleReal<T>, SetHandleNoOp<T>>::type;
-			SetHandleFunctor_t setHandleFunctor(allocdT);
-			setHandleFunctor.SetHandle(resultHandle);
-			
-			return resultHandle;
+			auto accessorForTarget = GetArenasAccessorForTarget<target>();
+			return AllocImpl<decltype<accessorForTarget>, T, Args_t...>(accessorForTarget, std::forward(args...));
 		}
 
+		template<cl::sycl::access::target target, class T>
+		ArrayHandle<T> AllocArray(const size_t arraySize, const T& initialValue = T())
+		{
+			auto accessorForTarget = GetArenasAccessorForTarget<target>();
+			return AllocArrayImpl<decltype<accessorForTarget>, T, Args_t...>(arraySize, std::forward(initialValue));
+		}
+		
+		// TODO make the other alloc / dealloc routines follow per-target pattern above, and do the same with arena.
 		template<class T, class ...Args_t>
 		SharedHandle<T> AllocShared(const Args_t&... args)
 		{
-			SharedHandle<T> result(Alloc<T, Args_t...>(args...), shared_from_this());
+			SharedHandle<T> result(Alloc<T, Args_t...>(args...), this);
 
-			using SetHandleFunctor_t = typename std::conditional<std::is_base_of<GetSharedHandleFromThis<T>, T>::value, SetSharedHandleReal<T>, SetHandleNoOp<T>>::type;
+			using SetHandleFunctor_t = typename std::conditional<std::is_base_of<EnableSharedHandleFromThis<T>, T>::value, SetSharedHandleReal<T>, SetHandleNoOp<T>>::type;
 			auto derefedAllocd = derefHandle(result);
 			SetHandleFunctor_t setHandleFunctor(derefedAllocd);
 			setHandleFunctor.SetHandle(result);
+			// TODO move the decrement ref count call into setHandleFunctor.SetHandle and only do it in SetSharedHandleReal
 			result.DecrementRefCount();
 
 			return result;
@@ -220,19 +233,45 @@ namespace FunGPU
 			auto derefedForHandle = derefHandle(handle);
 			// Explicitly call destructor
 			derefedForHandle->~T();
+			auto& arena = m_arenas->at(handle.GetArenaIndex());
+			arena.FreeFromArena(handle.GetAllocIndex());
+		}
 
-			auto& arena = m_arenas.at(handle.GetArenaIndex());
+		template<class T>
+		void DeallocArray(const ArrayHandle<T>& arrayHandle)
+		{
+			const auto& handle = arrayHandle.m_handle;
+			auto derefdHandle = derefHandle(handle);
+			for (size_t i = 0; i < arrayHandle.GetCount(); ++i)
+			{
+				(derefdHandle[i]).~T();
+			}
+
+			auto& arena = m_arenas->at(handle.GetArenaIndex());
 			arena.FreeFromArena(handle.GetAllocIndex());
 		}
 
 		template<class T>
 		T* derefHandle(const Handle<T>& handle)
 		{
-			auto& arena = m_arenas.at(handle.GetArenaIndex());
+			auto& arena = m_arenas->at(handle.GetArenaIndex());
 			auto bytesForIndex = arena.GetBytes(handle.GetAllocIndex());
 			return reinterpret_cast<T*>(bytesForIndex);
 		}
 
+		template<class T>
+		T* derefHandle(const SharedHandle<T>& handle)
+		{
+			return derefHandle(handle.m_wrappedHandle);
+		}
+
+		template<class T>
+		T* derefHandle(const ArrayHandle<T>& handle)
+		{
+			return derefHandle(handle.m_handle);
+		}
+
+		template<cl::sycl::access::target target>
 		size_t GetTotalAllocationCount();
 
 	private:
@@ -254,14 +293,21 @@ namespace FunGPU
 
 		struct Arena
 		{
-			Arena(const size_t sizeOfEachAlloc, const size_t totalBytes);
+			Arena(const size_t sizeOfEachAlloc, const size_t totalBytes,
+				cl::sycl::handler* handler);
+			Arena(const Arena& other);
+
 			ListNode AllocFromArena();
+
 			void FreeFromArena(const size_t allocIndex);
+
 			unsigned char* GetBytes(const size_t allocIndex);
 
 			const size_t m_sizeOfEachUnit;
-			std::vector<unsigned char> m_bytes;
-			std::vector<ListNode> m_listNodeStorage;
+			
+			cl::sycl::buffer<unsigned char, 1> m_bytes;
+			cl::sycl::buffer<ListNode, 1> m_listNodeStorage;
+
 			ListNode m_freeListHead;
 			ListNode m_freeListTail;
 			SpinLock m_lock;
@@ -277,32 +323,61 @@ namespace FunGPU
 		};
 
 		template<class T>
-		struct SetHandleReal
-		{
-			SetHandleReal(GetHandleFromThis<T>* target) : m_target(target) {}
-			void SetHandle(const Handle<T>& handle)
-			{
-				m_target->m_handle = handle;
-			}
-
-			GetHandleFromThis<T>* m_target;
-		};
-
-		template<class T>
 		struct SetSharedHandleReal
 		{
-			SetSharedHandleReal(GetSharedHandleFromThis<T>* target) : m_target(target) {}
+			SetSharedHandleReal(EnableSharedHandleFromThis<T>* target) : m_target(target) {}
 			void SetHandle(const SharedHandle<T>& handle)
 			{
-				m_target->m_handle = handle;
-				m_target->m_handle.Detach();
+				auto targetAsOriginalClass = static_cast<T*>(m_target);
+				targetAsOriginalClass->m_handle = handle;
+				targetAsOriginalClass->m_handle.Detach();
 			}
 
-			GetSharedHandleFromThis<T>* m_target;
+			EnableSharedHandleFromThis<T>* m_target;
 		};
+
+		template<cl::sycl::access::target target>
+		cl::sycl::accessor<Arena, 1, cl::sycl::access::mode::read_write, target> GetArenasAccessorForTarget();
+
+		template<class Accessor_t, class T, class ...Args_t>
+		Handle<T> AllocImpl(const Accessor_t& arenasAcc, const Args_t&... args)
+		{
+			const auto arenaIndex = FindArenaForAllocSize(sizeof(T));
+			auto& arena = arenasAcc[arenaIndex];
+
+			const auto allocdListNode = arena.AllocFromArena();
+			const Handle<T> resultHandle(arenaIndex, allocdListNode.m_indexInStorage, arena.m_sizeOfEachUnit);
+			auto bytesForHandle = reinterpret_cast<unsigned char*>(derefHandle(resultHandle));
+
+			// invoke T's constructor via placement new on allocated bytes
+			auto allocdT = new (bytesForHandle) T(args...);
+
+			return resultHandle;
+		}
+
+		template<class Accessor_t, class T>
+		ArrayHandle<T> AllocArrayImpl(const Accessor_t& arenasAcc, const size_t arraySize, const T& initialValue = T())
+		{
+			const auto arenaIndex = FindArenaForAllocSize(sizeof(T) * arraySize);
+			auto& arena = arenasAcc[arenaIndex];
+
+			const auto allocdListNode = arena.AllocFromArena();
+			const ArrayHandle<T> resultHandle(arenaIndex, allocdListNode.m_indexInStorage, arena.m_sizeOfEachUnit, arraySize);
+
+			auto tAlignedValues = derefHandle(resultHandle);
+			for (size_t i = 0; i < arraySize; ++i)
+			{
+				tAlignedValues[i] = *(new (tAlignedValues + i) T(initialValue));
+			}
+
+			return resultHandle;
+		}
 
 		size_t FindArenaForAllocSize(const size_t allocSize) const;
 
-		std::vector<Arena> m_arenas;
+		cl::sycl::buffer<Arena, 1> m_arenas;
+		Sycl1DBufferWithAccessors<cl::sycl::buffer<Arena, 1>> m_arenasAccessors;
+
+		bool m_isOnDevice;
 	};
 }

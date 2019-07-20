@@ -1,4 +1,5 @@
 #include "Types.h"
+#include "PortableMemPool.h"
 
 namespace FunGPU
 {
@@ -6,31 +7,39 @@ namespace FunGPU
 	class Array
 	{
 	public:
-		Array(const Index_t size) : m_size(size) 
+		Array(const Index_t size, PortableMemPool* pool) : m_size(size), m_pool(pool)
 		{
-			if (m_size == 0)
+			if (m_size != 0)
 			{
-				m_data = nullptr;
-			}
-			else
-			{
-				m_data = new T[m_size];
+				m_data = m_pool->AllocArray<T>(m_size);
 			}
 		}
+
+		~Array()
+		{
+			if (m_size != 0)
+			{
+				m_pool->DeallocArray(m_data);
+			}
+		}
+
 		T& Get(const Index_t index)
 		{
-			return m_data[index];
+			auto dataRef = m_pool->derefHandle(m_data);
+			return dataRef[index];
 		}
 		void Set(const Index_t index, const T& val)
 		{
-			m_data[index] = val;
+			auto dataRef = m_pool->derefHandle(m_data);
+			dataRef[index] = val;
 		}
 		Index_t size() const
 		{
 			return m_size;
 		}
 	private:
-		T* m_data;
+		PortableMemPool::ArrayHandle<T> m_data;
 		const Index_t m_size;
+		PortableMemPool* m_pool;
 	};
 }

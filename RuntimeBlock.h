@@ -1,12 +1,14 @@
 #include "Compiler.h"
 #include "List.hpp"
 #include "PortableMemPool.h"
+#include "SYCL/sycl.hpp"
+
 #include <atomic>
 
 namespace FunGPU
 {
 	template <class DependencyTracker_t>
-	class RuntimeBlock : public PortableMemPool::GetSharedHandleFromThis<RuntimeBlock<DependencyTracker_t>>
+	class RuntimeBlock : public PortableMemPool::EnableSharedHandleFromThis<RuntimeBlock<DependencyTracker_t>>
 	{
 	public:
 		using SharedRuntimeBlockHandle_t = PortableMemPool::SharedHandle<RuntimeBlock<DependencyTracker_t>>;
@@ -87,16 +89,21 @@ namespace FunGPU
 		using RuntimeValueHandle_t = PortableMemPool::Handle<RuntimeValue>;
 
 		RuntimeBlock(const Compiler::ASTNodeHandle astNode, const SharedRuntimeBlockHandle_t& bindingParent,
-			const SharedRuntimeBlockHandle_t& parent, DependencyTracker_t* depTracker, const RuntimeValueHandle_t& dest,
-			const std::shared_ptr<PortableMemPool>& memPool) :
+			const SharedRuntimeBlockHandle_t& parent, 
+			const cl::sycl::accessor<DependencyTracker_t, 1, cl::sycl::access::mode::read_write, cl::sycl::access::target::global_buffer>& depTracker, 
+			const RuntimeValueHandle_t& dest,
+			const PortableMemPool::DeviceAccessor_t& memPool) :
 			m_astNode(astNode), m_bindingParent(bindingParent), m_parent(parent),
-			m_depTracker(depTracker), m_dest(dest), m_memPool(memPool), 
-			m_runtimeValues(memPool) {
+			m_depTracker(depTracker), m_dest(dest), 
+			m_dependenciesRemaining(0),
+			m_memPoolDeviceAcc(memPool),
+			m_runtimeValues(memPool) 
+		{
 		}
 
 		Compiler::ASTNode* GetASTNode()
 		{
-			return m_memPool->derefHandle(m_astNode);
+			return m_memPoolDeviceAcc->derefHandle(m_astNode);
 		}
 
 		void PerformEvalPass()
@@ -115,15 +122,15 @@ namespace FunGPU
 					{
 						m_runtimeValues.push_front(RuntimeValue());
 						auto targetRuntimeValue = m_runtimeValues.front();
-						const auto handleToThis = GetHandle();
-						auto dependencyOnBinding = m_memPool->AllocShared<RuntimeBlock>(bindNode->m_bindings.Get(i),
-							isRec ? handleToThis : m_bindingParent, handleToThis, m_depTracker, targetRuntimeValue, m_memPool);
+						auto dependencyOnBinding = m_memPoolDeviceAcc->AllocShared<RuntimeBlock>(bindNode->m_bindings.Get(i),
+							isRec ? m_handle : m_bindingParent, m_handle, m_depTracker, targetRuntimeValue, m_memPoolDeviceAcc);
 						AddDependentActiveBlock(dependencyOnBinding);
 					}
 				}
 				else
 				{
-					auto depOnExpr = m_memPool->AllocShared<RuntimeBlock>(bindNode->m_childExpr, GetHandle(), m_parent, m_depTracker, m_dest, m_memPool);
+					auto depOnExpr = m_memPoolDeviceAcc->AllocShared<RuntimeBlock>(bindNode->m_childExpr, m_handle, m_parent, m_depTracker, m_dest, 
+						m_memPoolDeviceAcc);
 					AddDependentActiveBlock(depOnExpr, false);
 				}
 
@@ -138,14 +145,14 @@ namespace FunGPU
 					{
 						m_runtimeValues.push_front(RuntimeValue());
 						auto targetRuntimeValue = m_runtimeValues.front();
-						auto dependencyOnArg = m_memPool->AllocShared<RuntimeBlock>(callNode->m_args.Get(i), m_bindingParent, GetHandle(),
-							m_depTracker, targetRuntimeValue, m_memPool);
+						auto dependencyOnArg = m_memPoolDeviceAcc->AllocShared<RuntimeBlock>(callNode->m_args.Get(i), m_bindingParent, m_handle,
+							m_depTracker, targetRuntimeValue, m_memPoolDeviceAcc);
 						AddDependentActiveBlock(dependencyOnArg);
 					}
 
 					m_runtimeValues.push_front(RuntimeValue());
-					auto dependencyOnLambda = m_memPool->AllocShared<RuntimeBlock>(callNode->m_target, m_bindingParent, GetHandle(),
-						m_depTracker, m_runtimeValues.front(), m_memPool);
+					auto dependencyOnLambda = m_memPoolDeviceAcc->AllocShared<RuntimeBlock>(callNode->m_target, m_bindingParent, m_handle,
+						m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc);
 					AddDependentActiveBlock(dependencyOnLambda);
 				}
 				else
@@ -160,8 +167,8 @@ namespace FunGPU
 					{
 						throw std::invalid_argument("Incorrect number of args to call of lambda expr");
 					}
-					auto lambdaBlock = m_memPool->AllocShared<RuntimeBlock>(lambdaVal.m_data.functionVal.m_expr,
-						GetHandle(), m_parent, m_depTracker, m_dest, m_memPool);
+					auto lambdaBlock = m_memPoolDeviceAcc->AllocShared<RuntimeBlock>(lambdaVal.m_data.functionVal.m_expr,
+						m_handle, m_parent, m_depTracker, m_dest, m_memPoolDeviceAcc);
 					m_bindingParent = lambdaVal.m_data.functionVal.m_bindingParent;
 					AddDependentActiveBlock(lambdaBlock, false);
 				}
@@ -174,8 +181,8 @@ namespace FunGPU
 				if (m_runtimeValues.size() == 0)
 				{
 					m_runtimeValues.push_front(RuntimeValue());
-					auto dependencyOnPred = m_memPool->AllocShared<RuntimeBlock>(ifNode->m_pred, m_bindingParent, GetHandle(), m_depTracker,
-						m_runtimeValues.front(), m_memPool);
+					auto dependencyOnPred = m_memPoolDeviceAcc->AllocShared<RuntimeBlock>(ifNode->m_pred, m_bindingParent, m_handle, m_depTracker,
+						m_runtimeValues.front(), m_memPoolDeviceAcc);
 					AddDependentActiveBlock(dependencyOnPred);
 				}
 				else
@@ -188,8 +195,8 @@ namespace FunGPU
 					}
 					const bool isPredTrue = static_cast<bool>(predValue.m_data.doubleVal);
 					const auto branchToTake = isPredTrue ? ifNode->m_then : ifNode->m_else;
-					auto dependencyOnBranch = m_memPool->AllocShared<RuntimeBlock>(branchToTake, m_bindingParent, m_parent, m_depTracker,
-						m_dest, m_memPool);
+					auto dependencyOnBranch = m_memPoolDeviceAcc->AllocShared<RuntimeBlock>(branchToTake, m_bindingParent, m_parent, m_depTracker,
+						m_dest, m_memPoolDeviceAcc);
 					AddDependentActiveBlock(dependencyOnBranch, false);
 				}
 				break;
@@ -263,7 +270,7 @@ namespace FunGPU
 					auto rArg = m_runtimeValues.derefFront();
 					m_runtimeValues.pop_front();
 					const bool areEq = lArg == rArg;
-					RuntimeValue::Data dataVal;
+					typename RuntimeValue::Data dataVal;
 					dataVal.doubleVal = static_cast<double>(areEq);
 					FillDestValue(RuntimeValue::Type::Double, dataVal);
 				}
@@ -290,8 +297,8 @@ namespace FunGPU
 				if (m_runtimeValues.size() == 0)
 				{
 					m_runtimeValues.push_front(RuntimeValue());
-					auto dependencyNode = m_memPool->AllocShared<RuntimeBlock>(unaryOp->m_arg0, m_bindingParent, GetHandle(), m_depTracker,
-						m_runtimeValues.front(), m_memPool);
+					auto dependencyNode = m_memPoolDeviceAcc->AllocShared<RuntimeBlock>(unaryOp->m_arg0, m_bindingParent, m_handle, m_depTracker,
+						m_runtimeValues.front(), m_memPoolDeviceAcc);
 					AddDependentActiveBlock(dependencyNode);
 				}
 				else
@@ -301,7 +308,7 @@ namespace FunGPU
 					{
 						throw std::invalid_argument("Expected double in floor op");
 					}
-					RuntimeValue::Data dataToSet;
+					typename RuntimeValue::Data dataToSet;
 					dataToSet.doubleVal = floor(argVal.m_data.doubleVal);
 					FillDestValue(RuntimeValue::Type::Double, dataToSet);
 				}
@@ -310,7 +317,7 @@ namespace FunGPU
 			case Compiler::ASTNode::Type::Number:
 			{
 				auto numNode = static_cast<Compiler::NumberNode*>(astNode);
-				RuntimeValue::Data data;
+				typename RuntimeValue::Data data;
 				data.doubleVal = numNode->m_value;
 				FillDestValue(RuntimeValue::Type::Double, data);
 				break;
@@ -325,7 +332,7 @@ namespace FunGPU
 			case Compiler::ASTNode::Type::Lambda:
 			{
 				auto lambdaNode = static_cast<Compiler::LambdaNode*>(astNode);
-				RuntimeValue::Data dataVal;
+				typename RuntimeValue::Data dataVal;
 				dataVal.functionVal = FunctionValue(lambdaNode->m_childExpr, m_bindingParent, lambdaNode->m_argCount);
 				FillDestValue(RuntimeValue::Type::Function, dataVal);
 				break;
@@ -335,13 +342,15 @@ namespace FunGPU
 			}
 		}
 
+		SharedRuntimeBlockHandle_t m_handle;
+
 	private:
 		RuntimeValue* GetRuntimeValueForIndex(Index_t index)
 		{
 			auto tempParent = m_bindingParent;
 			while (tempParent != SharedRuntimeBlockHandle_t())
 			{
-				auto derefdParent = m_memPool->derefHandle(tempParent);
+				auto derefdParent = m_memPoolDeviceAcc->derefHandle(tempParent);
 				if (index >= derefdParent->m_runtimeValues.size())
 				{
 					index -= derefdParent->m_runtimeValues.size();
@@ -357,11 +366,11 @@ namespace FunGPU
 				throw std::runtime_error("Failed to find runtime value for index");
 			}
 
-			auto derefdParent = m_memPool->derefHandle(tempParent);
+			auto derefdParent = m_memPoolDeviceAcc->derefHandle(tempParent);
 			// Index is in tempParent's runtime values. It is 'index' from beginning.
 			const auto resultHandle = derefdParent->m_runtimeValues.GetItemAtIndex(index);
 
-			return m_memPool->derefHandle(resultHandle);
+			return m_memPoolDeviceAcc->derefHandle(resultHandle);
 		}
 
 		bool MaybeAddBinaryOp()
@@ -370,11 +379,11 @@ namespace FunGPU
 			{
 				auto binaryOp = static_cast<Compiler::BinaryOpNode*>(GetASTNode());
 				m_runtimeValues.push_front(RuntimeValue());
-				auto rightNodeBlock = m_memPool->AllocShared<RuntimeBlock>(binaryOp->m_arg1, m_bindingParent, GetHandle(), m_depTracker,
-					m_runtimeValues.front(), m_memPool);
+				auto rightNodeBlock = m_memPoolDeviceAcc->AllocShared<RuntimeBlock>(binaryOp->m_arg1, m_bindingParent, m_handle, m_depTracker,
+					m_runtimeValues.front(), m_memPoolDeviceAcc);
 				m_runtimeValues.push_front(RuntimeValue());
-				auto leftNodeBlock = m_memPool->AllocShared<RuntimeBlock>(binaryOp->m_arg0, m_bindingParent, GetHandle(), m_depTracker,
-					m_runtimeValues.front(), m_memPool);
+				auto leftNodeBlock = m_memPoolDeviceAcc->AllocShared<RuntimeBlock>(binaryOp->m_arg0, m_bindingParent, m_handle, m_depTracker,
+					m_runtimeValues.front(), m_memPoolDeviceAcc);
 				AddDependentActiveBlock(rightNodeBlock);
 				AddDependentActiveBlock(leftNodeBlock);
 
@@ -397,7 +406,7 @@ namespace FunGPU
 			{
 				throw std::invalid_argument("Expected both operands to add to be double");
 			}
-			RuntimeValue::Data dataVal;
+			typename RuntimeValue::Data dataVal;
 			dataVal.doubleVal = BinaryOpFunctor()(lArg.m_data.doubleVal, rArg.m_data.doubleVal);
 			FillDestValue(RuntimeValue::Type::Double, dataVal);
 		}
@@ -405,21 +414,21 @@ namespace FunGPU
 		void AddDependentActiveBlock(const SharedRuntimeBlockHandle_t block, const bool isNewDependency = true)
 		{
 			m_depTracker->AddActiveBlock(block);
-			auto derefdBlock = m_memPool->derefHandle(block);
+			auto derefdBlock = m_memPoolDeviceAcc->derefHandle(block);
 			if (derefdBlock->m_parent != SharedRuntimeBlockHandle_t() && isNewDependency)
 			{
-				auto derefdParent = m_memPool->derefHandle(derefdBlock->m_parent);
+				auto derefdParent = m_memPoolDeviceAcc->derefHandle(derefdBlock->m_parent);
 				++derefdParent->m_dependenciesRemaining;
 			}
 		}
 
 		void FillDestValue(const typename RuntimeValue::Type type, const typename RuntimeValue::Data& data)
 		{
-			auto destRef = m_memPool->derefHandle(m_dest);
+			auto destRef = m_memPoolDeviceAcc->derefHandle(m_dest);
 			destRef->SetValue(type, data);
 			if (m_parent != SharedRuntimeBlockHandle_t())
 			{
-				auto derefdParent = m_memPool->derefHandle(m_parent);
+				auto derefdParent = m_memPoolDeviceAcc->derefHandle(m_parent);
 				if (--derefdParent->m_dependenciesRemaining == 0)
 				{
 					m_depTracker->AddActiveBlock(m_parent);
@@ -431,11 +440,11 @@ namespace FunGPU
 		List<RuntimeValue> m_runtimeValues;
 		SharedRuntimeBlockHandle_t m_bindingParent;
 		SharedRuntimeBlockHandle_t m_parent;
-		DependencyTracker_t* m_depTracker;
 
 		RuntimeValueHandle_t m_dest;
 
-		std::atomic<int> m_dependenciesRemaining = 0;
-		std::shared_ptr<PortableMemPool> m_memPool;
+		std::atomic<int> m_dependenciesRemaining;
+
+		PortableMemPool::DeviceAccessor_t m_memPoolDeviceAcc;
 	};
 }
