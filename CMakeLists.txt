@@ -28,3 +28,11 @@ add_sycl_to_target(
     SOURCES ${SOURCE_LIST})
 
 set_property(TARGET FunGPU PROPERTY CXX_STANDARD 14)
+
+file(GLOB_RECURSE ALL_SOURCE_FILES *.cpp *.h *.hpp)
+find_program (CLANGFORMAT_CMD clang-format)
+
+add_custom_target(clangformat
+    COMMAND ${CLANGFORMAT_CMD}
+    -i
+    ${ALL_SOURCE_FILES})

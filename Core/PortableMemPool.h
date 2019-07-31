@@ -1,622 +1,530 @@
 #pragma once
 
-#include <vector>
-#include <utility>
-#include <memory>
-#include <type_traits>
+#include "SYCL/sycl.hpp"
 #include "SpinLock.h"
 #include <atomic>
 #include <limits>
-#include "SYCL/sycl.hpp"
+#include <memory>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
-namespace FunGPU
-{
-	/**
-	* Arena-based memory pool that can be moved around without invalidating references to objects in it.
-	* Required to alloc compiled nodes on host and reference them on device.
-	*/
-	class PortableMemPool
-	{
-	public:
-        using DeviceAccessor_t = cl::sycl::accessor<PortableMemPool, 1, cl::sycl::access::mode::read_write, cl::sycl::access::target::global_buffer>;
-        using HostAccessor_t = cl::sycl::accessor<PortableMemPool, 1, cl::sycl::access::mode::read_write, cl::sycl::access::target::host_buffer>;
-		template<class T>
-		class Handle
-		{
-		public:
-			Handle() :
-			    m_allocIndex(std::numeric_limits<size_t>::max()),
-				m_allocSize(std::numeric_limits<size_t>::max()) {}
-			Handle(const size_t allocIndex, const size_t allocSize) :
-			    m_allocIndex(allocIndex), m_allocSize(allocSize) {}
+namespace FunGPU {
+/**
+* Arena-based memory pool that can be moved around without invalidating
+* references to objects in it.
+* Required to alloc compiled nodes on host and reference them on device.
+*/
+class PortableMemPool {
+public:
+  using DeviceAccessor_t =
+      cl::sycl::accessor<PortableMemPool, 1, cl::sycl::access::mode::read_write,
+                         cl::sycl::access::target::global_buffer>;
+  using HostAccessor_t =
+      cl::sycl::accessor<PortableMemPool, 1, cl::sycl::access::mode::read_write,
+                         cl::sycl::access::target::host_buffer>;
+  template <class T> class Handle {
+  public:
+    Handle()
+        : m_allocIndex(std::numeric_limits<size_t>::max()),
+          m_allocSize(std::numeric_limits<size_t>::max()) {}
+    Handle(const size_t allocIndex, const size_t allocSize)
+        : m_allocIndex(allocIndex), m_allocSize(allocSize) {}
 
-			template<class OtherT>
-			Handle(const Handle<OtherT>& other)
-			{
-				*this = other;
-			}
+    template <class OtherT> Handle(const Handle<OtherT> &other) {
+      *this = other;
+    }
 
-			size_t GetAllocIndex() const
-			{
-				return m_allocIndex;
-			}
+    size_t GetAllocIndex() const { return m_allocIndex; }
 
-			size_t GetAllocSize() const
-			{
-				return m_allocSize;
-			}
-			bool operator==(const Handle& other) const 
-			{
-				return m_allocIndex == other.m_allocIndex &&
-					m_allocSize == other.m_allocSize;
-			}
-			bool operator!=(const Handle& other) const
-			{
-				return !(*this == other);
-			}
+    size_t GetAllocSize() const { return m_allocSize; }
+    bool operator==(const Handle &other) const {
+      return m_allocIndex == other.m_allocIndex &&
+             m_allocSize == other.m_allocSize;
+    }
+    bool operator!=(const Handle &other) const { return !(*this == other); }
 
-			template<class OtherT>
-			void operator=(const Handle<OtherT>& other)
-			{
-				static_assert(std::is_base_of<T, OtherT>::value || std::is_base_of<OtherT, T>::value,
-					"Cannot assign handle to handle of unrelated type");
-				m_allocIndex = other.GetAllocIndex();
-				m_allocSize = other.GetAllocSize();
-			}
-			
-		private:
-			size_t m_allocIndex;
-			size_t m_allocSize;
-		};
+    template <class OtherT> void operator=(const Handle<OtherT> &other) {
+      static_assert(std::is_base_of<T, OtherT>::value ||
+                        std::is_base_of<OtherT, T>::value,
+                    "Cannot assign handle to handle of unrelated type");
+      m_allocIndex = other.GetAllocIndex();
+      m_allocSize = other.GetAllocSize();
+    }
 
-		template<class T>
-		class ArrayHandle
-		{
-			friend class PortableMemPool;
-		public:
-			ArrayHandle() : m_count(std::numeric_limits<size_t>::max()) {}
-			ArrayHandle(const size_t allocIndex, const size_t allocSize, const size_t count):
-				m_handle(allocIndex, allocSize), m_count(count) {}
+  private:
+    size_t m_allocIndex;
+    size_t m_allocSize;
+  };
 
-			size_t GetCount() const
-			{
-				return m_count;
-			}
+  template <class T> class ArrayHandle {
+    friend class PortableMemPool;
 
-		private:
-			Handle<T> m_handle;
-			size_t m_count;
-		};
+  public:
+    ArrayHandle() : m_count(std::numeric_limits<size_t>::max()) {}
+    ArrayHandle(const size_t allocIndex, const size_t allocSize,
+                const size_t count)
+        : m_handle(allocIndex, allocSize), m_count(count) {}
 
-		template<class T>
-		class SharedHandle
-		{
-			friend class PortableMemPool;
-		public:
-			SharedHandle() {}
+    size_t GetCount() const { return m_count; }
 
-			SharedHandle(const Handle<T>& handle, PortableMemPool* pool) : m_wrappedHandle(handle),
-				m_pool(pool), 
-				m_refCountHandle(pool->Alloc<std::atomic<size_t>>(1))
-			{
-			}
+  private:
+    Handle<T> m_handle;
+    size_t m_count;
+  };
 
-			SharedHandle(const SharedHandle<T>& other):
-				m_wrappedHandle(other.m_wrappedHandle),
-				m_pool(other.m_pool), m_refCountHandle(other.m_refCountHandle)
-			{
-				IncrementRefCount();
-			}
+  template <class T> class SharedHandle {
+    friend class PortableMemPool;
 
-			~SharedHandle()
-			{
-				DecrementRefCount();
-			}
+  public:
+    SharedHandle() {}
 
-			void SetPool(PortableMemPool* pool)
-			{
-				m_pool = pool;
-			}
+    SharedHandle(const Handle<T> &handle, PortableMemPool *pool)
+        : m_wrappedHandle(handle), m_pool(pool),
+          m_refCountHandle(pool->Alloc<std::atomic<size_t>>(1)) {}
 
-			void Detach()
-			{
-				m_isAttached = false;
-			}
+    SharedHandle(const SharedHandle<T> &other)
+        : m_wrappedHandle(other.m_wrappedHandle), m_pool(other.m_pool),
+          m_refCountHandle(other.m_refCountHandle) {
+      IncrementRefCount();
+    }
 
-			SharedHandle<T> operator=(const SharedHandle<T>& other)
-			{
-				DecrementRefCount();
+    ~SharedHandle() { DecrementRefCount(); }
 
-				m_wrappedHandle = other.m_wrappedHandle;
-				m_pool = other.m_pool;
-				m_refCountHandle = other.m_refCountHandle;
+    void SetPool(PortableMemPool *pool) { m_pool = pool; }
 
-				IncrementRefCount();
+    void Detach() { m_isAttached = false; }
 
-				return *this;
-			}
+    SharedHandle<T> operator=(const SharedHandle<T> &other) {
+      DecrementRefCount();
 
-			bool operator==(const SharedHandle<T>& other) const
-			{
-				return m_wrappedHandle == other.m_wrappedHandle;
-			}
-			bool operator!=(const SharedHandle<T>& other) const
-			{
-				return !(*this == other);
-			}
+      m_wrappedHandle = other.m_wrappedHandle;
+      m_pool = other.m_pool;
+      m_refCountHandle = other.m_refCountHandle;
 
-		private:
+      IncrementRefCount();
 
-			void IncrementRefCount()
-			{
-				if (m_wrappedHandle != Handle<T>())
-				{
-					auto derefdRefCount = m_pool->derefHandle(m_refCountHandle);
-					++(*derefdRefCount);
-				}
-			}
+      return *this;
+    }
 
-			void DecrementRefCount()
-			{
-				if (m_isAttached && m_wrappedHandle != Handle<T>())
-				{
-					auto derefdRefCount = m_pool->derefHandle(m_refCountHandle);
-					if (--(*derefdRefCount) == 0)
-					{
-						m_pool->Dealloc(m_refCountHandle);
-						m_pool->Dealloc(m_wrappedHandle);
-					}
-				}
-			}
+    bool operator==(const SharedHandle<T> &other) const {
+      return m_wrappedHandle == other.m_wrappedHandle;
+    }
+    bool operator!=(const SharedHandle<T> &other) const {
+      return !(*this == other);
+    }
 
-			Handle<T> m_wrappedHandle;
-			PortableMemPool* m_pool;
-			Handle<std::atomic<size_t>> m_refCountHandle;
+  private:
+    void IncrementRefCount() {
+      if (m_wrappedHandle != Handle<T>()) {
+        auto derefdRefCount = m_pool->derefHandle(m_refCountHandle);
+        ++(*derefdRefCount);
+      }
+    }
 
-			bool m_isAttached = true;
-		};
-
-		// Implementers must define a public m_handle member. 
-		// Can't define it for you here because then your class would not be a standard layout class :(
-		template<class T>
-		class EnableSharedHandleFromThis
-		{
-			//SharedHandle<T> m_handle;
-		};
-		template<class T>
-		class EnableHandleFromThis
-        {
-		    // Handle<T> m_handle;
-        };
-
-		template<class T, class ...Args_t>
-		Handle<T> Alloc(const Args_t&... args)
-		{
-            const auto handle = AllocImpl<T>(m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
-
-            auto bytesForHandle = reinterpret_cast<unsigned char*>(derefHandle(handle));
-            // invoke T's constructor via placement new on allocated bytes
-            auto allocdT = new (bytesForHandle) T(args...);
-
-            using SetHandleFunctor_t = typename std::conditional<std::is_base_of<EnableHandleFromThis<T>, T>::value, SetHandleReal<T>, SetHandleNoOp<T>>::type;
-            auto derefedAllocd = derefHandle(handle);
-            SetHandleFunctor_t::SetHandle(*derefedAllocd, handle);
-
-            return handle;
-		}
-
-        template<class T, class ...Args_t>
-        Handle<T> AllocExp(const Args_t&... args)
-        {
-            const auto handle = AllocImpl<T>(m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
-
-            auto bytesForHandle = reinterpret_cast<unsigned char*>(derefHandle(handle));
-            // invoke T's constructor via placement new on allocated bytes
-            auto allocdT = new (bytesForHandle) T(args...);
-
-            using SetHandleFunctor_t = typename std::conditional<std::is_base_of<EnableHandleFromThis<T>, T>::value, SetHandleReal<T>, SetHandleNoOp<T>>::type;
-            auto derefedAllocd = derefHandle(handle);
-            SetHandleFunctor_t::SetHandle(*derefedAllocd, handle);
-
-            return handle;
+    void DecrementRefCount() {
+      if (m_isAttached && m_wrappedHandle != Handle<T>()) {
+        auto derefdRefCount = m_pool->derefHandle(m_refCountHandle);
+        if (--(*derefdRefCount) == 0) {
+          m_pool->Dealloc(m_refCountHandle);
+          m_pool->Dealloc(m_wrappedHandle);
         }
+      }
+    }
 
-		template<class T>
-		ArrayHandle<T> AllocArray(const size_t arraySize, const T& initialValue = T())
-		{
-            return AllocArrayImpl<T>(arraySize, initialValue, m_smallBin, m_mediumBin,
-                    m_largeBin, m_extraLargeBin);
-		}
+    Handle<T> m_wrappedHandle;
+    PortableMemPool *m_pool;
+    Handle<std::atomic<size_t>> m_refCountHandle;
 
-		template<class T, class ...Args_t>
-		SharedHandle<T> AllocShared(const Args_t&... args)
-		{
-			SharedHandle<T> result(Alloc<T, Args_t...>(args...), this);
+    bool m_isAttached = true;
+  };
 
-			using SetHandleFunctor_t = typename std::conditional<std::is_base_of<EnableSharedHandleFromThis<T>, T>::value, SetSharedHandleReal<T>, SetHandleNoOp<T>>::type;
-			auto derefedAllocd = derefHandle(result);
-			SetHandleFunctor_t::SetHandle(*derefedAllocd, result);
+  // Implementers must define a public m_handle member.
+  // Can't define it for you here because then your class would not be a
+  // standard layout class :(
+  template <class T> class EnableSharedHandleFromThis {
+    // SharedHandle<T> m_handle;
+  };
+  template <class T> class EnableHandleFromThis {
+    // Handle<T> m_handle;
+  };
 
-			// TODO move the decrement ref count call into setHandleFunctor.SetHandle and only do it in SetSharedHandleReal
-			result.DecrementRefCount();
+  template <class T, class... Args_t> Handle<T> Alloc(const Args_t &... args) {
+    const auto handle =
+        AllocImpl<T>(m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
 
-			return result;
-		}
+    auto bytesForHandle =
+        reinterpret_cast<unsigned char *>(derefHandle(handle));
+    // invoke T's constructor via placement new on allocated bytes
+    auto allocdT = new (bytesForHandle) T(args...);
 
-		template<class T>
-		void Dealloc(const Handle<T>& handle)
-		{
-            DeallocImpl(handle, m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
-		}
+    using SetHandleFunctor_t = typename std::conditional<
+        std::is_base_of<EnableHandleFromThis<T>, T>::value, SetHandleReal<T>,
+        SetHandleNoOp<T>>::type;
+    auto derefedAllocd = derefHandle(handle);
+    SetHandleFunctor_t::SetHandle(*derefedAllocd, handle);
 
-		template<class T>
-		void DeallocArray(const ArrayHandle<T>& arrayHandle)
-		{
-            DeallocArrayImpl(arrayHandle, m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
-		}
+    return handle;
+  }
 
-		template<class T>
-		T* derefHandle(const Handle<T>& handle)
-		{
-			return derefHandleImpl(handle, m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
-		}
+  template <class T, class... Args_t>
+  Handle<T> AllocExp(const Args_t &... args) {
+    const auto handle =
+        AllocImpl<T>(m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
 
-		template<class T>
-		T* derefHandle(const SharedHandle<T>& handle)
-		{
-			return derefHandle(handle.m_wrappedHandle);
-		}
+    auto bytesForHandle =
+        reinterpret_cast<unsigned char *>(derefHandle(handle));
+    // invoke T's constructor via placement new on allocated bytes
+    auto allocdT = new (bytesForHandle) T(args...);
 
-		template<class T>
-		T* derefHandle(const ArrayHandle<T>& handle)
-		{
-			return derefHandle(handle.m_handle);
-		}
+    using SetHandleFunctor_t = typename std::conditional<
+        std::is_base_of<EnableHandleFromThis<T>, T>::value, SetHandleReal<T>,
+        SetHandleNoOp<T>>::type;
+    auto derefedAllocd = derefHandle(handle);
+    SetHandleFunctor_t::SetHandle(*derefedAllocd, handle);
 
-		size_t GetTotalAllocationCount()
-        {
-		    return GetTotalAllocationCountImpl(m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
-        }
+    return handle;
+  }
 
-	private:
-		struct ListNode
-		{
-			ListNode(const size_t beginIndex) : m_beginIndex(beginIndex) {}
-			ListNode() : m_beginIndex(0), m_nextNode(0) {}
-			bool operator==(const ListNode& other)
-			{
-				return m_beginIndex == other.m_beginIndex &&
-					m_nextNode == other.m_nextNode &&
-					m_indexInStorage == other.m_indexInStorage;
-			}
+  template <class T>
+  ArrayHandle<T> AllocArray(const size_t arraySize,
+                            const T &initialValue = T()) {
+    return AllocArrayImpl<T>(arraySize, initialValue, m_smallBin, m_mediumBin,
+                             m_largeBin, m_extraLargeBin);
+  }
 
-			size_t m_beginIndex;
-			size_t m_nextNode;
-			size_t m_indexInStorage;
-		};
+  template <class T, class... Args_t>
+  SharedHandle<T> AllocShared(const Args_t &... args) {
+    SharedHandle<T> result(Alloc<T, Args_t...>(args...), this);
 
-		template<size_t AllocSize_i, size_t TotalBytes_i>
-		struct Arena
-		{
-		    static constexpr size_t AllocSize = AllocSize_i;
-		    static constexpr size_t TotalBytes = TotalBytes_i;
+    using SetHandleFunctor_t = typename std::conditional<
+        std::is_base_of<EnableSharedHandleFromThis<T>, T>::value,
+        SetSharedHandleReal<T>, SetHandleNoOp<T>>::type;
+    auto derefedAllocd = derefHandle(result);
+    SetHandleFunctor_t::SetHandle(*derefedAllocd, result);
 
-		    static_assert(TotalBytes_i % AllocSize_i == 0, "Expected TotalBytes to be a multiple of the allocation size");
-            Arena()
-            {
-                for (size_t i = 0; i < m_listNodeStorage.size(); ++i)
-                {
-                    auto& listNode = m_listNodeStorage[i];
-                    listNode.m_beginIndex = i * AllocSize_i;
-                    listNode.m_indexInStorage = i;
-                    listNode.m_nextNode = i + 1;
-                }
+    // TODO move the decrement ref count call into setHandleFunctor.SetHandle
+    // and only do it in SetSharedHandleReal
+    result.DecrementRefCount();
 
-                m_freeListHead = m_listNodeStorage[0];
-                m_freeListTail.m_beginIndex = m_bytes.size() + 1;
-                m_freeListTail.m_nextNode = m_listNodeStorage.size() + 1;
-            }
+    return result;
+  }
 
-			ListNode AllocFromArena()
-            {
-                m_lock.Aquire();
+  template <class T> void Dealloc(const Handle<T> &handle) {
+    DeallocImpl(handle, m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
+  }
 
-                if (m_freeListHead == m_freeListTail)
-                {
-                    m_lock.Release();
-                    return m_freeListHead;
-                }
+  template <class T> void DeallocArray(const ArrayHandle<T> &arrayHandle) {
+    DeallocArrayImpl(arrayHandle, m_smallBin, m_mediumBin, m_largeBin,
+                     m_extraLargeBin);
+  }
 
-                const auto result = m_freeListHead;
-                const auto nextListIndex = m_freeListHead.m_nextNode;
-                if (nextListIndex >= m_listNodeStorage.size())
-                {
-                    m_freeListHead = m_freeListTail;
-                }
-                else
-                {
-                    m_freeListHead = m_listNodeStorage[nextListIndex];
-                }
+  template <class T> T *derefHandle(const Handle<T> &handle) {
+    return derefHandleImpl(handle, m_smallBin, m_mediumBin, m_largeBin,
+                           m_extraLargeBin);
+  }
 
-                ++m_totalAllocations;
+  template <class T> T *derefHandle(const SharedHandle<T> &handle) {
+    return derefHandle(handle.m_wrappedHandle);
+  }
 
-                m_lock.Release();
+  template <class T> T *derefHandle(const ArrayHandle<T> &handle) {
+    return derefHandle(handle.m_handle);
+  }
 
-                return result;
-            }
+  size_t GetTotalAllocationCount() {
+    return GetTotalAllocationCountImpl(m_smallBin, m_mediumBin, m_largeBin,
+                                       m_extraLargeBin);
+  }
 
-			void FreeFromArena(const size_t allocIndex)
-            {
-                m_lock.Aquire();
+private:
+  struct ListNode {
+    ListNode(const size_t beginIndex) : m_beginIndex(beginIndex) {}
+    ListNode() : m_beginIndex(0), m_nextNode(0) {}
+    bool operator==(const ListNode &other) {
+      return m_beginIndex == other.m_beginIndex &&
+             m_nextNode == other.m_nextNode &&
+             m_indexInStorage == other.m_indexInStorage;
+    }
 
-                m_listNodeStorage[allocIndex].m_nextNode = m_freeListHead.m_indexInStorage;
-                m_freeListHead = m_listNodeStorage[allocIndex];
+    size_t m_beginIndex;
+    size_t m_nextNode;
+    size_t m_indexInStorage;
+  };
 
-                --m_totalAllocations;
+  template <size_t AllocSize_i, size_t TotalBytes_i> struct Arena {
+    static constexpr size_t AllocSize = AllocSize_i;
+    static constexpr size_t TotalBytes = TotalBytes_i;
 
-                m_lock.Release();
-            }
+    static_assert(
+        TotalBytes_i % AllocSize_i == 0,
+        "Expected TotalBytes to be a multiple of the allocation size");
+    Arena() {
+      for (size_t i = 0; i < m_listNodeStorage.size(); ++i) {
+        auto &listNode = m_listNodeStorage[i];
+        listNode.m_beginIndex = i * AllocSize_i;
+        listNode.m_indexInStorage = i;
+        listNode.m_nextNode = i + 1;
+      }
 
-			unsigned char* GetBytes(const size_t allocIndex)
-            {
-                const auto& listNodeForAllocIndex = m_listNodeStorage[allocIndex];
-                return &m_bytes[listNodeForAllocIndex.m_beginIndex];
-            }
+      m_freeListHead = m_listNodeStorage[0];
+      m_freeListTail.m_beginIndex = m_bytes.size() + 1;
+      m_freeListTail.m_nextNode = m_listNodeStorage.size() + 1;
+    }
 
-			std::array<unsigned char, TotalBytes_i> m_bytes;
-			std::array<ListNode, TotalBytes_i / AllocSize_i> m_listNodeStorage;
+    ListNode AllocFromArena() {
+      m_lock.Aquire();
 
-			ListNode m_freeListHead;
-			ListNode m_freeListTail;
-			SpinLock m_lock;
+      if (m_freeListHead == m_freeListTail) {
+        m_lock.Release();
+        return m_freeListHead;
+      }
 
-			size_t m_totalAllocations = 0;
-		};
+      const auto result = m_freeListHead;
+      const auto nextListIndex = m_freeListHead.m_nextNode;
+      if (nextListIndex >= m_listNodeStorage.size()) {
+        m_freeListHead = m_freeListTail;
+      } else {
+        m_freeListHead = m_listNodeStorage[nextListIndex];
+      }
 
-		template<class T>
-		struct SetHandleNoOp
-		{
-			static void SetHandle(T&, const Handle<T>&) {}
-		};
+      ++m_totalAllocations;
 
-		template<class T>
-		struct SetSharedHandleReal
-		{
-			static void SetHandle(EnableSharedHandleFromThis<T>& target, const SharedHandle<T>& handle)
-			{
-				auto targetAsOriginalClass = static_cast<T*>(&target);
-				targetAsOriginalClass->m_handle = handle;
-				targetAsOriginalClass->m_handle.Detach();
-			}
-		};
+      m_lock.Release();
 
-		template<class T>
-		struct SetHandleReal
-        {
-		    static void SetHandle(EnableHandleFromThis<T>& target, const Handle<T>& handle)
-            {
-		        auto targetAsSubclass = static_cast<T*>(&target);
-		        targetAsSubclass->m_handle = handle;
-            }
-        };
+      return result;
+    }
 
-        template<class T,
-                size_t allocSize,
-                size_t totalSize,
-                size_t ...allocSizes,
-                size_t ...totalSizes>
-        Handle<T> AllocImpl(Arena<allocSize, totalSize>& arena, Arena<allocSizes, totalSizes>&... arenas)
-        {
-            if (allocSize >= sizeof(T))
-            {
-                const auto allocdListNode = arena.AllocFromArena();
-                const Handle<T> resultHandle(allocdListNode.m_indexInStorage,
-                        std::remove_reference<decltype(arena)>::type::AllocSize);
-                return resultHandle;
-            } else {
-                return AllocImpl<T>(arenas...);
-            }
-        }
+    void FreeFromArena(const size_t allocIndex) {
+      m_lock.Aquire();
 
-        template<class T,
-                size_t allocSize,
-                size_t totalSize>
-        Handle<T> AllocImpl(Arena<allocSize, totalSize>& arena)
-        {
-            if (allocSize >= sizeof(T))
-            {
-                const auto allocdListNode = arena.AllocFromArena();
-                const Handle<T> resultHandle(allocdListNode.m_indexInStorage,
-                                             std::remove_reference<decltype(arena)>::type::AllocSize);
-                return resultHandle;
-            } else {
-                return Handle<T>();
-            }
-        }
+      m_listNodeStorage[allocIndex].m_nextNode =
+          m_freeListHead.m_indexInStorage;
+      m_freeListHead = m_listNodeStorage[allocIndex];
 
-        template<class T,
-                size_t allocSize,
-                size_t totalSize,
-                size_t ...allocSizes,
-                size_t ...totalSizes>
-        ArrayHandle<T> AllocArrayImpl(const size_t arraySize, const T& initialValue, Arena<allocSize, totalSize>& arena, Arena<allocSizes, totalSizes>&... arenas)
-        {
-            if (allocSize >= sizeof(T) * arraySize)
-            {
-                const auto allocdListNode = arena.AllocFromArena();
-                const ArrayHandle<T> resultHandle(allocdListNode.m_indexInStorage,
-                                                  std::remove_reference<decltype(arena)>::type::AllocSize, arraySize);
+      --m_totalAllocations;
 
-                auto tAlignedValues = derefHandle(resultHandle);
-                for (size_t i = 0; i < arraySize; ++i)
-                {
-                    tAlignedValues[i] = *(new (tAlignedValues + i) T(initialValue));
-                }
+      m_lock.Release();
+    }
 
-                return resultHandle;
-            } else {
-                return AllocArrayImpl(arraySize, initialValue, arenas...);
-            }
-        }
+    unsigned char *GetBytes(const size_t allocIndex) {
+      const auto &listNodeForAllocIndex = m_listNodeStorage[allocIndex];
+      return &m_bytes[listNodeForAllocIndex.m_beginIndex];
+    }
 
-        template<class T,
-                size_t allocSize,
-                size_t totalSize>
-        ArrayHandle<T> AllocArrayImpl(const size_t arraySize, const T& initialValue, Arena<allocSize, totalSize>& arena)
-        {
-            if (allocSize >= sizeof(T) * arraySize)
-            {
-                const auto allocdListNode = arena.AllocFromArena();
-                const ArrayHandle<T> resultHandle(allocdListNode.m_indexInStorage,
-                                                  std::remove_reference<decltype(arena)>::type::AllocSize, arraySize);
+    std::array<unsigned char, TotalBytes_i> m_bytes;
+    std::array<ListNode, TotalBytes_i / AllocSize_i> m_listNodeStorage;
 
-                auto tAlignedValues = derefHandle(resultHandle);
-                for (size_t i = 0; i < arraySize; ++i)
-                {
-                    tAlignedValues[i] = *(new (tAlignedValues + i) T(initialValue));
-                }
+    ListNode m_freeListHead;
+    ListNode m_freeListTail;
+    SpinLock m_lock;
 
-                return resultHandle;
-            } else {
-                return ArrayHandle<T>();
-            }
-        }
+    size_t m_totalAllocations = 0;
+  };
 
-        template<class T,
-                size_t allocSize,
-                size_t totalSize,
-                size_t ...allocSizes,
-                size_t ...totalSizes>
-        void DeallocImpl(const Handle<T>& handle, Arena<allocSize, totalSize>& arena,
-                Arena<allocSizes, totalSizes>&... arenas)
-        {
-            if (allocSize == handle.GetAllocSize())
-            {
-                auto derefedForHandle = derefHandle(handle);
-                // Explicitly call destructor
-                derefedForHandle->~T();
-                arena.FreeFromArena(handle.GetAllocIndex());
-            } else {
-                DeallocImpl(handle, arenas...);
-            }
-        }
+  template <class T> struct SetHandleNoOp {
+    static void SetHandle(T &, const Handle<T> &) {}
+  };
 
-        template<class T,
-                size_t allocSize,
-                size_t totalSize>
-        void DeallocImpl(const Handle<T>& handle, Arena<allocSize, totalSize>& arena)
-        {
-            if (allocSize == handle.GetAllocSize())
-            {
-                auto derefedForHandle = derefHandle(handle);
-                // Explicitly call destructor
-                derefedForHandle->~T();
-                arena.FreeFromArena(handle.GetAllocIndex());
-            }
-        }
+  template <class T> struct SetSharedHandleReal {
+    static void SetHandle(EnableSharedHandleFromThis<T> &target,
+                          const SharedHandle<T> &handle) {
+      auto targetAsOriginalClass = static_cast<T *>(&target);
+      targetAsOriginalClass->m_handle = handle;
+      targetAsOriginalClass->m_handle.Detach();
+    }
+  };
 
-        template<class T,
-                size_t allocSize,
-                size_t totalSize,
-                size_t ...allocSizes,
-                size_t ...totalSizes>
-        void DeallocArrayImpl(const ArrayHandle<T>& arrayHandle, Arena<allocSize, totalSize>& arena,
-                          Arena<allocSizes, totalSizes>&... arenas)
-        {
-            if (allocSize == arrayHandle.m_handle.GetAllocSize()) {
-                const auto &handle = arrayHandle.m_handle;
-                auto derefdHandle = derefHandle(handle);
-                for (size_t i = 0; i < arrayHandle.GetCount(); ++i) {
-                    (derefdHandle[i]).~T();
-                }
+  template <class T> struct SetHandleReal {
+    static void SetHandle(EnableHandleFromThis<T> &target,
+                          const Handle<T> &handle) {
+      auto targetAsSubclass = static_cast<T *>(&target);
+      targetAsSubclass->m_handle = handle;
+    }
+  };
 
-                arena.FreeFromArena(handle.GetAllocIndex());
-            } else {
-                DeallocArrayImpl(arrayHandle, arenas...);
-            }
-        }
+  template <class T, size_t allocSize, size_t totalSize, size_t... allocSizes,
+            size_t... totalSizes>
+  Handle<T> AllocImpl(Arena<allocSize, totalSize> &arena,
+                      Arena<allocSizes, totalSizes> &... arenas) {
+    if (allocSize >= sizeof(T)) {
+      const auto allocdListNode = arena.AllocFromArena();
+      const Handle<T> resultHandle(
+          allocdListNode.m_indexInStorage,
+          std::remove_reference<decltype(arena)>::type::AllocSize);
+      return resultHandle;
+    } else {
+      return AllocImpl<T>(arenas...);
+    }
+  }
 
-        template<class T,
-                size_t allocSize,
-                size_t totalSize>
-        void DeallocArrayImpl(const ArrayHandle<T>& arrayHandle, Arena<allocSize, totalSize>& arena)
-        {
-            if (allocSize == arrayHandle.m_handle.GetAllocSize()) {
-                const auto &handle = arrayHandle.m_handle;
-                auto derefdHandle = derefHandle(handle);
-                for (size_t i = 0; i < arrayHandle.GetCount(); ++i) {
-                    (derefdHandle[i]).~T();
-                }
+  template <class T, size_t allocSize, size_t totalSize>
+  Handle<T> AllocImpl(Arena<allocSize, totalSize> &arena) {
+    if (allocSize >= sizeof(T)) {
+      const auto allocdListNode = arena.AllocFromArena();
+      const Handle<T> resultHandle(
+          allocdListNode.m_indexInStorage,
+          std::remove_reference<decltype(arena)>::type::AllocSize);
+      return resultHandle;
+    } else {
+      return Handle<T>();
+    }
+  }
 
-                arena.FreeFromArena(handle.GetAllocIndex());
-            }
-        }
+  template <class T, size_t allocSize, size_t totalSize, size_t... allocSizes,
+            size_t... totalSizes>
+  ArrayHandle<T> AllocArrayImpl(const size_t arraySize, const T &initialValue,
+                                Arena<allocSize, totalSize> &arena,
+                                Arena<allocSizes, totalSizes> &... arenas) {
+    if (allocSize >= sizeof(T) * arraySize) {
+      const auto allocdListNode = arena.AllocFromArena();
+      const ArrayHandle<T> resultHandle(
+          allocdListNode.m_indexInStorage,
+          std::remove_reference<decltype(arena)>::type::AllocSize, arraySize);
 
-        template<class T,
-                size_t allocSize,
-                size_t totalSize,
-                size_t ...allocSizes,
-                size_t ...totalSizes>
-        T* derefHandleImpl(const Handle<T>& handle, Arena<allocSize, totalSize>& arena,
-                       Arena<allocSizes, totalSizes>&... arenas)
-        {
-            if (allocSize == handle.GetAllocSize()) {
-                auto bytesForIndex = arena.GetBytes(handle.GetAllocIndex());
-                return reinterpret_cast<T *>(bytesForIndex);
-            }
+      auto tAlignedValues = derefHandle(resultHandle);
+      for (size_t i = 0; i < arraySize; ++i) {
+        tAlignedValues[i] = *(new (tAlignedValues + i) T(initialValue));
+      }
 
-            return derefHandleImpl(handle, arenas...);
-        }
+      return resultHandle;
+    } else {
+      return AllocArrayImpl(arraySize, initialValue, arenas...);
+    }
+  }
 
-        template<class T,
-                size_t allocSize,
-                size_t totalSize>
-        T* derefHandleImpl(const Handle<T>& handle, Arena<allocSize, totalSize>& arena)
-        {
-            if (allocSize == handle.GetAllocSize()) {
-                auto bytesForIndex = arena.GetBytes(handle.GetAllocIndex());
-                return reinterpret_cast<T *>(bytesForIndex);
-            }
-            else {
-                return nullptr;
-            }
-        }
+  template <class T, size_t allocSize, size_t totalSize>
+  ArrayHandle<T> AllocArrayImpl(const size_t arraySize, const T &initialValue,
+                                Arena<allocSize, totalSize> &arena) {
+    if (allocSize >= sizeof(T) * arraySize) {
+      const auto allocdListNode = arena.AllocFromArena();
+      const ArrayHandle<T> resultHandle(
+          allocdListNode.m_indexInStorage,
+          std::remove_reference<decltype(arena)>::type::AllocSize, arraySize);
 
-        template<size_t allocSize,
-                size_t totalSize,
-                size_t ...allocSizes,
-                size_t ...totalSizes>
-        size_t GetTotalAllocationCountImpl(Arena<allocSize, totalSize>& arena,
-                                           Arena<allocSizes, totalSizes>&... arenas)
-        {
-            size_t totalAllocCount = 0;
+      auto tAlignedValues = derefHandle(resultHandle);
+      for (size_t i = 0; i < arraySize; ++i) {
+        tAlignedValues[i] = *(new (tAlignedValues + i) T(initialValue));
+      }
 
-            {
-                arena.m_lock.Aquire();
-                totalAllocCount += arena.m_totalAllocations;
-                arena.m_lock.Release();
-            }
-            totalAllocCount += GetTotalAllocationCountImpl(arenas...);
+      return resultHandle;
+    } else {
+      return ArrayHandle<T>();
+    }
+  }
 
-            return totalAllocCount;
-        }
+  template <class T, size_t allocSize, size_t totalSize, size_t... allocSizes,
+            size_t... totalSizes>
+  void DeallocImpl(const Handle<T> &handle, Arena<allocSize, totalSize> &arena,
+                   Arena<allocSizes, totalSizes> &... arenas) {
+    if (allocSize == handle.GetAllocSize()) {
+      auto derefedForHandle = derefHandle(handle);
+      // Explicitly call destructor
+      derefedForHandle->~T();
+      arena.FreeFromArena(handle.GetAllocIndex());
+    } else {
+      DeallocImpl(handle, arenas...);
+    }
+  }
 
-        template<size_t allocSize,
-                size_t totalSize>
-        size_t GetTotalAllocationCountImpl(Arena<allocSize, totalSize>& arena)
-        {
-            arena.m_lock.Aquire();
-            const auto result = arena.m_totalAllocations;
-            arena.m_lock.Release();
+  template <class T, size_t allocSize, size_t totalSize>
+  void DeallocImpl(const Handle<T> &handle,
+                   Arena<allocSize, totalSize> &arena) {
+    if (allocSize == handle.GetAllocSize()) {
+      auto derefedForHandle = derefHandle(handle);
+      // Explicitly call destructor
+      derefedForHandle->~T();
+      arena.FreeFromArena(handle.GetAllocIndex());
+    }
+  }
 
-            return result;
-        }
+  template <class T, size_t allocSize, size_t totalSize, size_t... allocSizes,
+            size_t... totalSizes>
+  void DeallocArrayImpl(const ArrayHandle<T> &arrayHandle,
+                        Arena<allocSize, totalSize> &arena,
+                        Arena<allocSizes, totalSizes> &... arenas) {
+    if (allocSize == arrayHandle.m_handle.GetAllocSize()) {
+      const auto &handle = arrayHandle.m_handle;
+      auto derefdHandle = derefHandle(handle);
+      for (size_t i = 0; i < arrayHandle.GetCount(); ++i) {
+        (derefdHandle[i]).~T();
+      }
 
-        static constexpr size_t eightMB = 8388608;
+      arena.FreeFromArena(handle.GetAllocIndex());
+    } else {
+      DeallocArrayImpl(arrayHandle, arenas...);
+    }
+  }
 
-		Arena<sizeof(int), eightMB> m_smallBin;
-		Arena<sizeof(int) * 8, eightMB> m_mediumBin;
-		Arena<sizeof(int) * 16, eightMB> m_largeBin;
-		Arena<sizeof(int) * 512, eightMB> m_extraLargeBin;
-	};
+  template <class T, size_t allocSize, size_t totalSize>
+  void DeallocArrayImpl(const ArrayHandle<T> &arrayHandle,
+                        Arena<allocSize, totalSize> &arena) {
+    if (allocSize == arrayHandle.m_handle.GetAllocSize()) {
+      const auto &handle = arrayHandle.m_handle;
+      auto derefdHandle = derefHandle(handle);
+      for (size_t i = 0; i < arrayHandle.GetCount(); ++i) {
+        (derefdHandle[i]).~T();
+      }
+
+      arena.FreeFromArena(handle.GetAllocIndex());
+    }
+  }
+
+  template <class T, size_t allocSize, size_t totalSize, size_t... allocSizes,
+            size_t... totalSizes>
+  T *derefHandleImpl(const Handle<T> &handle,
+                     Arena<allocSize, totalSize> &arena,
+                     Arena<allocSizes, totalSizes> &... arenas) {
+    if (allocSize == handle.GetAllocSize()) {
+      auto bytesForIndex = arena.GetBytes(handle.GetAllocIndex());
+      return reinterpret_cast<T *>(bytesForIndex);
+    }
+
+    return derefHandleImpl(handle, arenas...);
+  }
+
+  template <class T, size_t allocSize, size_t totalSize>
+  T *derefHandleImpl(const Handle<T> &handle,
+                     Arena<allocSize, totalSize> &arena) {
+    if (allocSize == handle.GetAllocSize()) {
+      auto bytesForIndex = arena.GetBytes(handle.GetAllocIndex());
+      return reinterpret_cast<T *>(bytesForIndex);
+    } else {
+      return nullptr;
+    }
+  }
+
+  template <size_t allocSize, size_t totalSize, size_t... allocSizes,
+            size_t... totalSizes>
+  size_t
+  GetTotalAllocationCountImpl(Arena<allocSize, totalSize> &arena,
+                              Arena<allocSizes, totalSizes> &... arenas) {
+    size_t totalAllocCount = 0;
+
+    {
+      arena.m_lock.Aquire();
+      totalAllocCount += arena.m_totalAllocations;
+      arena.m_lock.Release();
+    }
+    totalAllocCount += GetTotalAllocationCountImpl(arenas...);
+
+    return totalAllocCount;
+  }
+
+  template <size_t allocSize, size_t totalSize>
+  size_t GetTotalAllocationCountImpl(Arena<allocSize, totalSize> &arena) {
+    arena.m_lock.Aquire();
+    const auto result = arena.m_totalAllocations;
+    arena.m_lock.Release();
+
+    return result;
+  }
+
+  static constexpr size_t eightMB = 8388608;
+
+  Arena<sizeof(int), eightMB> m_smallBin;
+  Arena<sizeof(int) * 8, eightMB> m_mediumBin;
+  Arena<sizeof(int) * 16, eightMB> m_largeBin;
+  Arena<sizeof(int) * 512, eightMB> m_extraLargeBin;
+};
 }

@@ -4,30 +4,26 @@
 #include <string>
 #include <vector>
 
-namespace FunGPU
-{
-	class SExpr
-	{
-	public:
-		enum class Type
-		{
-			Symbol,
-			Number,
-			ListOfSExpr
-		};
-		SExpr();
-		SExpr(const std::shared_ptr<std::string>& literalValue);
-		void AddChild(const std::shared_ptr<SExpr>& val);
-		void DebugPrint(unsigned int indentLevel);
-		Type GetType() const { return m_type; }
-		const std::shared_ptr<std::string> GetSymbol() const { return m_stringValue; }
-		const std::shared_ptr<std::vector<std::shared_ptr<SExpr>>> GetChildren() const { return m_sexprValue; }
-		double GetDoubleVal() const { return m_numValue; }
+namespace FunGPU {
+class SExpr {
+public:
+  enum class Type { Symbol, Number, ListOfSExpr };
+  SExpr();
+  SExpr(const std::shared_ptr<std::string> &literalValue);
+  void AddChild(const std::shared_ptr<SExpr> &val);
+  void DebugPrint(unsigned int indentLevel);
+  Type GetType() const { return m_type; }
+  const std::shared_ptr<std::string> GetSymbol() const { return m_stringValue; }
+  const std::shared_ptr<std::vector<std::shared_ptr<SExpr>>>
+  GetChildren() const {
+    return m_sexprValue;
+  }
+  double GetDoubleVal() const { return m_numValue; }
 
-	private:
-		Type m_type;
-		std::shared_ptr<std::string> m_stringValue;
-		double m_numValue;
-		std::shared_ptr<std::vector<std::shared_ptr<SExpr>>> m_sexprValue;
-	};
+private:
+  Type m_type;
+  std::shared_ptr<std::string> m_stringValue;
+  double m_numValue;
+  std::shared_ptr<std::vector<std::shared_ptr<SExpr>>> m_sexprValue;
+};
 }
