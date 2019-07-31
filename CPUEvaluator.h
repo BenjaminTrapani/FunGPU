@@ -1,10 +1,9 @@
 #include "RuntimeBlock.h"
 #include "Compiler.h"
 #include "PortableMemPool.h"
-#include <mutex>
 #include <array>
 #include <memory>
-#include <SYCL\sycl.hpp>
+#include <SYCL/sycl.hpp>
 
 namespace FunGPU
 {
@@ -16,14 +15,23 @@ namespace FunGPU
 		using RuntimeBlock_t = RuntimeBlock<DependencyTracker>;
 
 	    class DependencyTracker
-		{
+        {
+	        friend class CPUEvaluator;
 		public:
 			DependencyTracker() : m_activeBlockCount(0) {}
 			void AddActiveBlock(const RuntimeBlock_t::SharedRuntimeBlockHandle_t& block);
-
+            unsigned int GetActiveBlockCount() {
+                return m_activeBlockCount.load();
+            }
+            void ResetActiveBlockCount() {
+                m_activeBlockCount.store(0);
+            }
+            RuntimeBlock_t::SharedRuntimeBlockHandle_t GetBlockAtIndex(const unsigned int index) {
+                return m_newActiveBlocks[index];
+            }
 		private:
 			std::array<RuntimeBlock_t::SharedRuntimeBlockHandle_t, 4096> m_newActiveBlocks;
-			std::atomic<size_t> m_activeBlockCount;
+			std::atomic<unsigned int> m_activeBlockCount;
 		};
 
 		CPUEvaluator(Compiler::ASTNodeHandle rootNode,
@@ -36,7 +44,7 @@ namespace FunGPU
 		std::shared_ptr<PortableMemPool> m_memPool;
 		PortableMemPool::Handle<RuntimeBlock_t::RuntimeValue> m_resultValue;
 		std::vector<RuntimeBlock_t::SharedRuntimeBlockHandle_t> m_currentBlocks;
-		cl::sycl::buffer<DependencyTracker> m_dependencyTracker;
+		std::shared_ptr<DependencyTracker> m_dependencyTracker;
 
 		cl::sycl::queue m_workQueue;
 	};

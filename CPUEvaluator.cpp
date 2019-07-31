@@ -7,6 +7,7 @@ using namespace cl::sycl;
 namespace FunGPU
 {
 	class init_first_block;
+    class run_eval_pass;
 
 	void CPUEvaluator::DependencyTracker::AddActiveBlock(const RuntimeBlock_t::SharedRuntimeBlockHandle_t& block)
 	{
@@ -16,52 +17,77 @@ namespace FunGPU
 	CPUEvaluator::CPUEvaluator(const Compiler::ASTNodeHandle rootNode,
 		const std::shared_ptr<PortableMemPool>& memPool): m_rootASTNode(rootNode),
 		m_memPool(memPool),
-		m_dependencyTracker(cl::sycl::range<1>(1))
+		m_dependencyTracker(std::make_shared<DependencyTracker>())
 	{
+	    std::cout << std::endl;
 		std::cout << "Running on "
 			<< m_workQueue.get_device().get_info<info::device::name>()
 			<< std::endl;
 
-		// Buffer is not a standard layout class, so can't have it as member on PortableMemPool.
-		// TODO create a PortableMemPoolStorage block that contains the buffers and data structures. Provide 
-		// templated accessors for PortableMemPoolStorage that contain most of the logic in mem pool now but 
-		// that create either device or host accessors that last for the duration of their instance based on the input
-		// mem pool storage block. Create the PortableMemPool instance here. Since it only contains accessors
-		// and no large blocks of data, it is trivially copyable so no need to muck with passing around
-		// references to the mem pool. Can simply pass around copies of the one backed by the storage.
-		m_resultValue = m_memPool->Alloc<cl::sycl::access::target::host_buffer, RuntimeBlock_t::RuntimeValue>();
+		try {
+            m_resultValue = m_memPool->Alloc<RuntimeBlock_t::RuntimeValue>();
+            {
+                buffer<PortableMemPool> memPoolBuff(m_memPool, range<1>(1));
+                buffer<DependencyTracker> dependencyTrackerBuff(m_dependencyTracker, range<1>(1));
+                buffer<RuntimeBlock_t::SharedRuntimeBlockHandle_t> workingBlocksBuff(range<1>(m_dependencyTracker->m_newActiveBlocks.size()));
+                auto resultValueRefCpy = m_resultValue;
+                m_workQueue.submit([&](handler &cgh) {
+                    auto memPoolWrite = memPoolBuff.get_access<access::mode::read_write>(cgh);
+                    auto dependenyTracker = dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
+                    cgh.single_task<class init_first_block>(
+                            [memPoolWrite, dependenyTracker, resultValueRefCpy, rootNode]() {
+                                const RuntimeBlock_t::SharedRuntimeBlockHandle_t emptyBlock;
+                                const auto sharedInitialBlock = memPoolWrite[0].Alloc<RuntimeBlock_t>(rootNode,
+                                                                                                      emptyBlock,
+                                                                                                      emptyBlock,
+                                                                                                      dependenyTracker,
+                                                                                                      resultValueRefCpy,
+                                                                                                      memPoolWrite);
+                                dependenyTracker[0].AddActiveBlock(sharedInitialBlock);
+                            });
+                });
 
-		buffer<PortableMemPool> memPoolBuff(m_memPool.get(), range<1>(1));
+                while (true) {
+                    unsigned int numActiveBlocks = 0;
+                    {
+                        auto hostDepTracker = dependencyTrackerBuff.get_access<access::mode::read_write>();
+                        numActiveBlocks = hostDepTracker[0].GetActiveBlockCount();
+                        hostDepTracker[0].ResetActiveBlockCount();
+                        auto workingBlocksAcc = workingBlocksBuff.get_access<access::mode::read_write>();
+                        //TODO make this copy parallel, do it on device.
+                        for (size_t i = 0; i < numActiveBlocks; ++i)
+                        {
+                            workingBlocksAcc[i] = hostDepTracker[0].GetBlockAtIndex(i);
+                        }
+                    }
 
-		auto resultValueRefCpy = m_resultValue;
-		m_workQueue.submit([&](handler& cgh) {
-			{
-				auto memPoolWriteHost = memPoolBuff.get_access<access::mode::read_write, access::target::host_buffer>(cgh);
-				memPoolWriteHost[0].ConfigureForDeviceAccess(cgh);
-			}
-
-			auto memPoolWrite = memPoolBuff.get_access<access::mode::read_write>(cgh);
-			auto dependenyTracker = m_dependencyTracker.get_access<access::mode::read_write>(cgh);
-
-			/*const RuntimeBlock_t::SharedRuntimeBlockHandle_t emptyBlock;
-			PortableMemPool* memPoolRef = &memPoolWrite[0];
-			const auto sharedInitialBlock = memPoolWrite[0].AllocShared<RuntimeBlock_t>(rootNode, emptyBlock,
-				emptyBlock, dependencyTracker, resultValueAcc[0], memPoolRef);
-			newActiveBlocksWrite[0] = sharedInitialBlock;*/
-
-			cgh.single_task<class init_first_block> ([&cgh, memPoolWrite, dependenyTracker, resultValueRefCpy, rootNode]() {
-				const RuntimeBlock_t::SharedRuntimeBlockHandle_t emptyBlock;
-				const auto sharedInitialBlock = memPoolWrite[0].AllocShared<RuntimeBlock_t>(rootNode, emptyBlock,
-					emptyBlock, dependenyTracker, resultValueRefCpy, memPoolWrite, &cgh);
-				dependenyTracker[0].AddActiveBlock(sharedInitialBlock);
-			});
-
-			//memPoolWrite[0].SetDeviceHandler(cgh);
-		});
-		
+                    if (numActiveBlocks > 0) {
+                        m_workQueue.submit([&](handler &cgh) {
+                            auto memPoolWrite = memPoolBuff.get_access<access::mode::read_write>(cgh);
+                            auto dependenyTracker = dependencyTrackerBuff.get_access<access::mode::read_write>(
+                                    cgh);
+                            auto workingBlocksAcc = workingBlocksBuff.get_access<access::mode::read>(cgh);
+                            cgh.parallel_for<class run_eval_pass>(cl::sycl::range<1>(numActiveBlocks),
+                                                                  [dependenyTracker, memPoolWrite, workingBlocksAcc](
+                                                                          item<1> itm) {
+                                                                      auto currentBlock = workingBlocksAcc[itm.get_linear_id()];
+                                                                      auto derefdCurrentBlock = memPoolWrite[0].derefHandle(
+                                                                              currentBlock);
+                                                                      derefdCurrentBlock->SetMemPool(memPoolWrite);
+                                                                      derefdCurrentBlock->PerformEvalPass();
+                                                                  });
+                            std::cout << "Completed eval pass" << std::endl;
+                        });
+                    } else {
+                        break;
+                    }
+                    m_workQueue.wait();
+                }
+            }
+        } catch (cl::sycl::exception e) {
+		    std::cerr << "Sycl exception: " << e.what() << std::endl;
+		}
 		m_workQueue.wait();
-
-		//m_memPool->ClearDeviceHandler();
 	}
 
 	CPUEvaluator::~CPUEvaluator()

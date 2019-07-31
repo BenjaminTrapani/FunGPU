@@ -8,16 +8,14 @@ using namespace FunGPU;
 
 int main(int argc, char** argv)
 {
-	Parser parser("TestInlineCalls.fgpu");
+	Parser parser("MergeSort.fgpu");
 	auto parsedResult = parser.ParseProgram();
 	parsedResult->DebugPrint(0);
 
 	std::cout << std::endl;
 	std::cout << std::endl;
 
-	const auto poolSize = static_cast<size_t>(pow(2, 29));
-	auto memPool = std::make_shared<PortableMemPool>(std::vector<std::pair<size_t, size_t>>{ {8, poolSize}, { 64, poolSize }, 
-		{ 512, poolSize }, { 8192, poolSize }});
+	auto memPool = std::make_shared<PortableMemPool>();
 	Compiler compiler(parsedResult, memPool);
 	auto compiledResult = compiler.Compile();
 	compiler.DebugPrintAST(compiledResult);

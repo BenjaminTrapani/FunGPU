@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.4.3)
 
 project(FunGPU)
 
-set(ComputeCpp_DIR "C:/Program Files/Codeplay/ComputeCpp/")
+set(ComputeCpp_DIR "/home/benjamintrapani/libs/ComputeCpp-CE-1.1.4-Ubuntu-16.04-x86_64")
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/Modules)
 
@@ -19,9 +19,7 @@ add_sycl_to_target(
     TARGET "FunGPU"
     SOURCES ${SOURCE_LIST})
 
-set_property(TARGET FunGPU PROPERTY CXX_STANDARD 17)
-
-add_subdirectory(TestSycl)
+set_property(TARGET FunGPU PROPERTY CXX_STANDARD 14)
 
 configure_file(TestProgram.fgpu TestProgram.fgpu COPYONLY)
 configure_file(FastGetNPrimeSum.fgpu FastGetNPrimeSum.fgpu COPYONLY)
@@ -30,3 +28,4 @@ configure_file(MergeSort.fgpu MergeSort.fgpu COPYONLY)
 configure_file(TestInlineCalls.fgpu TestInlineCalls.fgpu COPYONLY)
 configure_file(TestMultiList.fgpu TestMultiList.fgpu COPYONLY)
 configure_file(TestMultiLetRec.fgpu TestMultiLetRec.fgpu COPYONLY)
+configure_file(TestLinear.fgpu TestLinear.fgpu COPYONLY)

@@ -17,9 +17,9 @@ namespace FunGPU
 		{
 			while (m_head != PortableMemPool::Handle<ListNode>())
 			{
-				auto derefdHead = m_portableMemPool->derefHandle(m_head);
+				auto derefdHead = m_portableMemPool[0].derefHandle(m_head);
 				auto nextRef = derefdHead->m_next;
-				m_portableMemPool->Dealloc(m_head);
+				m_portableMemPool[0].Dealloc(m_head);
 				m_head = nextRef;
 			}
 		}
@@ -30,8 +30,8 @@ namespace FunGPU
 		}
 		void push_front(const T& val)
 		{
-			const auto newNodeHandle = m_portableMemPool->Alloc<ListNode>(val);
-			auto newNode = m_portableMemPool->derefHandle(newNodeHandle);
+			const auto newNodeHandle = m_portableMemPool[0].template Alloc<ListNode>(val);
+			auto newNode = m_portableMemPool[0].derefHandle(newNodeHandle);
 
 			newNode->m_next = m_head;
 			m_head = newNodeHandle;
@@ -45,19 +45,20 @@ namespace FunGPU
 
 		T& derefFront()
 		{
-			return *m_portableMemPool->derefHandle(front());
+			return *m_portableMemPool[0].derefHandle(front());
 		}
 
 		void pop_front()
 		{
 			if (m_head == PortableMemPool::Handle<ListNode>())
 			{
-				throw std::invalid_argument("Cannot delete head from list when it doesn't exist");
+			    return;
+				//throw std::invalid_argument("Cannot delete head from list when it doesn't exist");
 			}
 
-			auto derefdHead = m_portableMemPool->derefHandle(m_head);
+			auto derefdHead = m_portableMemPool[0].derefHandle(m_head);
 			auto nextHead = derefdHead->m_next;
-			m_portableMemPool->Dealloc(m_head);
+			m_portableMemPool[0].Dealloc(m_head);
 			m_head = nextHead;
 			--m_listSize;
 		}
@@ -67,13 +68,14 @@ namespace FunGPU
 			auto tempHead = m_head;
 			while (index > 0 && tempHead != PortableMemPool::Handle<ListNode>())
 			{
-				auto tempHeadDerefd = m_portableMemPool->derefHandle(tempHead);
+				auto tempHeadDerefd = m_portableMemPool[0].derefHandle(tempHead);
 				tempHead = tempHeadDerefd->m_next;
 				--index;
 			}
 			if (tempHead == PortableMemPool::Handle<ListNode>())
 			{
-				throw std::invalid_argument("Index out of range in list");
+			    return PortableMemPool::Handle<T>();
+				//throw std::invalid_argument("Index out of range in list");
 			}
 			return tempHead;
 		}
