@@ -60,11 +60,12 @@ namespace FunGPU
         }
 	}
 
-	CPUEvaluator::RuntimeBlock_t::RuntimeValue CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle& rootNode)
+	CPUEvaluator::RuntimeBlock_t::RuntimeValue CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle& rootNode,
+                                                                             unsigned int& maxConcurrentBlocksDuringExec)
 	{
         CreateFirstBlock(rootNode);
 
-	    unsigned int maxConcurrentBlocksInExec = 0;
+        maxConcurrentBlocksDuringExec = 0;
         try {
             buffer<RuntimeBlock_t::SharedRuntimeBlockHandle_t> workingBlocksBuff(range<1>(m_dependencyTracker->m_newActiveBlocks.size()));
             while (true) {
@@ -81,7 +82,7 @@ namespace FunGPU
                     }
                 }
 
-                maxConcurrentBlocksInExec = std::max(numActiveBlocks, maxConcurrentBlocksInExec);
+                maxConcurrentBlocksDuringExec = std::max(numActiveBlocks, maxConcurrentBlocksDuringExec);
 
                 if (numActiveBlocks > 0) {
                     m_workQueue.submit([&](handler &cgh) {
@@ -109,7 +110,6 @@ namespace FunGPU
             std::cerr << "Sycl exception: " << e.what() << std::endl;
         }
 
-        std::cout << "Max concurrent blocks during exec: " << maxConcurrentBlocksInExec << std::endl;
 		auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>();
 		return *memPoolAcc[0].derefHandle(m_resultValue);
 	}

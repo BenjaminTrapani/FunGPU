@@ -24,9 +24,6 @@ namespace FunGPU
 	std::shared_ptr<SExpr> Parser::ParseProgram()
 	{
 		auto stringExprs = GetStringExprs();
-		stringExprs->DebugPrint();
-		std::cout << std::endl;
-
 		return GetSExprFromStringExprs(stringExprs);
 	}
 

@@ -36,7 +36,8 @@ namespace FunGPU
 
 		CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool);
 		~CPUEvaluator();
-		RuntimeBlock_t::RuntimeValue EvaluateProgram(const Compiler::ASTNodeHandle& rootNode);
+		RuntimeBlock_t::RuntimeValue EvaluateProgram(const Compiler::ASTNodeHandle& rootNode,
+		        unsigned int& maxConcurrentBlocksDuringExec);
         cl::sycl::buffer<PortableMemPool> GetMemPoolBuffer() const {
             return m_memPoolBuff;
         }

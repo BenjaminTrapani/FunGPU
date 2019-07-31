@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.4.3)
 
 project(FunGPU)
 
+enable_testing()
+
 set(ComputeCpp_DIR "/home/benjamintrapani/libs/ComputeCpp-CE-1.1.4-Ubuntu-16.04-x86_64")
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/Modules)
@@ -15,7 +17,11 @@ include_directories(SYSTEM "${OpenCL_INCLUDE_DIR}")
 FILE(GLOB SOURCE_LIST *.cpp *.h *.hpp)
 add_executable(FunGPU ${SOURCE_LIST})
 
+add_subdirectory(Core)
 add_subdirectory(TestPrograms)
+add_subdirectory(IntegrationTests)
+
+target_link_libraries(FunGPU FunGPUCore)
 
 add_sycl_to_target(
     TARGET "FunGPU"
