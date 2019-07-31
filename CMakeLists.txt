@@ -15,17 +15,10 @@ include_directories(SYSTEM "${OpenCL_INCLUDE_DIR}")
 FILE(GLOB SOURCE_LIST *.cpp *.h *.hpp)
 add_executable(FunGPU ${SOURCE_LIST})
 
+add_subdirectory(TestPrograms)
+
 add_sycl_to_target(
     TARGET "FunGPU"
     SOURCES ${SOURCE_LIST})
 
 set_property(TARGET FunGPU PROPERTY CXX_STANDARD 14)
-
-configure_file(TestProgram.fgpu TestProgram.fgpu COPYONLY)
-configure_file(FastGetNPrimeSum.fgpu FastGetNPrimeSum.fgpu COPYONLY)
-configure_file(ListExample.fgpu ListExample.fgpu COPYONLY)
-configure_file(MergeSort.fgpu MergeSort.fgpu COPYONLY)
-configure_file(TestInlineCalls.fgpu TestInlineCalls.fgpu COPYONLY)
-configure_file(TestMultiList.fgpu TestMultiList.fgpu COPYONLY)
-configure_file(TestMultiLetRec.fgpu TestMultiLetRec.fgpu COPYONLY)
-configure_file(TestLinear.fgpu TestLinear.fgpu COPYONLY)

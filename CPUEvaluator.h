@@ -34,17 +34,20 @@ namespace FunGPU
 			std::atomic<unsigned int> m_activeBlockCount;
 		};
 
-		CPUEvaluator(Compiler::ASTNodeHandle rootNode,
-			const std::shared_ptr<PortableMemPool>& memPool);
+		CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool);
 		~CPUEvaluator();
-		RuntimeBlock_t::RuntimeValue EvaluateProgram();
+		RuntimeBlock_t::RuntimeValue EvaluateProgram(const Compiler::ASTNodeHandle& rootNode);
+        cl::sycl::buffer<PortableMemPool> GetMemPoolBuffer() const {
+            return m_memPoolBuff;
+        }
 
 	private:
-		Compiler::ASTNodeHandle m_rootASTNode;
-		std::shared_ptr<PortableMemPool> m_memPool;
+	    void CreateFirstBlock(const Compiler::ASTNodeHandle rootNode);
+
 		PortableMemPool::Handle<RuntimeBlock_t::RuntimeValue> m_resultValue;
-		std::vector<RuntimeBlock_t::SharedRuntimeBlockHandle_t> m_currentBlocks;
 		std::shared_ptr<DependencyTracker> m_dependencyTracker;
+        cl::sycl::buffer<PortableMemPool> m_memPoolBuff;
+        cl::sycl::buffer<DependencyTracker> m_dependencyTrackerBuff;
 
 		cl::sycl::queue m_workQueue;
 	};

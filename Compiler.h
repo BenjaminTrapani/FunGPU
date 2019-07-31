@@ -4,6 +4,7 @@
 #include "Types.h"
 #include "Array.hpp"
 #include "PortableMemPool.h"
+#include "SYCL/sycl.hpp"
 
 #include <memory>
 #include <list>
@@ -42,8 +43,8 @@ namespace FunGPU
 		class BindNode : public ASTNode
 		{
 		public:
-			BindNode(const Index_t numBindings, const bool isRec, PortableMemPool* pool) : ASTNode(isRec ? Type::BindRec : Type::Bind), 
-				m_bindings(pool->AllocArray<ASTNodeHandle>(numBindings)) {}
+			BindNode(const Index_t numBindings, const bool isRec, PortableMemPool::HostAccessor_t pool) : ASTNode(isRec ? Type::BindRec : Type::Bind),
+				m_bindings(pool[0].template AllocArray<ASTNodeHandle>(numBindings)) {}
 			PortableMemPool::ArrayHandle<ASTNodeHandle> m_bindings;
 			ASTNodeHandle m_childExpr;
 		};
@@ -102,8 +103,8 @@ namespace FunGPU
 		class CallNode : public ASTNode
 		{
 		public:
-			CallNode(const Index_t argCount, ASTNodeHandle target, PortableMemPool* pool): ASTNode(ASTNode::Type::Call),
-				m_target(target), m_args(pool->AllocArray<ASTNodeHandle>(argCount)) {}
+			CallNode(const Index_t argCount, ASTNodeHandle target, PortableMemPool::HostAccessor_t pool): ASTNode(ASTNode::Type::Call),
+				m_target(target), m_args(pool[0].template AllocArray<ASTNodeHandle>(argCount)) {}
 			ASTNodeHandle m_target;
 			PortableMemPool::ArrayHandle<ASTNodeHandle> m_args;
 		};
@@ -117,25 +118,31 @@ namespace FunGPU
 			std::string m_what;
 		};
 
-		Compiler(std::shared_ptr<const SExpr> sexpr, const std::shared_ptr<PortableMemPool>& pool) : 
+		Compiler(std::shared_ptr<const SExpr> sexpr, cl::sycl::buffer<PortableMemPool> pool) :
 			m_sExpr(sexpr), m_memPool(pool) {}
 
 		ASTNodeHandle Compile()
 		{
 			std::list<std::string> initialBound;
-			return Compile(m_sExpr, initialBound);
+			auto memPoolAcc = m_memPool.get_access<cl::sycl::access::mode::read_write>();
+			return Compile(m_sExpr, initialBound, memPoolAcc);
 		}
 
 		void DebugPrintAST(ASTNodeHandle rootOfAST);
 		void DeallocateAST(const ASTNodeHandle rootOfAST);
 
 	private:
-		ASTNodeHandle Compile(std::shared_ptr<const SExpr> sexpr,
-			std::list<std::string> boundIdentifiers);
-		ASTNodeHandle CompileListOfSExpr(std::shared_ptr<const SExpr> sexpr,
-			std::list<std::string> boundIdentifiers);
+        static void DebugPrintAST(ASTNodeHandle rootOfAST, PortableMemPool::HostAccessor_t memPoolAcc);
+	    static void DeallocateAST(const ASTNodeHandle& handle, PortableMemPool::HostAccessor_t memPoolAcc);
+
+		static ASTNodeHandle Compile(std::shared_ptr<const SExpr> sexpr,
+			std::list<std::string> boundIdentifiers,
+			PortableMemPool::HostAccessor_t memPoolAcc);
+		static ASTNodeHandle CompileListOfSExpr(std::shared_ptr<const SExpr> sexpr,
+			std::list<std::string> boundIdentifiers,
+			PortableMemPool::HostAccessor_t memPoolAcc);
 
 		std::shared_ptr<const SExpr> m_sExpr;
-		std::shared_ptr<PortableMemPool> m_memPool;
+		cl::sycl::buffer<PortableMemPool> m_memPool;
 	};
 }

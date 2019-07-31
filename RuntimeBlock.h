@@ -107,6 +107,11 @@ namespace FunGPU
             m_memPoolDeviceAcc = memPool;
         }
 
+        void SetDependencyTracker(const cl::sycl::accessor<DependencyTracker_t, 1, cl::sycl::access::mode::read_write, cl::sycl::access::target::global_buffer>& depTracker)
+        {
+		    m_depTracker = depTracker;
+        }
+
 		Compiler::ASTNode* GetASTNode()
 		{
 			return m_memPoolDeviceAcc[0].derefHandle(m_astNode);

@@ -19,7 +19,7 @@ namespace FunGPU
 	{
 	public:
         using DeviceAccessor_t = cl::sycl::accessor<PortableMemPool, 1, cl::sycl::access::mode::read_write, cl::sycl::access::target::global_buffer>;
-
+        using HostAccessor_t = cl::sycl::accessor<PortableMemPool, 1, cl::sycl::access::mode::read_write, cl::sycl::access::target::host_buffer>;
 		template<class T>
 		class Handle
 		{
