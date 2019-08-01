@@ -3,12 +3,12 @@ pipeline {
     stages {
         stage('build') {
             steps {
-                sh 'build.sh'
+                sh "bash build.sh"
             }
         }
         stage('test') {
             steps {
-                sh 'test.sh'
+                sh "bash test.sh"
             }
         }
     }
