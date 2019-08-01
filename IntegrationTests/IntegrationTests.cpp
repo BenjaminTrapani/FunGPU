@@ -88,7 +88,7 @@ BOOST_AUTO_TEST_CASE(MultiLetRec) {
 BOOST_AUTO_TEST_CASE(MergeSort) {
   const auto programResult =
       RunProgram("../TestPrograms/MergeSort.fgpu", evaluator, *memPoolBuff);
-  BOOST_REQUIRE_EQUAL(123456, programResult.m_data.doubleVal);
+  BOOST_REQUIRE_EQUAL(12345, programResult.m_data.doubleVal);
 }
 
 BOOST_AUTO_TEST_CASE(CleanUpFixture) {
