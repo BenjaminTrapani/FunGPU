@@ -44,4 +44,4 @@
                                          0
                                          (let ((rem-list-len (my-length (my-rest l))))
                                            (+ (* (my-first l) (my-pow 10 rem-list-len)) (list-to-number (my-rest l))))))))
-            (list-to-number (merge-sort (my-cons 5 (my-cons 1 (my-cons 4 (my-cons 3 (my-cons 2 my-list-terminator)))))))))))))
+            (list-to-number (merge-sort (my-cons 6 (my-cons 5 (my-cons 1 (my-cons 4 (my-cons 3 (my-cons 2 my-list-terminator))))))))))))))
