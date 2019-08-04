@@ -19,14 +19,20 @@ public:
   }
 
   Index_t size() const { return m_listSize; }
-  void push_front(const T &val) {
+  bool push_front(const T &val) {
     const auto newNodeHandle =
         m_portableMemPool[0].template Alloc<ListNode>(val);
+    if (newNodeHandle == PortableMemPool::Handle<ListNode>()) {
+      return false;
+    }
+
     auto newNode = m_portableMemPool[0].derefHandle(newNodeHandle);
 
     newNode->m_next = m_head;
     m_head = newNodeHandle;
     ++m_listSize;
+
+    return true;
   }
 
   PortableMemPool::Handle<T> front() { return m_head; }

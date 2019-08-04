@@ -25,6 +25,7 @@ public:
       Div,
       Equal,
       GreaterThan,
+      Remainder,
       Floor,
       Number,
       Identifier,

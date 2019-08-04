@@ -152,25 +152,9 @@ public:
   template <class T, class... Args_t> Handle<T> Alloc(const Args_t &... args) {
     const auto handle =
         AllocImpl<T>(m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
-
-    auto bytesForHandle =
-        reinterpret_cast<unsigned char *>(derefHandle(handle));
-    // invoke T's constructor via placement new on allocated bytes
-    auto allocdT = new (bytesForHandle) T(args...);
-
-    using SetHandleFunctor_t = typename std::conditional<
-        std::is_base_of<EnableHandleFromThis<T>, T>::value, SetHandleReal<T>,
-        SetHandleNoOp<T>>::type;
-    auto derefedAllocd = derefHandle(handle);
-    SetHandleFunctor_t::SetHandle(*derefedAllocd, handle);
-
-    return handle;
-  }
-
-  template <class T, class... Args_t>
-  Handle<T> AllocExp(const Args_t &... args) {
-    const auto handle =
-        AllocImpl<T>(m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
+    if (handle == Handle<T>()) {
+      return handle;
+    }
 
     auto bytesForHandle =
         reinterpret_cast<unsigned char *>(derefHandle(handle));
@@ -195,7 +179,11 @@ public:
 
   template <class T, class... Args_t>
   SharedHandle<T> AllocShared(const Args_t &... args) {
-    SharedHandle<T> result(Alloc<T, Args_t...>(args...), this);
+    const auto allocdHandle = Alloc<T, Args_t...>(args...);
+    if (allocdHandle == Handle<T>()) {
+      return allocdHandle;
+    }
+    SharedHandle<T> result(allocdHandle, this);
 
     using SetHandleFunctor_t = typename std::conditional<
         std::is_base_of<EnableSharedHandleFromThis<T>, T>::value,
@@ -241,7 +229,7 @@ private:
   struct ListNode {
     ListNode(const size_t beginIndex) : m_beginIndex(beginIndex) {}
     ListNode() : m_beginIndex(0), m_nextNode(0) {}
-    bool operator==(const ListNode &other) {
+    bool operator==(const ListNode &other) const {
       return m_beginIndex == other.m_beginIndex &&
              m_nextNode == other.m_nextNode &&
              m_indexInStorage == other.m_indexInStorage;
@@ -349,6 +337,10 @@ private:
                       Arena<allocSizes, totalSizes> &... arenas) {
     if (allocSize >= sizeof(T)) {
       const auto allocdListNode = arena.AllocFromArena();
+      if (allocdListNode == arena.m_freeListTail) {
+        return Handle<T>();
+      }
+
       const Handle<T> resultHandle(
           allocdListNode.m_indexInStorage,
           std::remove_reference<decltype(arena)>::type::AllocSize);
@@ -362,6 +354,9 @@ private:
   Handle<T> AllocImpl(Arena<allocSize, totalSize> &arena) {
     if (allocSize >= sizeof(T)) {
       const auto allocdListNode = arena.AllocFromArena();
+      if (allocdListNode == arena.m_freeListTail) {
+        return Handle<T>();
+      }
       const Handle<T> resultHandle(
           allocdListNode.m_indexInStorage,
           std::remove_reference<decltype(arena)>::type::AllocSize);
@@ -378,6 +373,9 @@ private:
                                 Arena<allocSizes, totalSizes> &... arenas) {
     if (allocSize >= sizeof(T) * arraySize) {
       const auto allocdListNode = arena.AllocFromArena();
+      if (allocdListNode == arena.m_freeListTail) {
+        return ArrayHandle<T>();
+      }
       const ArrayHandle<T> resultHandle(
           allocdListNode.m_indexInStorage,
           std::remove_reference<decltype(arena)>::type::AllocSize, arraySize);
@@ -398,6 +396,9 @@ private:
                                 Arena<allocSize, totalSize> &arena) {
     if (allocSize >= sizeof(T) * arraySize) {
       const auto allocdListNode = arena.AllocFromArena();
+      if (allocdListNode == arena.m_freeListTail) {
+        return ArrayHandle<T>();
+      }
       const ArrayHandle<T> resultHandle(
           allocdListNode.m_indexInStorage,
           std::remove_reference<decltype(arena)>::type::AllocSize, arraySize);
@@ -520,11 +521,11 @@ private:
     return result;
   }
 
-  static constexpr size_t eightMB = 8388608;
+  static constexpr size_t binSize = 16777216;
 
-  Arena<sizeof(int), eightMB> m_smallBin;
-  Arena<sizeof(int) * 8, eightMB> m_mediumBin;
-  Arena<sizeof(int) * 16, eightMB> m_largeBin;
-  Arena<sizeof(int) * 512, eightMB> m_extraLargeBin;
+  Arena<sizeof(int), binSize> m_smallBin;
+  Arena<sizeof(int) * 8, binSize> m_mediumBin;
+  Arena<sizeof(int) * 16, binSize> m_largeBin;
+  Arena<sizeof(int) * 512, binSize> m_extraLargeBin;
 };
 }

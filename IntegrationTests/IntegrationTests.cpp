@@ -67,6 +67,12 @@ RunProgram(const std::string &path,
 
 BOOST_FIXTURE_TEST_SUITE(IntegrationTests, Fixture)
 
+BOOST_AUTO_TEST_CASE(GraphColoring) {
+  const auto programResult =
+      RunProgram("../TestPrograms/GraphColoring.fgpu", evaluator, *memPoolBuff);
+  BOOST_REQUIRE_EQUAL(6, programResult.m_data.doubleVal);
+}
+
 BOOST_AUTO_TEST_CASE(ListExample) {
   const auto programResult =
       RunProgram("../TestPrograms/ListExample.fgpu", evaluator, *memPoolBuff);

@@ -1,6 +1,7 @@
 #include "CPUEvaluator.h"
 #include <algorithm>
 #include <iostream>
+#include <sstream>
 
 using namespace cl::sycl;
 
@@ -16,7 +17,8 @@ void CPUEvaluator::DependencyTracker::AddActiveBlock(
 CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
     : m_dependencyTracker(std::make_shared<DependencyTracker>()),
       m_memPoolBuff(memPool),
-      m_dependencyTrackerBuff(m_dependencyTracker, range<1>(1)) {
+      m_dependencyTrackerBuff(m_dependencyTracker, range<1>(1))
+/*m_workQueue(host_selector{})*/ {
   std::cout << std::endl;
   std::cout << "Running on "
             << m_workQueue.get_device().get_info<info::device::name>()
@@ -66,6 +68,10 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
   try {
     buffer<RuntimeBlock_t::SharedRuntimeBlockHandle_t> workingBlocksBuff(
         range<1>(m_dependencyTracker->m_newActiveBlocks.size()));
+    buffer<RuntimeBlock_t::Error> errorsPerBlock(
+        range<1>(m_dependencyTracker->m_newActiveBlocks.size()));
+    unsigned int blockErrorIdxData = 0;
+    buffer<unsigned int> blockErrorIdx(&blockErrorIdxData, range<1>(1));
     while (true) {
       unsigned int numActiveBlocks = 0;
       {
@@ -79,6 +85,20 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
         for (size_t i = 0; i < numActiveBlocks; ++i) {
           workingBlocksAcc[i] = hostDepTracker[0].GetBlockAtIndex(i);
         }
+
+        auto hostBlockHasErrorAcc =
+            blockErrorIdx.get_access<access::mode::read_write>();
+        if (hostBlockHasErrorAcc[0] > 0) {
+          auto errorsPerBlockAcc =
+              errorsPerBlock.get_access<access::mode::read_write>();
+          std::stringstream ss;
+          ss << "Block errors in previous pass: " << std::endl;
+          for (unsigned int i = 0; i < hostBlockHasErrorAcc[0]; ++i) {
+            ss << errorsPerBlockAcc[i].GetDescription() << std::endl;
+          }
+          throw std::runtime_error(ss.str());
+        }
+        hostBlockHasErrorAcc[0] = 0;
       }
 
       maxConcurrentBlocksDuringExec =
@@ -92,15 +112,25 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
               m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
           auto workingBlocksAcc =
               workingBlocksBuff.get_access<access::mode::read>(cgh);
+          auto blockErrorIdxAtomicAcc =
+              blockErrorIdx.get_access<access::mode::atomic>(cgh);
+          auto blockErrorAcc =
+              errorsPerBlock.get_access<access::mode::read_write>(cgh);
           cgh.parallel_for<class run_eval_pass>(
               cl::sycl::range<1>(numActiveBlocks),
-              [dependencyTracker, memPoolWrite, workingBlocksAcc](item<1> itm) {
+              [dependencyTracker, memPoolWrite, workingBlocksAcc,
+               blockErrorIdxAtomicAcc, blockErrorAcc](item<1> itm) {
                 auto currentBlock = workingBlocksAcc[itm.get_linear_id()];
                 auto derefdCurrentBlock =
                     memPoolWrite[0].derefHandle(currentBlock);
                 derefdCurrentBlock->SetMemPool(memPoolWrite);
                 derefdCurrentBlock->SetDependencyTracker(dependencyTracker);
-                derefdCurrentBlock->PerformEvalPass();
+                const auto error = derefdCurrentBlock->PerformEvalPass();
+                if (error.GetType() != RuntimeBlock_t::Error::Type::Success) {
+                  cl::sycl::atomic<unsigned int> blockErrorIdxAtomic(
+                      blockErrorIdxAtomicAcc[0]);
+                  blockErrorAcc[blockErrorIdxAtomic.fetch_add(1)] = error;
+                }
               });
         });
       } else {

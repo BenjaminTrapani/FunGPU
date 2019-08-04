@@ -22,7 +22,14 @@ int main(int argc, char **argv) {
       auto parsedResult = parser.ParseProgram();
 
       Compiler compiler(parsedResult, memPoolBuff);
-      auto compiledResult = compiler.Compile();
+      Compiler::ASTNodeHandle compiledResult;
+      try {
+        compiledResult = compiler.Compile();
+      } catch (const Compiler::CompileException &e) {
+        std::cerr << "Failed to compile " << argv[i] << ": " << e.What()
+                  << std::endl;
+        return 1;
+      }
 
       unsigned int maxConcurrentBlockCount;
       const auto programResult =
@@ -31,7 +38,7 @@ int main(int argc, char **argv) {
 
       compiler.DeallocateAST(compiledResult);
     }
-  } catch (cl::sycl::exception e) {
+  } catch (const cl::sycl::exception &e) {
     std::cerr << "Sycl exception in main: " << e.what() << std::endl;
   }
 
