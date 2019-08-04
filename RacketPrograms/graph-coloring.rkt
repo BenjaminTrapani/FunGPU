@@ -44,7 +44,7 @@
                   (graph-edges (gen-edges (my-cons 5 (my-cons 5 my-list-terminator))
                                           (my-cons 3 (my-cons 7 my-list-terminator)) 13 1 24))
                   (make-graph-color-per-vert (lambda (color vert)
-                                               (my-cons color (my-cons vert my-list-terminator)))))
+                                               (my-cons vert (my-cons color my-list-terminator)))))
               (letrec ((get-second-in-pair-for-first-of (lambda (first list-of-pairs)
                                                           (if (my-is-empty? list-of-pairs)
                                                               my-list-terminator
