@@ -1,7 +1,7 @@
 #include "Core/CPUEvaluator.h"
 #include "Core/Compiler.h"
 #include "Core/Parser.h"
-#include "Core/PortableMemPool.h"
+#include "Core/PortableMemPool.hpp"
 #include <iostream>
 
 using namespace FunGPU;

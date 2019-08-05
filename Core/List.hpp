@@ -1,4 +1,4 @@
-#include "PortableMemPool.h"
+#include "PortableMemPool.hpp"
 #include "SYCL/sycl.hpp"
 #include "Types.h"
 #include <memory>
@@ -16,6 +16,10 @@ public:
       m_portableMemPool[0].Dealloc(m_head);
       m_head = nextRef;
     }
+  }
+
+  void SetMemPoolAcc(const PortableMemPool::DeviceAccessor_t &acc) {
+    m_portableMemPool = acc;
   }
 
   Index_t size() const { return m_listSize; }

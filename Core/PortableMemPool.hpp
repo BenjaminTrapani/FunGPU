@@ -79,64 +79,45 @@ public:
   public:
     SharedHandle() {}
 
-    SharedHandle(const Handle<T> &handle, PortableMemPool *pool)
-        : m_wrappedHandle(handle), m_pool(pool),
-          m_refCountHandle(pool->Alloc<std::atomic<size_t>>(1)) {}
-
-    SharedHandle(const SharedHandle<T> &other)
-        : m_wrappedHandle(other.m_wrappedHandle), m_pool(other.m_pool),
-          m_refCountHandle(other.m_refCountHandle) {
-      IncrementRefCount();
-    }
-
-    ~SharedHandle() { DecrementRefCount(); }
-
-    void SetPool(PortableMemPool *pool) { m_pool = pool; }
-
-    void Detach() { m_isAttached = false; }
-
-    SharedHandle<T> operator=(const SharedHandle<T> &other) {
-      DecrementRefCount();
-
-      m_wrappedHandle = other.m_wrappedHandle;
-      m_pool = other.m_pool;
-      m_refCountHandle = other.m_refCountHandle;
-
-      IncrementRefCount();
-
-      return *this;
-    }
+    SharedHandle(const Handle<T> &handle, const Handle<unsigned int> &refCount)
+        : m_wrappedHandle(handle), m_refCountHandle(refCount) {}
 
     bool operator==(const SharedHandle<T> &other) const {
       return m_wrappedHandle == other.m_wrappedHandle;
     }
+
     bool operator!=(const SharedHandle<T> &other) const {
       return !(*this == other);
     }
 
   private:
-    void IncrementRefCount() {
+    void IncrementRefCount(PortableMemPool &pool) const {
       if (m_wrappedHandle != Handle<T>()) {
-        auto derefdRefCount = m_pool->derefHandle(m_refCountHandle);
-        ++(*derefdRefCount);
+        auto derefdRefCount = pool.derefHandle(m_refCountHandle);
+        cl::sycl::multi_ptr<unsigned int,
+                            cl::sycl::access::address_space::global_space>
+            multiPtr(derefdRefCount);
+        cl::sycl::atomic<unsigned int> atomicRefCount(multiPtr);
+        atomicRefCount.fetch_add(1);
       }
     }
 
-    void DecrementRefCount() {
-      if (m_isAttached && m_wrappedHandle != Handle<T>()) {
-        auto derefdRefCount = m_pool->derefHandle(m_refCountHandle);
-        if (--(*derefdRefCount) == 0) {
-          m_pool->Dealloc(m_refCountHandle);
-          m_pool->Dealloc(m_wrappedHandle);
+    void DecrementRefCount(PortableMemPool &pool) const {
+      if (m_wrappedHandle != Handle<T>()) {
+        auto derefdRefCount = pool.derefHandle(m_refCountHandle);
+        cl::sycl::multi_ptr<unsigned int,
+                            cl::sycl::access::address_space::global_space>
+            multiPtr(derefdRefCount);
+        cl::sycl::atomic<unsigned int> atomicRefCount(multiPtr);
+        if (atomicRefCount.fetch_sub(1) == 1) {
+          pool.Dealloc(m_refCountHandle);
+          pool.Dealloc(m_wrappedHandle);
         }
       }
     }
 
     Handle<T> m_wrappedHandle;
-    PortableMemPool *m_pool;
-    Handle<std::atomic<size_t>> m_refCountHandle;
-
-    bool m_isAttached = true;
+    Handle<unsigned int> m_refCountHandle;
   };
 
   // Implementers must define a public m_handle member.
@@ -181,9 +162,15 @@ public:
   SharedHandle<T> AllocShared(const Args_t &... args) {
     const auto allocdHandle = Alloc<T, Args_t...>(args...);
     if (allocdHandle == Handle<T>()) {
-      return allocdHandle;
+      return SharedHandle<T>();
     }
-    SharedHandle<T> result(allocdHandle, this);
+
+    const auto allocdRefCount = Alloc<unsigned int>(1);
+    if (allocdRefCount == Handle<unsigned int>()) {
+      return SharedHandle<T>();
+    }
+
+    SharedHandle<T> result(allocdHandle, allocdRefCount);
 
     using SetHandleFunctor_t = typename std::conditional<
         std::is_base_of<EnableSharedHandleFromThis<T>, T>::value,
@@ -191,11 +178,15 @@ public:
     auto derefedAllocd = derefHandle(result);
     SetHandleFunctor_t::SetHandle(*derefedAllocd, result);
 
-    // TODO move the decrement ref count call into setHandleFunctor.SetHandle
-    // and only do it in SetSharedHandleReal
-    result.DecrementRefCount();
-
     return result;
+  }
+
+  template <class T> void AddRef(const SharedHandle<T> &sharedHandle) {
+    sharedHandle.IncrementRefCount(*this);
+  }
+
+  template <class T> void RemoveRef(const SharedHandle<T> &sharedHandle) {
+    sharedHandle.DecrementRefCount(*this);
   }
 
   template <class T> void Dealloc(const Handle<T> &handle) {
@@ -319,7 +310,6 @@ private:
                           const SharedHandle<T> &handle) {
       auto targetAsOriginalClass = static_cast<T *>(&target);
       targetAsOriginalClass->m_handle = handle;
-      targetAsOriginalClass->m_handle.Detach();
     }
   };
 

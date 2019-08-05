@@ -1,6 +1,6 @@
 #include "Compiler.h"
-#include "PortableMemPool.h"
-#include "RuntimeBlock.h"
+#include "PortableMemPool.hpp"
+#include "RuntimeBlock.hpp"
 #include <SYCL/sycl.hpp>
 #include <array>
 #include <memory>
@@ -15,20 +15,36 @@ public:
     friend class CPUEvaluator;
 
   public:
-    DependencyTracker() : m_activeBlockCount(0) {}
-    void
-    AddActiveBlock(const RuntimeBlock_t::SharedRuntimeBlockHandle_t &block);
+    DependencyTracker() : m_activeBlockCount(0), m_removeRefBlocksCount(0) {}
+    void AddActiveBlock(const RuntimeBlock_t::SharedRuntimeBlockHandle_t &block,
+                        const PortableMemPool::DeviceAccessor_t &memPoolAcc);
+    void MarkRequiresRemoveRef(
+        const RuntimeBlock_t::SharedRuntimeBlockHandle_t &block);
+
     unsigned int GetActiveBlockCount() { return m_activeBlockCount.load(); }
+    unsigned int GetRequiresRemoveRefCount() {
+      return m_removeRefBlocksCount.load();
+    }
     void ResetActiveBlockCount() { m_activeBlockCount.store(0); }
+    void ResetRequiresRemoveRefCount() { m_removeRefBlocksCount.store(0); }
+
     RuntimeBlock_t::SharedRuntimeBlockHandle_t
     GetBlockAtIndex(const unsigned int index) {
       return m_newActiveBlocks[index];
+    }
+    RuntimeBlock_t::SharedRuntimeBlockHandle_t
+    GetRemoveRefBlockAtIndex(const unsigned int index) {
+      return m_requireRemoveRefBlocks[index];
     }
 
   private:
     std::array<RuntimeBlock_t::SharedRuntimeBlockHandle_t, 4096>
         m_newActiveBlocks;
     std::atomic<unsigned int> m_activeBlockCount;
+
+    std::array<RuntimeBlock_t::SharedRuntimeBlockHandle_t, 4096>
+        m_requireRemoveRefBlocks;
+    std::atomic<unsigned int> m_removeRefBlocksCount;
   };
 
   CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool);
