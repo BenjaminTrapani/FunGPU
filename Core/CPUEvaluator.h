@@ -11,7 +11,7 @@ class CPUEvaluator {
 public:
   class DependencyTracker;
 
-  using RuntimeBlock_t = RuntimeBlock<DependencyTracker, 4096>;
+  using RuntimeBlock_t = RuntimeBlock<DependencyTracker, 8192 * 4>;
   using GarbageCollector_t = RuntimeBlock_t::GarbageCollector_t;
 
   class DependencyTracker {
@@ -19,7 +19,8 @@ public:
 
   public:
     DependencyTracker() : m_activeBlockCountData(0) {}
-    void
+
+    CPUEvaluator::RuntimeBlock_t::Error
     AddActiveBlock(const RuntimeBlock_t::SharedRuntimeBlockHandle_t &block);
 
     unsigned int GetActiveBlockCount() {
@@ -69,7 +70,5 @@ private:
   cl::sycl::buffer<DependencyTracker> m_dependencyTrackerBuff;
 
   cl::sycl::queue m_workQueue;
-
-  static_assert(sizeof(GarbageCollector_t) < sizeof(int) * 4194304, "failed");
 };
 }

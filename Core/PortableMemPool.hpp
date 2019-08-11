@@ -422,7 +422,7 @@ private:
     return result;
   }
 
-  static constexpr size_t binSize = 16777216;
+  static constexpr size_t binSize = 16777216 * 16;
 
   Arena<sizeof(int), binSize> m_smallBin;
   Arena<sizeof(int) * 8, binSize> m_mediumBin;

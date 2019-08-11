@@ -21,8 +21,11 @@ public:
         (cl::sycl::multi_ptr<unsigned int,
                              cl::sycl::access::address_space::global_space>(
             &m_managedAllocationsCountData)));
-    m_managedHandles[m_managedHandlesIdx][allocCount.fetch_add(1)] =
-        allocdHandle;
+    const auto indexToAlloc = allocCount.fetch_add(1);
+    if (indexToAlloc >= maxManagedAllocationsCount) {
+      return PortableMemPool::Handle<T>();
+    }
+    m_managedHandles[m_managedHandlesIdx][indexToAlloc] = allocdHandle;
     return allocdHandle;
   }
 

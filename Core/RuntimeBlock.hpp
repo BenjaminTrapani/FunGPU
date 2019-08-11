@@ -235,7 +235,7 @@ public:
             return Error(Error::Type::OutOfMemory,
                          "Failed to alloc dependency on binding");
           }
-          AddDependentActiveBlock(dependencyOnBinding);
+          RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnBinding));
         }
       } else {
         auto depOnExpr = garbageCollector->template AllocManaged(
@@ -245,7 +245,7 @@ public:
           return Error(Error::Type::OutOfMemory,
                        "Failed to allocate inner expression in bind");
         }
-        AddDependentActiveBlock(depOnExpr, false);
+        RETURN_IF_FAILURE(AddDependentActiveBlock(depOnExpr, false));
       }
 
       break;
@@ -268,7 +268,7 @@ public:
           if (dependencyOnArg == SharedRuntimeBlockHandle_t()) {
             return Error(Error::Type::OutOfMemory, "Failed to alloc call arg");
           }
-          AddDependentActiveBlock(dependencyOnArg);
+          RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnArg));
         }
 
         if (!m_runtimeValues.push_front(RuntimeValue())) {
@@ -283,7 +283,7 @@ public:
           return Error(Error::Type::OutOfMemory,
                        "Failed to alloc space for lambda target of call");
         }
-        AddDependentActiveBlock(dependencyOnLambda);
+        RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnLambda));
       } else {
         RuntimeValue lambdaVal = m_runtimeValues.derefFront();
         m_runtimeValues.pop_front();
@@ -303,7 +303,7 @@ public:
                        "Failed to alloc space for lambda eval of call");
         }
         m_bindingParent = lambdaVal.m_data.functionVal.m_bindingParent;
-        AddDependentActiveBlock(lambdaBlock, false);
+        RETURN_IF_FAILURE(AddDependentActiveBlock(lambdaBlock, false));
       }
 
       break;
@@ -325,7 +325,7 @@ public:
           return Error(Error::Type::OutOfMemory,
                        "Failed to allocate dependency on pred for if expr");
         }
-        AddDependentActiveBlock(dependencyOnPred);
+        RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnPred));
       } else {
         auto predValue = m_runtimeValues.derefFront();
         m_runtimeValues.pop_front();
@@ -342,7 +342,7 @@ public:
           return Error(Error::Type::OutOfMemory,
                        "Failed to allocate dependency on branch for if expr");
         }
-        AddDependentActiveBlock(dependencyOnBranch, false);
+        RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnBranch, false));
       }
       break;
     }
@@ -401,7 +401,7 @@ public:
         const bool areEq = lArg == rArg;
         typename RuntimeValue::Data dataVal;
         dataVal.doubleVal = static_cast<double>(areEq);
-        FillDestValue(RuntimeValue::Type::Double, dataVal);
+        RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Double, dataVal));
       }
       break;
     }
@@ -446,7 +446,7 @@ public:
       auto numNode = static_cast<Compiler::NumberNode *>(astNode);
       typename RuntimeValue::Data data;
       data.doubleVal = numNode->m_value;
-      FillDestValue(RuntimeValue::Type::Double, data);
+      RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Double, data));
       break;
     }
     case Compiler::ASTNode::Type::Identifier: {
@@ -454,7 +454,7 @@ public:
       Error error;
       const auto identVal = GetRuntimeValueForIndex(identNode->m_index, error);
       RETURN_IF_FAILURE(error);
-      FillDestValue(identVal->m_type, identVal->m_data);
+      RETURN_IF_FAILURE(FillDestValue(identVal->m_type, identVal->m_data));
       break;
     }
     case Compiler::ASTNode::Type::Lambda: {
@@ -462,7 +462,7 @@ public:
       typename RuntimeValue::Data dataVal;
       dataVal.functionVal = FunctionValue(
           lambdaNode->m_childExpr, m_bindingParent, lambdaNode->m_argCount);
-      FillDestValue(RuntimeValue::Type::Function, dataVal);
+      RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Function, dataVal));
       break;
     }
     default:
@@ -519,7 +519,7 @@ private:
         return Error(Error::Type::OutOfMemory,
                      "Failed to allocate dependency on arg for unary op");
       }
-      AddDependentActiveBlock(dependencyNode);
+      RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyNode));
       added = true;
     } else {
       added = false;
@@ -559,8 +559,8 @@ private:
                      "Failed to allocate left arg depn in binary op");
       }
 
-      AddDependentActiveBlock(rightNodeBlock);
-      AddDependentActiveBlock(leftNodeBlock);
+      RETURN_IF_FAILURE(AddDependentActiveBlock(rightNodeBlock));
+      RETURN_IF_FAILURE(AddDependentActiveBlock(leftNodeBlock));
 
       added = true;
     } else {
@@ -577,7 +577,7 @@ private:
     }
     typename RuntimeValue::Data dataToSet;
     dataToSet.doubleVal = UnaryOpFunctor()(argVal.m_data.doubleVal);
-    FillDestValue(RuntimeValue::Type::Double, dataToSet);
+    RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Double, dataToSet));
 
     return Error();
   }
@@ -594,14 +594,14 @@ private:
     typename RuntimeValue::Data dataVal;
     dataVal.doubleVal =
         BinaryOpFunctor()(lArg.m_data.doubleVal, rArg.m_data.doubleVal);
-    FillDestValue(RuntimeValue::Type::Double, dataVal);
+    RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Double, dataVal));
 
     return Error();
   }
 
-  void AddDependentActiveBlock(const SharedRuntimeBlockHandle_t block,
-                               const bool isNewDependency = true) {
-    m_depTracker[0].AddActiveBlock(block);
+  Error AddDependentActiveBlock(const SharedRuntimeBlockHandle_t block,
+                                const bool isNewDependency = true) {
+    RETURN_IF_FAILURE(m_depTracker[0].AddActiveBlock(block));
     auto derefdBlock = m_memPoolDeviceAcc[0].derefHandle(block);
     if (derefdBlock->m_parent != SharedRuntimeBlockHandle_t() &&
         isNewDependency) {
@@ -613,10 +613,12 @@ private:
               &derefdParent->m_dependenciesRemainingData)));
       atomicDepCount.fetch_add(1);
     }
+
+    return Error();
   }
 
-  void FillDestValue(const typename RuntimeValue::Type type,
-                     const typename RuntimeValue::Data &data) {
+  Error FillDestValue(const typename RuntimeValue::Type type,
+                      const typename RuntimeValue::Data &data) {
     auto destRef = m_memPoolDeviceAcc[0].derefHandle(m_dest);
     destRef->SetValue(type, data);
     if (m_parent != SharedRuntimeBlockHandle_t()) {
@@ -626,9 +628,10 @@ private:
                                cl::sycl::access::address_space::global_space>(
               &derefdParent->m_dependenciesRemainingData)));
       if (atomicDepCount.fetch_add(-1) == 1) {
-        m_depTracker[0].AddActiveBlock(m_parent);
+        RETURN_IF_FAILURE(m_depTracker[0].AddActiveBlock(m_parent));
       }
     }
+    return Error();
   }
 
   Compiler::ASTNodeHandle m_astNode;

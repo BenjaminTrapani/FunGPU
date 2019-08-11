@@ -80,14 +80,6 @@ RunProgram(const std::string &path,
 
 BOOST_FIXTURE_TEST_SUITE(IntegrationTests, Fixture)
 
-/*
-BOOST_AUTO_TEST_CASE(GraphColoring) {
-  const auto programResult =
-      RunProgram("../TestPrograms/GraphColoring.fgpu", evaluator, *memPoolBuff);
-  BOOST_REQUIRE_EQUAL(6, programResult.m_data.doubleVal);
-}
-*/
-
 BOOST_AUTO_TEST_CASE(MultiLet) {
   const auto programResult =
       RunProgram("../TestPrograms/MultiLet.fgpu", evaluator, *memPoolBuff);
@@ -134,6 +126,12 @@ BOOST_AUTO_TEST_CASE(MergeSort) {
   const auto programResult =
       RunProgram("../TestPrograms/MergeSort.fgpu", evaluator, *memPoolBuff);
   BOOST_REQUIRE_EQUAL(123456, programResult.m_data.doubleVal);
+}
+
+BOOST_AUTO_TEST_CASE(GraphColoring) {
+  const auto programResult =
+      RunProgram("../TestPrograms/GraphColoring.fgpu", evaluator, *memPoolBuff);
+  BOOST_REQUIRE_EQUAL(8, programResult.m_data.doubleVal);
 }
 
 BOOST_AUTO_TEST_CASE(CleanUpFixture) {

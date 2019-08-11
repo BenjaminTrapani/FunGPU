@@ -11,18 +11,27 @@ class init_first_block;
 class run_eval_pass;
 class prep_blocks;
 class get_managed_allocd_count;
+class gc_initial_mark;
 class gc_mark;
 class gc_sweep;
 class gc_prepare_compact;
 class gc_compact;
 
-void CPUEvaluator::DependencyTracker::AddActiveBlock(
+CPUEvaluator::RuntimeBlock_t::Error
+CPUEvaluator::DependencyTracker::AddActiveBlock(
     const RuntimeBlock_t::SharedRuntimeBlockHandle_t &block) {
   cl::sycl::atomic<unsigned int> activeBlockCount(
       (cl::sycl::multi_ptr<unsigned int,
                            cl::sycl::access::address_space::global_space>(
           &m_activeBlockCountData)));
-  m_newActiveBlocks[activeBlockCount.fetch_add(1)] = block;
+  const auto indexToInsert = activeBlockCount.fetch_add(1);
+  if (indexToInsert >= m_newActiveBlocks.size()) {
+    return RuntimeBlock_t::Error(RuntimeBlock_t::Error::Type::OutOfMemory,
+                                 "Ran out of space for active blocks");
+  }
+  m_newActiveBlocks[indexToInsert] = block;
+
+  return RuntimeBlock_t::Error();
 }
 
 CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
@@ -119,6 +128,7 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
     buffer<unsigned int> managedAllocdCount(&managedAllocdCountData,
                                             range<1>(1));
 
+    size_t ticksSinceGc = 0;
     while (true) {
       unsigned int numActiveBlocks = 0;
       {
@@ -161,107 +171,132 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
                     dependencyTracker[0].GetBlockAtIndex(idx);
                 const auto derefdWorking =
                     memPoolAcc[0].derefHandle(workingBlocksAcc[idx]);
-                derefdWorking->SetMarked();
               });
         });
       }
 
-      m_workQueue.submit([&](handler &cgh) {
-        auto managedAllocdCountDevice =
-            managedAllocdCount.get_access<access::mode::read_write>(cgh);
-        auto memPoolAcc =
-            m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-        auto gcHandleAcc =
-            m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
-        cgh.single_task<class get_managed_allocd_count>(
-            [managedAllocdCountDevice, memPoolAcc, gcHandleAcc] {
-              auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
-              managedAllocdCountDevice[0] = gcRef->GetManagedAllocationCount();
-            });
-      });
-      m_workQueue.wait();
+      if (ticksSinceGc >= 16 || numActiveBlocks == 0) {
+        ticksSinceGc = 0;
 
-      unsigned int managedAllocdSize;
-      {
-        auto managedAllocdCountHost =
-            managedAllocdCount.get_access<access::mode::read>();
-        managedAllocdSize = managedAllocdCountHost[0];
-      }
-      if (managedAllocdSize > 0) {
-        // Expand markings
-        bool wasMarkingsExpandedInLastPass = true;
-        while (wasMarkingsExpandedInLastPass) {
+        if (numActiveBlocks > 0) {
+          m_workQueue.submit([&](handler &cgh) {
+            auto workingBlocksAcc =
+                workingBlocksBuff.get_access<access::mode::read_write>(cgh);
+            auto memPoolAcc =
+                m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+            cgh.parallel_for<class gc_initial_mark>(
+                cl::sycl::range<1>(numActiveBlocks),
+                [workingBlocksAcc, memPoolAcc](item<1> itm) {
+                  const auto idx = itm.get_linear_id();
+                  const auto derefdWorking =
+                      memPoolAcc[0].derefHandle(workingBlocksAcc[idx]);
+                  derefdWorking->SetMarked();
+                });
+          });
+        }
+
+        m_workQueue.submit([&](handler &cgh) {
+          auto managedAllocdCountDevice =
+              managedAllocdCount.get_access<access::mode::read_write>(cgh);
+          auto memPoolAcc =
+              m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+          auto gcHandleAcc =
+              m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
+          cgh.single_task<class get_managed_allocd_count>(
+              [managedAllocdCountDevice, memPoolAcc, gcHandleAcc] {
+                auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
+                managedAllocdCountDevice[0] =
+                    gcRef->GetManagedAllocationCount();
+              });
+        });
+        m_workQueue.wait();
+
+        unsigned int managedAllocdSize;
+        {
+          auto managedAllocdCountHost =
+              managedAllocdCount.get_access<access::mode::read>();
+          managedAllocdSize = managedAllocdCountHost[0];
+        }
+        if (managedAllocdSize > 0) {
+          // Expand markings
+          bool wasMarkingsExpandedInLastPass = true;
+          std::cout << "Expanding markings" << std::endl;
+          while (wasMarkingsExpandedInLastPass) {
+            m_workQueue.submit([&](handler &cgh) {
+              auto gcHandleAcc =
+                  m_garbageCollectorHandleBuff.get_access<access::mode::read>(
+                      cgh);
+              auto memPoolAcc =
+                  m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+              auto markingsExpandedAcc =
+                  markingsExpanded.get_access<access::mode::read_write>(cgh);
+              cgh.parallel_for<class gc_mark>(
+                  cl::sycl::range<1>(managedAllocdSize),
+                  [gcHandleAcc, memPoolAcc, markingsExpandedAcc](item<1> itm) {
+                    auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
+                    gcRef->SetMemPoolAcc(memPoolAcc);
+                    const auto wereMarkingsExpandedHere =
+                        gcRef->RunMarkPass(itm.get_linear_id());
+                    if (wereMarkingsExpandedHere) {
+                      markingsExpandedAcc[0] = true;
+                    }
+                  });
+            });
+            m_workQueue.wait();
+            {
+              auto markingsExpandedHostAcc =
+                  markingsExpanded.get_access<access::mode::read_write>();
+              wasMarkingsExpandedInLastPass = markingsExpandedHostAcc[0];
+              markingsExpandedHostAcc[0] = false;
+            }
+          }
+
+          // Sweep unmarked, one pass
           m_workQueue.submit([&](handler &cgh) {
             auto gcHandleAcc =
                 m_garbageCollectorHandleBuff.get_access<access::mode::read>(
                     cgh);
             auto memPoolAcc =
                 m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-            auto markingsExpandedAcc =
-                markingsExpanded.get_access<access::mode::read_write>(cgh);
-            cgh.parallel_for<class gc_mark>(
+            cgh.parallel_for<class gc_sweep>(
                 cl::sycl::range<1>(managedAllocdSize),
-                [gcHandleAcc, memPoolAcc, markingsExpandedAcc](item<1> itm) {
+                [gcHandleAcc, memPoolAcc](item<1> itm) {
                   auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
                   gcRef->SetMemPoolAcc(memPoolAcc);
-                  const auto wereMarkingsExpandedHere =
-                      gcRef->RunMarkPass(itm.get_linear_id());
-                  if (wereMarkingsExpandedHere) {
-                    markingsExpandedAcc[0] = true;
-                  }
+                  gcRef->Sweep(itm.get_linear_id());
                 });
           });
-          m_workQueue.wait();
-          {
-            auto markingsExpandedHostAcc =
-                markingsExpanded.get_access<access::mode::read_write>();
-            wasMarkingsExpandedInLastPass = markingsExpandedHostAcc[0];
-            markingsExpandedHostAcc[0] = false;
-          }
+
+          m_workQueue.submit([&](handler &cgh) {
+            auto gcHandleAcc =
+                m_garbageCollectorHandleBuff.get_access<access::mode::read>(
+                    cgh);
+            auto memPoolAcc =
+                m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+            cgh.single_task<class gc_prepare_compact>(
+                [gcHandleAcc, memPoolAcc]() {
+                  auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
+                  gcRef->ResetAllocationCount();
+                });
+          });
+
+          // Compact
+          // TODO can't compact in place, need seperate container to compact
+          // into.
+          m_workQueue.submit([&](handler &cgh) {
+            auto gcHandleAcc =
+                m_garbageCollectorHandleBuff.get_access<access::mode::read>(
+                    cgh);
+            auto memPoolAcc =
+                m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+            cgh.parallel_for<class gc_compact>(
+                cl::sycl::range<1>(managedAllocdSize),
+                [gcHandleAcc, memPoolAcc](item<1> itm) {
+                  auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
+                  gcRef->Compact(itm.get_linear_id());
+                });
+          });
         }
-
-        // Sweep unmarked, one pass
-        m_workQueue.submit([&](handler &cgh) {
-          auto gcHandleAcc =
-              m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
-          auto memPoolAcc =
-              m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-          cgh.parallel_for<class gc_sweep>(
-              cl::sycl::range<1>(managedAllocdSize),
-              [gcHandleAcc, memPoolAcc](item<1> itm) {
-                auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
-                gcRef->SetMemPoolAcc(memPoolAcc);
-                gcRef->Sweep(itm.get_linear_id());
-              });
-        });
-
-        m_workQueue.submit([&](handler &cgh) {
-          auto gcHandleAcc =
-              m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
-          auto memPoolAcc =
-              m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-          cgh.single_task<class gc_prepare_compact>(
-              [gcHandleAcc, memPoolAcc]() {
-                auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
-                gcRef->ResetAllocationCount();
-              });
-        });
-
-        // Compact
-        // TODO can't compact in place, need seperate container to compact
-        // into.
-        m_workQueue.submit([&](handler &cgh) {
-          auto gcHandleAcc =
-              m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
-          auto memPoolAcc =
-              m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-          cgh.parallel_for<class gc_compact>(
-              cl::sycl::range<1>(managedAllocdSize),
-              [gcHandleAcc, memPoolAcc](item<1> itm) {
-                auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
-                gcRef->Compact(itm.get_linear_id());
-              });
-        });
       }
 
       if (numActiveBlocks > 0) {
@@ -281,6 +316,7 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
           auto blockErrorAcc =
               errorsPerBlock.get_access<access::mode::read_write>(cgh);
 
+          std::cout << "Running eval pass" << std::endl;
           cgh.parallel_for<class run_eval_pass>(
               cl::sycl::range<1>(numActiveBlocks),
               [dependencyTracker, memPoolWrite, workingBlocksAcc,
