@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Array.hpp"
-#include "PortableMemPool.h"
+#include "PortableMemPool.hpp"
 #include "SExpr.h"
 #include "SYCL/sycl.hpp"
 #include "Types.h"
@@ -25,6 +25,7 @@ public:
       Div,
       Equal,
       GreaterThan,
+      Remainder,
       Floor,
       Number,
       Identifier,

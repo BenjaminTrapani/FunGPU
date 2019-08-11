@@ -1,0 +1,5 @@
+(let ((add-to-bound
+        (let ((bound-val 4))
+            (lambda (x) (+ bound-val x)))))
+   (let ((bound-val 10) (val-to-add 9))
+        (add-to-bound val-to-add)))

@@ -1,4 +1,4 @@
-#include "PortableMemPool.h"
+#include "PortableMemPool.hpp"
 #include "Types.h"
 
 namespace FunGPU {

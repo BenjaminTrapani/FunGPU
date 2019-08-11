@@ -1,4 +1,4 @@
-#include "PortableMemPool.h"
+#include "PortableMemPool.hpp"
 #include "SYCL/sycl.hpp"
 #include "Types.h"
 #include <memory>
@@ -18,20 +18,39 @@ public:
     }
   }
 
+  void SetMemPoolAcc(const PortableMemPool::DeviceAccessor_t &acc) {
+    m_portableMemPool = acc;
+  }
+
   Index_t size() const { return m_listSize; }
-  void push_front(const T &val) {
+  bool push_front(const T &val) {
     const auto newNodeHandle =
         m_portableMemPool[0].template Alloc<ListNode>(val);
+    if (newNodeHandle == PortableMemPool::Handle<ListNode>()) {
+      return false;
+    }
+
     auto newNode = m_portableMemPool[0].derefHandle(newNodeHandle);
 
     newNode->m_next = m_head;
     m_head = newNodeHandle;
     ++m_listSize;
+
+    return true;
   }
 
   PortableMemPool::Handle<T> front() { return m_head; }
 
   T &derefFront() { return *m_portableMemPool[0].derefHandle(front()); }
+
+  template <class Callable_t> void map(Callable_t &callable) {
+    auto tempHead = m_head;
+    while (tempHead != PortableMemPool::Handle<ListNode>()) {
+      auto tempHeadDerefd = m_portableMemPool[0].derefHandle(tempHead);
+      callable(*static_cast<T *>(tempHeadDerefd));
+      tempHead = tempHeadDerefd->m_next;
+    }
+  }
 
   void pop_front() {
     if (m_head == PortableMemPool::Handle<ListNode>()) {

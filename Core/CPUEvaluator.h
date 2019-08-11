@@ -1,6 +1,7 @@
 #include "Compiler.h"
-#include "PortableMemPool.h"
-#include "RuntimeBlock.h"
+#include "GarbageCollector.h"
+#include "PortableMemPool.hpp"
+#include "RuntimeBlock.hpp"
 #include <SYCL/sycl.hpp>
 #include <array>
 #include <memory>
@@ -9,17 +10,35 @@ namespace FunGPU {
 class CPUEvaluator {
 public:
   class DependencyTracker;
-  using RuntimeBlock_t = RuntimeBlock<DependencyTracker>;
+
+  using RuntimeBlock_t = RuntimeBlock<DependencyTracker, 8192 * 4>;
+  using GarbageCollector_t = RuntimeBlock_t::GarbageCollector_t;
 
   class DependencyTracker {
     friend class CPUEvaluator;
 
   public:
-    DependencyTracker() : m_activeBlockCount(0) {}
-    void
+    DependencyTracker() : m_activeBlockCountData(0) {}
+
+    CPUEvaluator::RuntimeBlock_t::Error
     AddActiveBlock(const RuntimeBlock_t::SharedRuntimeBlockHandle_t &block);
-    unsigned int GetActiveBlockCount() { return m_activeBlockCount.load(); }
-    void ResetActiveBlockCount() { m_activeBlockCount.store(0); }
+
+    unsigned int GetActiveBlockCount() {
+      cl::sycl::atomic<unsigned int> activeBlockCount(
+          (cl::sycl::multi_ptr<unsigned int,
+                               cl::sycl::access::address_space::global_space>(
+              &m_activeBlockCountData)));
+      return activeBlockCount.load();
+    }
+
+    void ResetActiveBlockCount() {
+      cl::sycl::atomic<unsigned int> activeBlockCount(
+          (cl::sycl::multi_ptr<unsigned int,
+                               cl::sycl::access::address_space::global_space>(
+              &m_activeBlockCountData)));
+      activeBlockCount.store(0);
+    }
+
     RuntimeBlock_t::SharedRuntimeBlockHandle_t
     GetBlockAtIndex(const unsigned int index) {
       return m_newActiveBlocks[index];
@@ -28,7 +47,7 @@ public:
   private:
     std::array<RuntimeBlock_t::SharedRuntimeBlockHandle_t, 4096>
         m_newActiveBlocks;
-    std::atomic<unsigned int> m_activeBlockCount;
+    unsigned int m_activeBlockCountData;
   };
 
   CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool);
@@ -45,6 +64,8 @@ private:
 
   PortableMemPool::Handle<RuntimeBlock_t::RuntimeValue> m_resultValue;
   std::shared_ptr<DependencyTracker> m_dependencyTracker;
+  cl::sycl::buffer<PortableMemPool::Handle<GarbageCollector_t>>
+      m_garbageCollectorHandleBuff;
   cl::sycl::buffer<PortableMemPool> m_memPoolBuff;
   cl::sycl::buffer<DependencyTracker> m_dependencyTrackerBuff;
 

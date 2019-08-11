@@ -64,6 +64,14 @@ Compiler::CompileListOfSExpr(std::shared_ptr<const SExpr> sexpr,
           ASTNode::Type::GreaterThan,
           Compile(sexprChildren->at(1), boundIdentifiers, memPoolAcc),
           Compile(sexprChildren->at(2), boundIdentifiers, memPoolAcc));
+    } else if (firstChildSym == "remainder") {
+      if (sexprChildren->size() != 3) {
+        throw CompileException("Expected remainder to have 2 args");
+      }
+      result = memPoolAcc[0].template Alloc<BinaryOpNode>(
+          ASTNode::Type::Remainder,
+          Compile(sexprChildren->at(1), boundIdentifiers, memPoolAcc),
+          Compile(sexprChildren->at(2), boundIdentifiers, memPoolAcc));
     } else if (firstChildSym == "let" || firstChildSym == "letrec") {
       if (sexprChildren->size() != 3) {
         throw CompileException("Expected let to have 2 args");
@@ -297,6 +305,14 @@ void Compiler::DebugPrintAST(ASTNodeHandle rootOfASTHandle,
     std::cout << ")";
     break;
   }
+  case ASTNode::Type::Remainder: {
+    std::cout << "(remainder ";
+    auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
+    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc);
+    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc);
+    std::cout << ")";
+    break;
+  }
   case ASTNode::Type::Floor: {
     std::cout << "(floor ";
     auto unaryOpNode = static_cast<UnaryOpNode *>(rootOfAST);
@@ -368,52 +384,13 @@ void Compiler::DeallocateAST(const ASTNodeHandle &rootOfASTHandle,
         static_cast<PortableMemPool::Handle<IfNode>>(rootOfASTHandle));
     break;
   }
-  case ASTNode::Type::Add: {
-    auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
-    DeallocateAST(binaryOpNode->m_arg0, memPoolAcc);
-    DeallocateAST(binaryOpNode->m_arg1, memPoolAcc);
-
-    memPoolAcc[0].Dealloc(
-        static_cast<PortableMemPool::Handle<BinaryOpNode>>(rootOfASTHandle));
-    break;
-  }
-  case ASTNode::Type::Sub: {
-    auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
-    DeallocateAST(binaryOpNode->m_arg0, memPoolAcc);
-    DeallocateAST(binaryOpNode->m_arg1, memPoolAcc);
-
-    memPoolAcc[0].Dealloc(
-        static_cast<PortableMemPool::Handle<BinaryOpNode>>(rootOfASTHandle));
-    break;
-  }
-  case ASTNode::Type::Mul: {
-    auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
-    DeallocateAST(binaryOpNode->m_arg0, memPoolAcc);
-    DeallocateAST(binaryOpNode->m_arg1, memPoolAcc);
-
-    memPoolAcc[0].Dealloc(
-        static_cast<PortableMemPool::Handle<BinaryOpNode>>(rootOfASTHandle));
-    break;
-  }
-  case ASTNode::Type::Div: {
-    auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
-    DeallocateAST(binaryOpNode->m_arg0, memPoolAcc);
-    DeallocateAST(binaryOpNode->m_arg1, memPoolAcc);
-
-    memPoolAcc[0].Dealloc(
-        static_cast<PortableMemPool::Handle<BinaryOpNode>>(rootOfASTHandle));
-    break;
-  }
-  case ASTNode::Type::Equal: {
-    auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
-    DeallocateAST(binaryOpNode->m_arg0, memPoolAcc);
-    DeallocateAST(binaryOpNode->m_arg1, memPoolAcc);
-
-    memPoolAcc[0].Dealloc(
-        static_cast<PortableMemPool::Handle<BinaryOpNode>>(rootOfASTHandle));
-    break;
-  }
-  case ASTNode::Type::GreaterThan: {
+  case ASTNode::Type::Add:
+  case ASTNode::Type::Sub:
+  case ASTNode::Type::Mul:
+  case ASTNode::Type::Div:
+  case ASTNode::Type::Equal:
+  case ASTNode::Type::GreaterThan:
+  case ASTNode::Type::Remainder: {
     auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
     DeallocateAST(binaryOpNode->m_arg0, memPoolAcc);
     DeallocateAST(binaryOpNode->m_arg1, memPoolAcc);

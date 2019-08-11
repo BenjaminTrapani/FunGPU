@@ -15,6 +15,7 @@ namespace FunGPU {
 * references to objects in it.
 * Required to alloc compiled nodes on host and reference them on device.
 */
+
 class PortableMemPool {
 public:
   using DeviceAccessor_t =
@@ -73,78 +74,9 @@ public:
     size_t m_count;
   };
 
-  template <class T> class SharedHandle {
-    friend class PortableMemPool;
-
-  public:
-    SharedHandle() {}
-
-    SharedHandle(const Handle<T> &handle, PortableMemPool *pool)
-        : m_wrappedHandle(handle), m_pool(pool),
-          m_refCountHandle(pool->Alloc<std::atomic<size_t>>(1)) {}
-
-    SharedHandle(const SharedHandle<T> &other)
-        : m_wrappedHandle(other.m_wrappedHandle), m_pool(other.m_pool),
-          m_refCountHandle(other.m_refCountHandle) {
-      IncrementRefCount();
-    }
-
-    ~SharedHandle() { DecrementRefCount(); }
-
-    void SetPool(PortableMemPool *pool) { m_pool = pool; }
-
-    void Detach() { m_isAttached = false; }
-
-    SharedHandle<T> operator=(const SharedHandle<T> &other) {
-      DecrementRefCount();
-
-      m_wrappedHandle = other.m_wrappedHandle;
-      m_pool = other.m_pool;
-      m_refCountHandle = other.m_refCountHandle;
-
-      IncrementRefCount();
-
-      return *this;
-    }
-
-    bool operator==(const SharedHandle<T> &other) const {
-      return m_wrappedHandle == other.m_wrappedHandle;
-    }
-    bool operator!=(const SharedHandle<T> &other) const {
-      return !(*this == other);
-    }
-
-  private:
-    void IncrementRefCount() {
-      if (m_wrappedHandle != Handle<T>()) {
-        auto derefdRefCount = m_pool->derefHandle(m_refCountHandle);
-        ++(*derefdRefCount);
-      }
-    }
-
-    void DecrementRefCount() {
-      if (m_isAttached && m_wrappedHandle != Handle<T>()) {
-        auto derefdRefCount = m_pool->derefHandle(m_refCountHandle);
-        if (--(*derefdRefCount) == 0) {
-          m_pool->Dealloc(m_refCountHandle);
-          m_pool->Dealloc(m_wrappedHandle);
-        }
-      }
-    }
-
-    Handle<T> m_wrappedHandle;
-    PortableMemPool *m_pool;
-    Handle<std::atomic<size_t>> m_refCountHandle;
-
-    bool m_isAttached = true;
-  };
-
   // Implementers must define a public m_handle member.
   // Can't define it for you here because then your class would not be a
   // standard layout class :(
-  template <class T> class EnableSharedHandleFromThis {
-    // SharedHandle<T> m_handle;
-  };
   template <class T> class EnableHandleFromThis {
     // Handle<T> m_handle;
   };
@@ -152,25 +84,9 @@ public:
   template <class T, class... Args_t> Handle<T> Alloc(const Args_t &... args) {
     const auto handle =
         AllocImpl<T>(m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
-
-    auto bytesForHandle =
-        reinterpret_cast<unsigned char *>(derefHandle(handle));
-    // invoke T's constructor via placement new on allocated bytes
-    auto allocdT = new (bytesForHandle) T(args...);
-
-    using SetHandleFunctor_t = typename std::conditional<
-        std::is_base_of<EnableHandleFromThis<T>, T>::value, SetHandleReal<T>,
-        SetHandleNoOp<T>>::type;
-    auto derefedAllocd = derefHandle(handle);
-    SetHandleFunctor_t::SetHandle(*derefedAllocd, handle);
-
-    return handle;
-  }
-
-  template <class T, class... Args_t>
-  Handle<T> AllocExp(const Args_t &... args) {
-    const auto handle =
-        AllocImpl<T>(m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
+    if (handle == Handle<T>()) {
+      return handle;
+    }
 
     auto bytesForHandle =
         reinterpret_cast<unsigned char *>(derefHandle(handle));
@@ -193,23 +109,6 @@ public:
                              m_largeBin, m_extraLargeBin);
   }
 
-  template <class T, class... Args_t>
-  SharedHandle<T> AllocShared(const Args_t &... args) {
-    SharedHandle<T> result(Alloc<T, Args_t...>(args...), this);
-
-    using SetHandleFunctor_t = typename std::conditional<
-        std::is_base_of<EnableSharedHandleFromThis<T>, T>::value,
-        SetSharedHandleReal<T>, SetHandleNoOp<T>>::type;
-    auto derefedAllocd = derefHandle(result);
-    SetHandleFunctor_t::SetHandle(*derefedAllocd, result);
-
-    // TODO move the decrement ref count call into setHandleFunctor.SetHandle
-    // and only do it in SetSharedHandleReal
-    result.DecrementRefCount();
-
-    return result;
-  }
-
   template <class T> void Dealloc(const Handle<T> &handle) {
     DeallocImpl(handle, m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
   }
@@ -222,10 +121,6 @@ public:
   template <class T> T *derefHandle(const Handle<T> &handle) {
     return derefHandleImpl(handle, m_smallBin, m_mediumBin, m_largeBin,
                            m_extraLargeBin);
-  }
-
-  template <class T> T *derefHandle(const SharedHandle<T> &handle) {
-    return derefHandle(handle.m_wrappedHandle);
   }
 
   template <class T> T *derefHandle(const ArrayHandle<T> &handle) {
@@ -241,7 +136,7 @@ private:
   struct ListNode {
     ListNode(const size_t beginIndex) : m_beginIndex(beginIndex) {}
     ListNode() : m_beginIndex(0), m_nextNode(0) {}
-    bool operator==(const ListNode &other) {
+    bool operator==(const ListNode &other) const {
       return m_beginIndex == other.m_beginIndex &&
              m_nextNode == other.m_nextNode &&
              m_indexInStorage == other.m_indexInStorage;
@@ -259,6 +154,9 @@ private:
     static_assert(
         TotalBytes_i % AllocSize_i == 0,
         "Expected TotalBytes to be a multiple of the allocation size");
+
+    static constexpr size_t TotalNodes = TotalBytes_i / AllocSize_i;
+
     Arena() {
       for (size_t i = 0; i < m_listNodeStorage.size(); ++i) {
         auto &listNode = m_listNodeStorage[i];
@@ -326,15 +224,6 @@ private:
     static void SetHandle(T &, const Handle<T> &) {}
   };
 
-  template <class T> struct SetSharedHandleReal {
-    static void SetHandle(EnableSharedHandleFromThis<T> &target,
-                          const SharedHandle<T> &handle) {
-      auto targetAsOriginalClass = static_cast<T *>(&target);
-      targetAsOriginalClass->m_handle = handle;
-      targetAsOriginalClass->m_handle.Detach();
-    }
-  };
-
   template <class T> struct SetHandleReal {
     static void SetHandle(EnableHandleFromThis<T> &target,
                           const Handle<T> &handle) {
@@ -349,6 +238,10 @@ private:
                       Arena<allocSizes, totalSizes> &... arenas) {
     if (allocSize >= sizeof(T)) {
       const auto allocdListNode = arena.AllocFromArena();
+      if (allocdListNode == arena.m_freeListTail) {
+        return Handle<T>();
+      }
+
       const Handle<T> resultHandle(
           allocdListNode.m_indexInStorage,
           std::remove_reference<decltype(arena)>::type::AllocSize);
@@ -362,6 +255,9 @@ private:
   Handle<T> AllocImpl(Arena<allocSize, totalSize> &arena) {
     if (allocSize >= sizeof(T)) {
       const auto allocdListNode = arena.AllocFromArena();
+      if (allocdListNode == arena.m_freeListTail) {
+        return Handle<T>();
+      }
       const Handle<T> resultHandle(
           allocdListNode.m_indexInStorage,
           std::remove_reference<decltype(arena)>::type::AllocSize);
@@ -378,6 +274,9 @@ private:
                                 Arena<allocSizes, totalSizes> &... arenas) {
     if (allocSize >= sizeof(T) * arraySize) {
       const auto allocdListNode = arena.AllocFromArena();
+      if (allocdListNode == arena.m_freeListTail) {
+        return ArrayHandle<T>();
+      }
       const ArrayHandle<T> resultHandle(
           allocdListNode.m_indexInStorage,
           std::remove_reference<decltype(arena)>::type::AllocSize, arraySize);
@@ -398,6 +297,9 @@ private:
                                 Arena<allocSize, totalSize> &arena) {
     if (allocSize >= sizeof(T) * arraySize) {
       const auto allocdListNode = arena.AllocFromArena();
+      if (allocdListNode == arena.m_freeListTail) {
+        return ArrayHandle<T>();
+      }
       const ArrayHandle<T> resultHandle(
           allocdListNode.m_indexInStorage,
           std::remove_reference<decltype(arena)>::type::AllocSize, arraySize);
@@ -520,11 +422,11 @@ private:
     return result;
   }
 
-  static constexpr size_t eightMB = 8388608;
+  static constexpr size_t binSize = 16777216;
 
-  Arena<sizeof(int), eightMB> m_smallBin;
-  Arena<sizeof(int) * 8, eightMB> m_mediumBin;
-  Arena<sizeof(int) * 16, eightMB> m_largeBin;
-  Arena<sizeof(int) * 512, eightMB> m_extraLargeBin;
+  Arena<sizeof(int), binSize> m_smallBin;
+  Arena<sizeof(int) * 8, binSize> m_mediumBin;
+  Arena<sizeof(int) * 128, binSize> m_largeBin;
+  Arena<sizeof(int) * 4194304, binSize> m_extraLargeBin;
 };
 }
