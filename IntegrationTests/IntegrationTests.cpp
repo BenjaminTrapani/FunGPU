@@ -67,16 +67,36 @@ RunProgram(const std::string &path,
 
 BOOST_FIXTURE_TEST_SUITE(IntegrationTests, Fixture)
 
-/*BOOST_AUTO_TEST_CASE(GraphColoring) {
+/*
+BOOST_AUTO_TEST_CASE(GraphColoring) {
   const auto programResult =
       RunProgram("../TestPrograms/GraphColoring.fgpu", evaluator, *memPoolBuff);
   BOOST_REQUIRE_EQUAL(6, programResult.m_data.doubleVal);
-}*/
+}
+*/
+
+BOOST_AUTO_TEST_CASE(MultiLet) {
+  const auto programResult =
+      RunProgram("../TestPrograms/MultiLet.fgpu", evaluator, *memPoolBuff);
+  BOOST_REQUIRE_EQUAL(1, programResult.m_data.doubleVal);
+}
 
 BOOST_AUTO_TEST_CASE(NoBindings) {
-    const auto programResult =
-            RunProgram("../TestPrograms/NoBindings.fgpu", evaluator, *memPoolBuff);
-    BOOST_REQUIRE_EQUAL(14, programResult.m_data.doubleVal);
+  const auto programResult =
+      RunProgram("../TestPrograms/NoBindings.fgpu", evaluator, *memPoolBuff);
+  BOOST_REQUIRE_EQUAL(14, programResult.m_data.doubleVal);
+}
+
+BOOST_AUTO_TEST_CASE(SimpleCall) {
+  const auto programResult =
+      RunProgram("../TestPrograms/SimpleCall.fgpu", evaluator, *memPoolBuff);
+  BOOST_REQUIRE_EQUAL(42, programResult.m_data.doubleVal);
+}
+
+BOOST_AUTO_TEST_CASE(CallMultiBindings) {
+  const auto programResult = RunProgram(
+      "../TestPrograms/CallMultiBindings.fgpu", evaluator, *memPoolBuff);
+  BOOST_REQUIRE_EQUAL(13, programResult.m_data.doubleVal);
 }
 
 BOOST_AUTO_TEST_CASE(ListExample) {

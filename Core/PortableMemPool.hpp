@@ -15,6 +15,7 @@ namespace FunGPU {
 * references to objects in it.
 * Required to alloc compiled nodes on host and reference them on device.
 */
+
 class PortableMemPool {
 public:
   using DeviceAccessor_t =
@@ -73,59 +74,9 @@ public:
     size_t m_count;
   };
 
-  template <class T> class SharedHandle {
-    friend class PortableMemPool;
-
-  public:
-    SharedHandle() {}
-
-    SharedHandle(const Handle<T> &handle, const Handle<unsigned int> &refCount)
-        : m_wrappedHandle(handle), m_refCountHandle(refCount) {}
-
-    bool operator==(const SharedHandle<T> &other) const {
-      return m_wrappedHandle == other.m_wrappedHandle;
-    }
-
-    bool operator!=(const SharedHandle<T> &other) const {
-      return !(*this == other);
-    }
-
-  private:
-    void IncrementRefCount(PortableMemPool &pool) const {
-      if (m_wrappedHandle != Handle<T>()) {
-        auto derefdRefCount = pool.derefHandle(m_refCountHandle);
-        cl::sycl::multi_ptr<unsigned int,
-                            cl::sycl::access::address_space::global_space>
-            multiPtr(derefdRefCount);
-        cl::sycl::atomic<unsigned int> atomicRefCount(multiPtr);
-        atomicRefCount.fetch_add(1);
-      }
-    }
-
-    void DecrementRefCount(PortableMemPool &pool) const {
-      if (m_wrappedHandle != Handle<T>()) {
-        auto derefdRefCount = pool.derefHandle(m_refCountHandle);
-        cl::sycl::multi_ptr<unsigned int,
-                            cl::sycl::access::address_space::global_space>
-            multiPtr(derefdRefCount);
-        cl::sycl::atomic<unsigned int> atomicRefCount(multiPtr);
-        if (atomicRefCount.fetch_sub(1) == 1) {
-          pool.Dealloc(m_refCountHandle);
-          pool.Dealloc(m_wrappedHandle);
-        }
-      }
-    }
-
-    Handle<T> m_wrappedHandle;
-    Handle<unsigned int> m_refCountHandle;
-  };
-
   // Implementers must define a public m_handle member.
   // Can't define it for you here because then your class would not be a
   // standard layout class :(
-  template <class T> class EnableSharedHandleFromThis {
-    // SharedHandle<T> m_handle;
-  };
   template <class T> class EnableHandleFromThis {
     // Handle<T> m_handle;
   };
@@ -158,37 +109,6 @@ public:
                              m_largeBin, m_extraLargeBin);
   }
 
-  template <class T, class... Args_t>
-  SharedHandle<T> AllocShared(const Args_t &... args) {
-    const auto allocdHandle = Alloc<T, Args_t...>(args...);
-    if (allocdHandle == Handle<T>()) {
-      return SharedHandle<T>();
-    }
-
-    const auto allocdRefCount = Alloc<unsigned int>(1);
-    if (allocdRefCount == Handle<unsigned int>()) {
-      return SharedHandle<T>();
-    }
-
-    SharedHandle<T> result(allocdHandle, allocdRefCount);
-
-    using SetHandleFunctor_t = typename std::conditional<
-        std::is_base_of<EnableSharedHandleFromThis<T>, T>::value,
-        SetSharedHandleReal<T>, SetHandleNoOp<T>>::type;
-    auto derefedAllocd = derefHandle(result);
-    SetHandleFunctor_t::SetHandle(*derefedAllocd, result);
-
-    return result;
-  }
-
-  template <class T> void AddRef(const SharedHandle<T> &sharedHandle) {
-    sharedHandle.IncrementRefCount(*this);
-  }
-
-  template <class T> void RemoveRef(const SharedHandle<T> &sharedHandle) {
-    sharedHandle.DecrementRefCount(*this);
-  }
-
   template <class T> void Dealloc(const Handle<T> &handle) {
     DeallocImpl(handle, m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
   }
@@ -201,10 +121,6 @@ public:
   template <class T> T *derefHandle(const Handle<T> &handle) {
     return derefHandleImpl(handle, m_smallBin, m_mediumBin, m_largeBin,
                            m_extraLargeBin);
-  }
-
-  template <class T> T *derefHandle(const SharedHandle<T> &handle) {
-    return derefHandle(handle.m_wrappedHandle);
   }
 
   template <class T> T *derefHandle(const ArrayHandle<T> &handle) {
@@ -238,6 +154,9 @@ private:
     static_assert(
         TotalBytes_i % AllocSize_i == 0,
         "Expected TotalBytes to be a multiple of the allocation size");
+
+    static constexpr size_t TotalNodes = TotalBytes_i / AllocSize_i;
+
     Arena() {
       for (size_t i = 0; i < m_listNodeStorage.size(); ++i) {
         auto &listNode = m_listNodeStorage[i];
@@ -303,14 +222,6 @@ private:
 
   template <class T> struct SetHandleNoOp {
     static void SetHandle(T &, const Handle<T> &) {}
-  };
-
-  template <class T> struct SetSharedHandleReal {
-    static void SetHandle(EnableSharedHandleFromThis<T> &target,
-                          const SharedHandle<T> &handle) {
-      auto targetAsOriginalClass = static_cast<T *>(&target);
-      targetAsOriginalClass->m_handle = handle;
-    }
   };
 
   template <class T> struct SetHandleReal {
@@ -515,7 +426,7 @@ private:
 
   Arena<sizeof(int), binSize> m_smallBin;
   Arena<sizeof(int) * 8, binSize> m_mediumBin;
-  Arena<sizeof(int) * 16, binSize> m_largeBin;
-  Arena<sizeof(int) * 512, binSize> m_extraLargeBin;
+  Arena<sizeof(int) * 128, binSize> m_largeBin;
+  Arena<sizeof(int) * 4194304, binSize> m_extraLargeBin;
 };
 }

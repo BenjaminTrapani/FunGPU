@@ -43,6 +43,15 @@ public:
 
   T &derefFront() { return *m_portableMemPool[0].derefHandle(front()); }
 
+  template <class Callable_t> void map(Callable_t &callable) {
+    auto tempHead = m_head;
+    while (tempHead != PortableMemPool::Handle<ListNode>()) {
+      auto tempHeadDerefd = m_portableMemPool[0].derefHandle(tempHead);
+      callable(*static_cast<T *>(tempHeadDerefd));
+      tempHead = tempHeadDerefd->m_next;
+    }
+  }
+
   void pop_front() {
     if (m_head == PortableMemPool::Handle<ListNode>()) {
       return;

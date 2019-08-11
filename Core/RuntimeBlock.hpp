@@ -1,4 +1,5 @@
 #include "Compiler.h"
+#include "GarbageCollector.h"
 #include "List.hpp"
 #include "PortableMemPool.hpp"
 #include "SYCL/sycl.hpp"
@@ -6,12 +7,15 @@
 #include <atomic>
 
 namespace FunGPU {
-template <class DependencyTracker_t>
-class RuntimeBlock : public PortableMemPool::EnableSharedHandleFromThis<
-                         RuntimeBlock<DependencyTracker_t>> {
+template <class DependencyTracker_t, size_t MaxManagedAllocsCount>
+class RuntimeBlock
+    : public PortableMemPool::EnableHandleFromThis<
+          RuntimeBlock<DependencyTracker_t, MaxManagedAllocsCount>> {
 public:
-  using SharedRuntimeBlockHandle_t =
-      PortableMemPool::SharedHandle<RuntimeBlock<DependencyTracker_t>>;
+  using SharedRuntimeBlockHandle_t = PortableMemPool::Handle<
+      RuntimeBlock<DependencyTracker_t, MaxManagedAllocsCount>>;
+  using GarbageCollector_t =
+      GarbageCollector<RuntimeBlock, MaxManagedAllocsCount>;
 
   class FunctionValue {
   public:
@@ -113,42 +117,83 @@ public:
                    DependencyTracker_t, 1, cl::sycl::access::mode::read_write,
                    cl::sycl::access::target::global_buffer> &depTracker,
                const RuntimeValueHandle_t &dest,
-               const PortableMemPool::DeviceAccessor_t &memPool)
+               const PortableMemPool::DeviceAccessor_t &memPool,
+               const PortableMemPool::Handle<GarbageCollector_t> &gc)
       : m_astNode(astNode), m_bindingParent(bindingParent), m_parent(parent),
-        m_depTracker(depTracker), m_dest(dest), m_dependenciesRemaining(0),
-        m_memPoolDeviceAcc(memPool), m_runtimeValues(memPool),
-        m_isMarked(false) {
-    m_memPoolDeviceAcc[0].AddRef(m_bindingParent);
-    m_memPoolDeviceAcc[0].AddRef(m_parent);
+        m_depTracker(depTracker), m_dest(dest), m_dependenciesRemainingData(0),
+        m_memPoolDeviceAcc(memPool), m_garbageCollectorHandle(gc),
+        m_runtimeValues(memPool), m_isMarkedData(false) {}
+
+  bool SetMarked() {
+    cl::sycl::atomic<bool> isMarkedAtomic(
+        (cl::sycl::multi_ptr<bool,
+                             cl::sycl::access::address_space::global_space>(
+            &m_isMarkedData)));
+    return isMarkedAtomic.exchange(true);
   }
 
-
-  void MarkDependencies() {
-      if (!m_isMarked)
-      {
-          m_isMarked = true;
-          m_depTracker[0].MarkRequiresRemoveRef(m_bindingParent);
-          m_depTracker[0].MarkRequiresRemoveRef(m_parent);
+  struct MapperForFunctionVals {
+    MapperForFunctionVals(const PortableMemPool::DeviceAccessor_t &memPoolAcc)
+        : m_anyMarkingsExpanded(false), m_memPoolAcc(memPoolAcc) {}
+    void operator()(const RuntimeValue &runtimeValue) {
+      if (runtimeValue.m_type == RuntimeValue::Type::Function) {
+        auto &funv = runtimeValue.m_data.functionVal;
+        if (funv.m_bindingParent != SharedRuntimeBlockHandle_t()) {
+          m_anyMarkingsExpanded =
+              m_anyMarkingsExpanded ||
+              !m_memPoolAcc[0].derefHandle(funv.m_bindingParent)->SetMarked();
+        }
       }
+    }
+    bool m_anyMarkingsExpanded;
+    PortableMemPool::DeviceAccessor_t m_memPoolAcc;
+  };
+
+  bool ExpandMarkings() {
+    bool anyMarkingsExpanded = false;
+    if (GetIsMarked()) {
+      if (m_bindingParent != SharedRuntimeBlockHandle_t()) {
+        anyMarkingsExpanded =
+            anyMarkingsExpanded ||
+            !m_memPoolDeviceAcc[0].derefHandle(m_bindingParent)->SetMarked();
+      }
+      if (m_parent != SharedRuntimeBlockHandle_t()) {
+        anyMarkingsExpanded =
+            anyMarkingsExpanded ||
+            !m_memPoolDeviceAcc[0].derefHandle(m_parent)->SetMarked();
+      }
+
+      MapperForFunctionVals mapper(m_memPoolDeviceAcc);
+      m_runtimeValues.map(mapper);
+
+      anyMarkingsExpanded = anyMarkingsExpanded || mapper.m_anyMarkingsExpanded;
+    }
+    return anyMarkingsExpanded;
   }
 
-  bool GetIsMarked() const {
-      return m_isMarked;
+  bool GetIsMarked() {
+    cl::sycl::atomic<bool> isMarkedAtomic(
+        (cl::sycl::multi_ptr<bool,
+                             cl::sycl::access::address_space::global_space>(
+            &m_isMarkedData)));
+    return isMarkedAtomic.load();
   }
 
-  void ClearIsMarked() {
-      m_isMarked = false;
+  void ClearMarking() {
+    cl::sycl::atomic<bool> isMarkedAtomic(
+        (cl::sycl::multi_ptr<bool,
+                             cl::sycl::access::address_space::global_space>(
+            &m_isMarkedData)));
+    isMarkedAtomic.store(false);
   }
 
-  void SetMemPool(const PortableMemPool::DeviceAccessor_t &memPool) {
+  void
+  SetResources(const PortableMemPool::DeviceAccessor_t &memPool,
+               const cl::sycl::accessor<
+                   DependencyTracker_t, 1, cl::sycl::access::mode::read_write,
+                   cl::sycl::access::target::global_buffer> &depTracker) {
     m_memPoolDeviceAcc = memPool;
     m_runtimeValues.SetMemPoolAcc(memPool);
-  }
-
-  void SetDependencyTracker(
-      const cl::sycl::accessor<
-          DependencyTracker_t, 1, cl::sycl::access::mode::read_write,
-          cl::sycl::access::target::global_buffer> &depTracker) {
     m_depTracker = depTracker;
   }
 
@@ -171,6 +216,8 @@ public:
     case Compiler::ASTNode::Type::BindRec: {
       const bool isRec = astNode->m_type == Compiler::ASTNode::Type::BindRec;
       auto bindNode = static_cast<Compiler::BindNode *>(astNode);
+      auto garbageCollector =
+          m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
       if (m_runtimeValues.size() == 0) {
         auto bindingsData =
             m_memPoolDeviceAcc[0].derefHandle(bindNode->m_bindings);
@@ -180,34 +227,33 @@ public:
                          "While allocating space for bindings");
           }
           auto targetRuntimeValue = m_runtimeValues.front();
-          auto dependencyOnBinding =
-              m_memPoolDeviceAcc[0].template AllocShared<RuntimeBlock>(
-                  bindingsData[i], isRec ? m_handle : m_bindingParent, m_handle,
-                  m_depTracker, targetRuntimeValue, m_memPoolDeviceAcc);
+          auto dependencyOnBinding = garbageCollector->template AllocManaged(
+              bindingsData[i], isRec ? m_handle : m_bindingParent, m_handle,
+              m_depTracker, targetRuntimeValue, m_memPoolDeviceAcc,
+              m_garbageCollectorHandle);
           if (dependencyOnBinding == SharedRuntimeBlockHandle_t()) {
             return Error(Error::Type::OutOfMemory,
                          "Failed to alloc dependency on binding");
           }
           AddDependentActiveBlock(dependencyOnBinding);
-          m_memPoolDeviceAcc[0].RemoveRef(dependencyOnBinding);
         }
       } else {
-        auto depOnExpr =
-            m_memPoolDeviceAcc[0].template AllocShared<RuntimeBlock>(
-                bindNode->m_childExpr, m_handle, m_parent, m_depTracker, m_dest,
-                m_memPoolDeviceAcc);
+        auto depOnExpr = garbageCollector->template AllocManaged(
+            bindNode->m_childExpr, m_handle, m_parent, m_depTracker, m_dest,
+            m_memPoolDeviceAcc, m_garbageCollectorHandle);
         if (depOnExpr == SharedRuntimeBlockHandle_t()) {
           return Error(Error::Type::OutOfMemory,
                        "Failed to allocate inner expression in bind");
         }
         AddDependentActiveBlock(depOnExpr, false);
-        m_memPoolDeviceAcc[0].RemoveRef(depOnExpr);
       }
 
       break;
     }
     case Compiler::ASTNode::Type::Call: {
       auto callNode = static_cast<Compiler::CallNode *>(astNode);
+      auto garbageCollector =
+          m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
       if (m_runtimeValues.size() == 0) {
         auto argsData = m_memPoolDeviceAcc[0].derefHandle(callNode->m_args);
         for (Index_t i = 0; i < callNode->m_args.GetCount(); ++i) {
@@ -216,31 +262,28 @@ public:
                          "While allocating call args runtime values");
           }
           auto targetRuntimeValue = m_runtimeValues.front();
-          auto dependencyOnArg =
-              m_memPoolDeviceAcc[0].template AllocShared<RuntimeBlock>(
-                  argsData[i], m_bindingParent, m_handle, m_depTracker,
-                  targetRuntimeValue, m_memPoolDeviceAcc);
+          auto dependencyOnArg = garbageCollector->template AllocManaged(
+              argsData[i], m_bindingParent, m_handle, m_depTracker,
+              targetRuntimeValue, m_memPoolDeviceAcc, m_garbageCollectorHandle);
           if (dependencyOnArg == SharedRuntimeBlockHandle_t()) {
             return Error(Error::Type::OutOfMemory, "Failed to alloc call arg");
           }
           AddDependentActiveBlock(dependencyOnArg);
-          m_memPoolDeviceAcc[0].RemoveRef(dependencyOnArg);
         }
 
         if (!m_runtimeValues.push_front(RuntimeValue())) {
           return Error(Error::Type::OutOfMemory,
                        "While allocating call lambda runtime value");
         }
-        auto dependencyOnLambda =
-            m_memPoolDeviceAcc[0].template AllocShared<RuntimeBlock>(
-                callNode->m_target, m_bindingParent, m_handle, m_depTracker,
-                m_runtimeValues.front(), m_memPoolDeviceAcc);
+        auto dependencyOnLambda = garbageCollector->template AllocManaged(
+            callNode->m_target, m_bindingParent, m_handle, m_depTracker,
+            m_runtimeValues.front(), m_memPoolDeviceAcc,
+            m_garbageCollectorHandle);
         if (dependencyOnLambda == SharedRuntimeBlockHandle_t()) {
           return Error(Error::Type::OutOfMemory,
                        "Failed to alloc space for lambda target of call");
         }
         AddDependentActiveBlock(dependencyOnLambda);
-        m_memPoolDeviceAcc[0].RemoveRef(dependencyOnLambda);
       } else {
         RuntimeValue lambdaVal = m_runtimeValues.derefFront();
         m_runtimeValues.pop_front();
@@ -252,38 +295,37 @@ public:
           return Error(Error::Type::ArityMismatch,
                        "Incorrect number of args in call of lambda expr");
         }
-        auto lambdaBlock =
-            m_memPoolDeviceAcc[0].template AllocShared<RuntimeBlock>(
-                lambdaVal.m_data.functionVal.m_expr, m_handle, m_parent,
-                m_depTracker, m_dest, m_memPoolDeviceAcc);
+        auto lambdaBlock = garbageCollector->template AllocManaged(
+            lambdaVal.m_data.functionVal.m_expr, m_handle, m_parent,
+            m_depTracker, m_dest, m_memPoolDeviceAcc, m_garbageCollectorHandle);
         if (lambdaBlock == SharedRuntimeBlockHandle_t()) {
           return Error(Error::Type::OutOfMemory,
                        "Failed to alloc space for lambda eval of call");
         }
         m_bindingParent = lambdaVal.m_data.functionVal.m_bindingParent;
         AddDependentActiveBlock(lambdaBlock, false);
-        m_memPoolDeviceAcc[0].RemoveRef(lambdaBlock);
       }
 
       break;
     }
     case Compiler::ASTNode::Type::If: {
       auto ifNode = static_cast<Compiler::IfNode *>(astNode);
+      auto garbageCollector =
+          m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
       if (m_runtimeValues.size() == 0) {
         if (!m_runtimeValues.push_front(RuntimeValue())) {
           return Error(Error::Type::OutOfMemory,
                        "While allocating runtime value for if pred");
         }
-        auto dependencyOnPred =
-            m_memPoolDeviceAcc[0].template AllocShared<RuntimeBlock>(
-                ifNode->m_pred, m_bindingParent, m_handle, m_depTracker,
-                m_runtimeValues.front(), m_memPoolDeviceAcc);
+        auto dependencyOnPred = garbageCollector->template AllocManaged(
+            ifNode->m_pred, m_bindingParent, m_handle, m_depTracker,
+            m_runtimeValues.front(), m_memPoolDeviceAcc,
+            m_garbageCollectorHandle);
         if (dependencyOnPred == SharedRuntimeBlockHandle_t()) {
           return Error(Error::Type::OutOfMemory,
                        "Failed to allocate dependency on pred for if expr");
         }
         AddDependentActiveBlock(dependencyOnPred);
-        m_memPoolDeviceAcc[0].RemoveRef(dependencyOnPred);
       } else {
         auto predValue = m_runtimeValues.derefFront();
         m_runtimeValues.pop_front();
@@ -293,16 +335,14 @@ public:
         }
         const bool isPredTrue = static_cast<bool>(predValue.m_data.doubleVal);
         const auto branchToTake = isPredTrue ? ifNode->m_then : ifNode->m_else;
-        auto dependencyOnBranch =
-            m_memPoolDeviceAcc[0].template AllocShared<RuntimeBlock>(
-                branchToTake, m_bindingParent, m_parent, m_depTracker, m_dest,
-                m_memPoolDeviceAcc);
+        auto dependencyOnBranch = garbageCollector->template AllocManaged(
+            branchToTake, m_bindingParent, m_parent, m_depTracker, m_dest,
+            m_memPoolDeviceAcc, m_garbageCollectorHandle);
         if (dependencyOnBranch == SharedRuntimeBlockHandle_t()) {
           return Error(Error::Type::OutOfMemory,
                        "Failed to allocate dependency on branch for if expr");
         }
         AddDependentActiveBlock(dependencyOnBranch, false);
-        m_memPoolDeviceAcc[0].RemoveRef(dependencyOnBranch);
       }
       break;
     }
@@ -382,7 +422,7 @@ public:
       if (!wasOpAdded) {
         struct RemainderFunctor {
           double operator()(const double val, const double base) const {
-            return fmod(val, base);
+            return cl::sycl::fmod(val, base);
           }
         };
         RETURN_IF_FAILURE(PerformBinaryOp<RemainderFunctor>());
@@ -394,7 +434,9 @@ public:
       RETURN_IF_FAILURE(MaybeAddUnaryOp(wasOpAdded));
       if (!wasOpAdded) {
         struct FloorFunctor {
-          double operator()(const double arg) const { return floor(arg); }
+          double operator()(const double arg) const {
+            return cl::sycl::floor(arg);
+          }
         };
         RETURN_IF_FAILURE(PerformUnaryOp<FloorFunctor>());
       }
@@ -467,16 +509,17 @@ private:
         return Error(Error::Type::OutOfMemory,
                      "While allocating dest for unary op");
       }
-      auto dependencyNode =
-          m_memPoolDeviceAcc[0].template AllocShared<RuntimeBlock>(
-              unaryOp->m_arg0, m_bindingParent, m_handle, m_depTracker,
-              m_runtimeValues.front(), m_memPoolDeviceAcc);
+      auto garbageCollector =
+          m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
+      auto dependencyNode = garbageCollector->template AllocManaged(
+          unaryOp->m_arg0, m_bindingParent, m_handle, m_depTracker,
+          m_runtimeValues.front(), m_memPoolDeviceAcc,
+          m_garbageCollectorHandle);
       if (dependencyNode == SharedRuntimeBlockHandle_t()) {
         return Error(Error::Type::OutOfMemory,
                      "Failed to allocate dependency on arg for unary op");
       }
       AddDependentActiveBlock(dependencyNode);
-      m_memPoolDeviceAcc[0].RemoveRef(dependencyNode);
       added = true;
     } else {
       added = false;
@@ -492,10 +535,12 @@ private:
         return Error(Error::Type::OutOfMemory,
                      "While allocating dest for left binary op arg");
       }
-      auto rightNodeBlock =
-          m_memPoolDeviceAcc[0].template AllocShared<RuntimeBlock>(
-              binaryOp->m_arg1, m_bindingParent, m_handle, m_depTracker,
-              m_runtimeValues.front(), m_memPoolDeviceAcc);
+      auto garbageCollector =
+          m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
+      auto rightNodeBlock = garbageCollector->template AllocManaged(
+          binaryOp->m_arg1, m_bindingParent, m_handle, m_depTracker,
+          m_runtimeValues.front(), m_memPoolDeviceAcc,
+          m_garbageCollectorHandle);
       if (rightNodeBlock == SharedRuntimeBlockHandle_t()) {
         return Error(Error::Type::OutOfMemory,
                      "Failed to allocate right arg dep in binary op");
@@ -505,10 +550,10 @@ private:
         return Error(Error::Type::OutOfMemory,
                      "While allocating dest for right binar op arg");
       }
-      auto leftNodeBlock =
-          m_memPoolDeviceAcc[0].template AllocShared<RuntimeBlock>(
-              binaryOp->m_arg0, m_bindingParent, m_handle, m_depTracker,
-              m_runtimeValues.front(), m_memPoolDeviceAcc);
+      auto leftNodeBlock = garbageCollector->template AllocManaged(
+          binaryOp->m_arg0, m_bindingParent, m_handle, m_depTracker,
+          m_runtimeValues.front(), m_memPoolDeviceAcc,
+          m_garbageCollectorHandle);
       if (leftNodeBlock == SharedRuntimeBlockHandle_t()) {
         return Error(Error::Type::OutOfMemory,
                      "Failed to allocate left arg depn in binary op");
@@ -516,9 +561,6 @@ private:
 
       AddDependentActiveBlock(rightNodeBlock);
       AddDependentActiveBlock(leftNodeBlock);
-
-      m_memPoolDeviceAcc[0].RemoveRef(rightNodeBlock);
-      m_memPoolDeviceAcc[0].RemoveRef(leftNodeBlock);
 
       added = true;
     } else {
@@ -559,13 +601,17 @@ private:
 
   void AddDependentActiveBlock(const SharedRuntimeBlockHandle_t block,
                                const bool isNewDependency = true) {
-    m_depTracker[0].AddActiveBlock(block, m_memPoolDeviceAcc);
+    m_depTracker[0].AddActiveBlock(block);
     auto derefdBlock = m_memPoolDeviceAcc[0].derefHandle(block);
     if (derefdBlock->m_parent != SharedRuntimeBlockHandle_t() &&
         isNewDependency) {
       auto derefdParent =
           m_memPoolDeviceAcc[0].derefHandle(derefdBlock->m_parent);
-      ++derefdParent->m_dependenciesRemaining;
+      cl::sycl::atomic<int> atomicDepCount(
+          (cl::sycl::multi_ptr<int,
+                               cl::sycl::access::address_space::global_space>(
+              &derefdParent->m_dependenciesRemainingData)));
+      atomicDepCount.fetch_add(1);
     }
   }
 
@@ -575,8 +621,12 @@ private:
     destRef->SetValue(type, data);
     if (m_parent != SharedRuntimeBlockHandle_t()) {
       auto derefdParent = m_memPoolDeviceAcc[0].derefHandle(m_parent);
-      if (--derefdParent->m_dependenciesRemaining == 0) {
-        m_depTracker[0].AddActiveBlock(m_parent, m_memPoolDeviceAcc);
+      cl::sycl::atomic<int> atomicDepCount(
+          (cl::sycl::multi_ptr<int,
+                               cl::sycl::access::address_space::global_space>(
+              &derefdParent->m_dependenciesRemainingData)));
+      if (atomicDepCount.fetch_add(-1) == 1) {
+        m_depTracker[0].AddActiveBlock(m_parent);
       }
     }
   }
@@ -590,10 +640,11 @@ private:
   cl::sycl::accessor<DependencyTracker_t, 1, cl::sycl::access::mode::read_write,
                      cl::sycl::access::target::global_buffer>
       m_depTracker;
-  std::atomic<int> m_dependenciesRemaining;
+  int m_dependenciesRemainingData;
 
   PortableMemPool::DeviceAccessor_t m_memPoolDeviceAcc;
-  bool m_isMarked;
+  PortableMemPool::Handle<GarbageCollector_t> m_garbageCollectorHandle;
 
+  bool m_isMarkedData;
 };
 }
