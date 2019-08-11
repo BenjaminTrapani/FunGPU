@@ -35,12 +35,21 @@ std::shared_ptr<cl::sycl::buffer<PortableMemPool>> Fixture::memPoolBuff =
     nullptr;
 std::shared_ptr<CPUEvaluator> Fixture::evaluator = nullptr;
 
+namespace {
+
+size_t GetAllocCount(cl::sycl::buffer<PortableMemPool> memPoolBuff) {
+  auto hostAcc = memPoolBuff.get_access<cl::sycl::access::mode::read_write>();
+  return hostAcc[0].GetTotalAllocationCount();
+}
+
 CPUEvaluator::RuntimeBlock_t::RuntimeValue
 RunProgram(const std::string &path,
            const std::shared_ptr<CPUEvaluator> &evaluator,
            cl::sycl::buffer<PortableMemPool> memPoolBuff) {
   std::cout << std::endl;
   std::cout << "Running program " << path << std::endl;
+
+  const auto initialAllocCount = GetAllocCount(memPoolBuff);
 
   Parser parser(path);
   auto parsedResult = parser.ParseProgram();
@@ -62,7 +71,11 @@ RunProgram(const std::string &path,
             << std::endl;
   compiler.DeallocateAST(compiledResult);
 
+  const auto finalAllocCount = GetAllocCount(memPoolBuff);
+  BOOST_REQUIRE_EQUAL(initialAllocCount, finalAllocCount);
+
   return programResult;
+}
 }
 
 BOOST_FIXTURE_TEST_SUITE(IntegrationTests, Fixture)
