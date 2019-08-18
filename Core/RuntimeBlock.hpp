@@ -202,12 +202,12 @@ public:
   }
 
 #define RETURN_IF_FAILURE(expr)                                                \
-  ({                                                                           \
+  {                                                                           \
     const auto __error = expr;                                                 \
     if (__error.GetType() != Error::Type::Success) {                           \
       return __error;                                                          \
     }                                                                          \
-  })
+  }
 
   Error PerformEvalPass() {
     auto astNode = GetASTNode();
@@ -227,7 +227,7 @@ public:
                          "While allocating space for bindings");
           }
           auto targetRuntimeValue = m_runtimeValues.front();
-          auto dependencyOnBinding = garbageCollector->template AllocManaged(
+          auto dependencyOnBinding = garbageCollector->AllocManaged(
               bindingsData[i], isRec ? m_handle : m_bindingParent, m_handle,
               m_depTracker, targetRuntimeValue, m_memPoolDeviceAcc,
               m_garbageCollectorHandle);
@@ -238,7 +238,7 @@ public:
           RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnBinding));
         }
       } else {
-        auto depOnExpr = garbageCollector->template AllocManaged(
+        auto depOnExpr = garbageCollector->AllocManaged(
             bindNode->m_childExpr, m_handle, m_parent, m_depTracker, m_dest,
             m_memPoolDeviceAcc, m_garbageCollectorHandle);
         if (depOnExpr == SharedRuntimeBlockHandle_t()) {
@@ -262,7 +262,7 @@ public:
                          "While allocating call args runtime values");
           }
           auto targetRuntimeValue = m_runtimeValues.front();
-          auto dependencyOnArg = garbageCollector->template AllocManaged(
+          auto dependencyOnArg = garbageCollector->AllocManaged(
               argsData[i], m_bindingParent, m_handle, m_depTracker,
               targetRuntimeValue, m_memPoolDeviceAcc, m_garbageCollectorHandle);
           if (dependencyOnArg == SharedRuntimeBlockHandle_t()) {
@@ -275,7 +275,7 @@ public:
           return Error(Error::Type::OutOfMemory,
                        "While allocating call lambda runtime value");
         }
-        auto dependencyOnLambda = garbageCollector->template AllocManaged(
+        auto dependencyOnLambda = garbageCollector->AllocManaged(
             callNode->m_target, m_bindingParent, m_handle, m_depTracker,
             m_runtimeValues.front(), m_memPoolDeviceAcc,
             m_garbageCollectorHandle);
@@ -295,7 +295,7 @@ public:
           return Error(Error::Type::ArityMismatch,
                        "Incorrect number of args in call of lambda expr");
         }
-        auto lambdaBlock = garbageCollector->template AllocManaged(
+        auto lambdaBlock = garbageCollector->AllocManaged(
             lambdaVal.m_data.functionVal.m_expr, m_handle, m_parent,
             m_depTracker, m_dest, m_memPoolDeviceAcc, m_garbageCollectorHandle);
         if (lambdaBlock == SharedRuntimeBlockHandle_t()) {
@@ -317,7 +317,7 @@ public:
           return Error(Error::Type::OutOfMemory,
                        "While allocating runtime value for if pred");
         }
-        auto dependencyOnPred = garbageCollector->template AllocManaged(
+        auto dependencyOnPred = garbageCollector->AllocManaged(
             ifNode->m_pred, m_bindingParent, m_handle, m_depTracker,
             m_runtimeValues.front(), m_memPoolDeviceAcc,
             m_garbageCollectorHandle);
@@ -335,7 +335,7 @@ public:
         }
         const bool isPredTrue = static_cast<bool>(predValue.m_data.doubleVal);
         const auto branchToTake = isPredTrue ? ifNode->m_then : ifNode->m_else;
-        auto dependencyOnBranch = garbageCollector->template AllocManaged(
+        auto dependencyOnBranch = garbageCollector->AllocManaged(
             branchToTake, m_bindingParent, m_parent, m_depTracker, m_dest,
             m_memPoolDeviceAcc, m_garbageCollectorHandle);
         if (dependencyOnBranch == SharedRuntimeBlockHandle_t()) {
@@ -511,7 +511,7 @@ private:
       }
       auto garbageCollector =
           m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
-      auto dependencyNode = garbageCollector->template AllocManaged(
+      auto dependencyNode = garbageCollector->AllocManaged(
           unaryOp->m_arg0, m_bindingParent, m_handle, m_depTracker,
           m_runtimeValues.front(), m_memPoolDeviceAcc,
           m_garbageCollectorHandle);
@@ -537,7 +537,7 @@ private:
       }
       auto garbageCollector =
           m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
-      auto rightNodeBlock = garbageCollector->template AllocManaged(
+      auto rightNodeBlock = garbageCollector->AllocManaged(
           binaryOp->m_arg1, m_bindingParent, m_handle, m_depTracker,
           m_runtimeValues.front(), m_memPoolDeviceAcc,
           m_garbageCollectorHandle);
@@ -550,7 +550,7 @@ private:
         return Error(Error::Type::OutOfMemory,
                      "While allocating dest for right binar op arg");
       }
-      auto leftNodeBlock = garbageCollector->template AllocManaged(
+      auto leftNodeBlock = garbageCollector->AllocManaged(
           binaryOp->m_arg0, m_bindingParent, m_handle, m_depTracker,
           m_runtimeValues.front(), m_memPoolDeviceAcc,
           m_garbageCollectorHandle);

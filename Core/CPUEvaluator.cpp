@@ -38,7 +38,7 @@ CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
     : m_dependencyTracker(std::make_shared<DependencyTracker>()),
       m_garbageCollectorHandleBuff(range<1>(1)), m_memPoolBuff(memPool),
       m_dependencyTrackerBuff(m_dependencyTracker, range<1>(1))
-/*m_workQueue(host_selector{})*/ {
+  /*m_workQueue(host_selector{})*/ {
   std::cout << std::endl;
   std::cout << "Running on "
             << m_workQueue.get_device().get_info<info::device::name>()
@@ -93,7 +93,7 @@ void CPUEvaluator::CreateFirstBlock(const Compiler::ASTNodeHandle rootNode) {
                                                garbageCollectorHandleAcc]() {
         auto gcRef = memPoolWrite[0].derefHandle(garbageCollectorHandleAcc[0]);
         const RuntimeBlock_t::SharedRuntimeBlockHandle_t emptyBlock;
-        const auto sharedInitialBlock = gcRef->template AllocManaged(
+        const auto sharedInitialBlock = gcRef->AllocManaged(
             rootNode, emptyBlock, emptyBlock, dependencyTracker,
             resultValueRefCpy, memPoolWrite, garbageCollectorHandleAcc[0]);
         dependencyTracker[0].AddActiveBlock(sharedInitialBlock);

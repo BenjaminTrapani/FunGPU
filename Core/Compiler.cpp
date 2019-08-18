@@ -102,7 +102,7 @@ Compiler::CompileListOfSExpr(std::shared_ptr<const SExpr> sexpr,
       }
 
       auto bindingsData =
-          memPoolAcc[0].template derefHandle(bindNode->m_bindings);
+          memPoolAcc[0].derefHandle(bindNode->m_bindings);
       for (size_t i = 0; i < bindingExprs->size(); ++i) {
         auto bindExpr = bindingExprs->at(i);
         auto bindExprChildren = bindExpr->GetChildren();
