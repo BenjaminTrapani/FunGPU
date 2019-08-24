@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SExpr.h"
+#include "Types.h"
 #include <fstream>
 #include <memory>
 
@@ -24,7 +25,7 @@ private:
     void DebugPrint() override;
 
     std::shared_ptr<std::vector<std::shared_ptr<ParsedExpr>>> m_childExprs;
-    size_t m_currentChildIndex = 0;
+    Index_t m_currentChildIndex = 0;
   };
 
   struct StringExpr : public ParsedExpr {

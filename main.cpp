@@ -31,10 +31,10 @@ int main(int argc, char **argv) {
         return 1;
       }
 
-      unsigned int maxConcurrentBlockCount;
+      Index_t maxConcurrentBlockCount;
       const auto programResult =
           evaluator.EvaluateProgram(compiledResult, maxConcurrentBlockCount);
-      std::cout << programResult.m_data.doubleVal << std::endl;
+      std::cout << programResult.m_data.floatVal << std::endl;
 
       compiler.DeallocateAST(compiledResult);
     }

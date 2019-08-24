@@ -3,11 +3,12 @@
 #include "List.hpp"
 #include "PortableMemPool.hpp"
 #include "SYCL/sycl.hpp"
+#include "Types.h"
 
 #include <atomic>
 
 namespace FunGPU {
-template <class DependencyTracker_t, size_t MaxManagedAllocsCount>
+template <class DependencyTracker_t, Index_t MaxManagedAllocsCount>
 class RuntimeBlock
     : public PortableMemPool::EnableHandleFromThis<
           RuntimeBlock<DependencyTracker_t, MaxManagedAllocsCount>> {
@@ -41,11 +42,11 @@ public:
   class RuntimeValue {
   public:
     enum class Type {
-      Double,
+      Float_t,
       Function,
     };
     union Data {
-      double doubleVal;
+      Float_t floatVal;
       FunctionValue functionVal;
 
       Data() : functionVal(FunctionValue()) {}
@@ -66,15 +67,14 @@ public:
         return false;
       }
       switch (m_type) {
-      case Type::Double: {
-        return m_data.doubleVal == other.m_data.doubleVal;
+      case Type::Float_t: {
+        return m_data.floatVal == other.m_data.floatVal;
       }
       case Type::Function: {
         return m_data.functionVal == other.m_data.functionVal;
       }
-      default:
-        break;
       }
+	  return false;
     }
 
     void SetValue(const Type type, const Data data) {
@@ -329,11 +329,11 @@ public:
       } else {
         auto predValue = m_runtimeValues.derefFront();
         m_runtimeValues.pop_front();
-        if (predValue.m_type != RuntimeValue::Type::Double) {
+        if (predValue.m_type != RuntimeValue::Type::Float_t) {
           return Error(Error::Type::InvalidType,
-                       "Double is the only supported bolean type");
+                       "Float_t is the only supported bolean type");
         }
-        const bool isPredTrue = static_cast<bool>(predValue.m_data.doubleVal);
+        const bool isPredTrue = static_cast<bool>(predValue.m_data.floatVal);
         const auto branchToTake = isPredTrue ? ifNode->m_then : ifNode->m_else;
         auto dependencyOnBranch = garbageCollector->AllocManaged(
             branchToTake, m_bindingParent, m_parent, m_depTracker, m_dest,
@@ -351,7 +351,7 @@ public:
       RETURN_IF_FAILURE(MaybeAddBinaryOp(wasOpAdded));
       if (!wasOpAdded) {
         struct AddFunctor {
-          double operator()(const double l, const double r) { return l + r; }
+          Float_t operator()(const Float_t l, const Float_t r) { return l + r; }
         };
         RETURN_IF_FAILURE(PerformBinaryOp<AddFunctor>());
       }
@@ -362,7 +362,7 @@ public:
       RETURN_IF_FAILURE(MaybeAddBinaryOp(wasOpAdded));
       if (!wasOpAdded) {
         struct SubFunctor {
-          double operator()(const double l, const double r) { return l - r; }
+          Float_t operator()(const Float_t l, const Float_t r) { return l - r; }
         };
         RETURN_IF_FAILURE(PerformBinaryOp<SubFunctor>());
       }
@@ -373,7 +373,7 @@ public:
       RETURN_IF_FAILURE(MaybeAddBinaryOp(wasOpAdded));
       if (!wasOpAdded) {
         struct MulFunctor {
-          double operator()(const double l, const double r) { return l * r; }
+          Float_t operator()(const Float_t l, const Float_t r) { return l * r; }
         };
         RETURN_IF_FAILURE(PerformBinaryOp<MulFunctor>());
       }
@@ -384,7 +384,7 @@ public:
       RETURN_IF_FAILURE(MaybeAddBinaryOp(wasOpAdded));
       if (!wasOpAdded) {
         struct DivFunctor {
-          double operator()(const double l, const double r) { return l / r; }
+          Float_t operator()(const Float_t l, const Float_t r) { return l / r; }
         };
         RETURN_IF_FAILURE(PerformBinaryOp<DivFunctor>());
       }
@@ -400,8 +400,8 @@ public:
         m_runtimeValues.pop_front();
         const bool areEq = lArg == rArg;
         typename RuntimeValue::Data dataVal;
-        dataVal.doubleVal = static_cast<double>(areEq);
-        RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Double, dataVal));
+        dataVal.floatVal = static_cast<Float_t>(areEq);
+        RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Float_t, dataVal));
       }
       break;
     }
@@ -410,7 +410,7 @@ public:
       RETURN_IF_FAILURE(MaybeAddBinaryOp(wasOpAdded));
       if (!wasOpAdded) {
         struct GreaterThanFunctor {
-          double operator()(const double l, const double r) { return l > r; }
+          Float_t operator()(const Float_t l, const Float_t r) { return l > r; }
         };
         RETURN_IF_FAILURE(PerformBinaryOp<GreaterThanFunctor>());
       }
@@ -421,7 +421,7 @@ public:
       RETURN_IF_FAILURE(MaybeAddBinaryOp(wasOpAdded));
       if (!wasOpAdded) {
         struct RemainderFunctor {
-          double operator()(const double val, const double base) const {
+          Float_t operator()(const Float_t val, const Float_t base) const {
             return cl::sycl::fmod(val, base);
           }
         };
@@ -434,7 +434,7 @@ public:
       RETURN_IF_FAILURE(MaybeAddUnaryOp(wasOpAdded));
       if (!wasOpAdded) {
         struct FloorFunctor {
-          double operator()(const double arg) const {
+          Float_t operator()(const Float_t arg) const {
             return cl::sycl::floor(arg);
           }
         };
@@ -445,8 +445,8 @@ public:
     case Compiler::ASTNode::Type::Number: {
       auto numNode = static_cast<Compiler::NumberNode *>(astNode);
       typename RuntimeValue::Data data;
-      data.doubleVal = numNode->m_value;
-      RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Double, data));
+      data.floatVal = numNode->m_value;
+      RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Float_t, data));
       break;
     }
     case Compiler::ASTNode::Type::Identifier: {
@@ -572,12 +572,12 @@ private:
 
   template <class UnaryOpFunctor> Error PerformUnaryOp() {
     const auto argVal = m_runtimeValues.derefFront();
-    if (argVal.m_type != RuntimeValue::Type::Double) {
-      return Error(Error::Type::InvalidType, "Expected double in unary op");
+    if (argVal.m_type != RuntimeValue::Type::Float_t) {
+      return Error(Error::Type::InvalidType, "Expected Float_t in unary op");
     }
     typename RuntimeValue::Data dataToSet;
-    dataToSet.doubleVal = UnaryOpFunctor()(argVal.m_data.doubleVal);
-    RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Double, dataToSet));
+    dataToSet.floatVal = UnaryOpFunctor()(argVal.m_data.floatVal);
+    RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Float_t, dataToSet));
 
     return Error();
   }
@@ -587,14 +587,14 @@ private:
     m_runtimeValues.pop_front();
     auto rArg = m_runtimeValues.derefFront();
     m_runtimeValues.pop_front();
-    if (lArg.m_type != RuntimeValue::Type::Double ||
-        rArg.m_type != RuntimeValue::Type::Double) {
-      return Error(Error::Type::InvalidType, "Expected doubles in binary op");
+    if (lArg.m_type != RuntimeValue::Type::Float_t ||
+        rArg.m_type != RuntimeValue::Type::Float_t) {
+      return Error(Error::Type::InvalidType, "Expected Float_ts in binary op");
     }
     typename RuntimeValue::Data dataVal;
-    dataVal.doubleVal =
-        BinaryOpFunctor()(lArg.m_data.doubleVal, rArg.m_data.doubleVal);
-    RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Double, dataVal));
+    dataVal.floatVal =
+        BinaryOpFunctor()(lArg.m_data.floatVal, rArg.m_data.floatVal);
+    RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Float_t, dataVal));
 
     return Error();
   }

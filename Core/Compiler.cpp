@@ -1,6 +1,7 @@
 #include "Compiler.h"
 #include <iostream>
 #include <sstream>
+#include "Types.h"
 
 namespace FunGPU {
 Compiler::ASTNodeHandle
@@ -103,7 +104,7 @@ Compiler::CompileListOfSExpr(std::shared_ptr<const SExpr> sexpr,
 
       auto bindingsData =
           memPoolAcc[0].derefHandle(bindNode->m_bindings);
-      for (size_t i = 0; i < bindingExprs->size(); ++i) {
+      for (Index_t i = 0; i < bindingExprs->size(); ++i) {
         auto bindExpr = bindingExprs->at(i);
         auto bindExprChildren = bindExpr->GetChildren();
         bindingsData[i] =
@@ -164,7 +165,7 @@ Compiler::CompileListOfSExpr(std::shared_ptr<const SExpr> sexpr,
         memPoolAcc);
     auto callNode = memPoolAcc[0].derefHandle(callNodeHandle);
     auto argsData = memPoolAcc[0].derefHandle(callNode->m_args);
-    for (size_t i = 1; i < sexprChildren->size(); ++i) {
+    for (Index_t i = 1; i < sexprChildren->size(); ++i) {
       auto curArg = sexprChildren->at(i);
       argsData[i - 1] = Compile(curArg, boundIdentifiers, memPoolAcc);
     }
@@ -197,7 +198,7 @@ Compiler::Compile(std::shared_ptr<const SExpr> sexpr,
     break;
   }
   case SExpr::Type::Number: {
-    result = memPoolAcc[0].template Alloc<NumberNode>(sexpr->GetDoubleVal());
+    result = memPoolAcc[0].template Alloc<NumberNode>(sexpr->GetfloatVal());
     break;
   }
   case SExpr::Type::ListOfSExpr: {

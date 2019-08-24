@@ -5,6 +5,10 @@
 #define BOOST_TEST_MODULE IntegrationTestsModule
 #include <boost/test/included/unit_test.hpp>
 
+// windows weirdness
+#undef max
+#undef min
+
 #include "CPUEvaluator.h"
 #include "Compiler.h"
 #include "Parser.h"
@@ -37,7 +41,7 @@ std::shared_ptr<CPUEvaluator> Fixture::evaluator = nullptr;
 
 namespace {
 
-size_t GetAllocCount(cl::sycl::buffer<PortableMemPool> memPoolBuff) {
+Index_t GetAllocCount(cl::sycl::buffer<PortableMemPool> memPoolBuff) {
   auto hostAcc = memPoolBuff.get_access<cl::sycl::access::mode::read_write>();
   return hostAcc[0].GetTotalAllocationCount();
 }
@@ -64,7 +68,7 @@ RunProgram(const std::string &path,
   compiler.DebugPrintAST(compiledResult);
   std::cout << std::endl;
 
-  unsigned int maxBlocksForExec;
+  Index_t maxBlocksForExec;
   const auto programResult =
       evaluator->EvaluateProgram(compiledResult, maxBlocksForExec);
   std::cout << "Max concurrent blocks during exec: " << maxBlocksForExec
@@ -83,55 +87,55 @@ BOOST_FIXTURE_TEST_SUITE(IntegrationTests, Fixture)
 BOOST_AUTO_TEST_CASE(MultiLet) {
   const auto programResult =
       RunProgram("../TestPrograms/MultiLet.fgpu", evaluator, *memPoolBuff);
-  BOOST_REQUIRE_EQUAL(1, programResult.m_data.doubleVal);
+  BOOST_REQUIRE_EQUAL(1, programResult.m_data.floatVal);
 }
 
 BOOST_AUTO_TEST_CASE(NoBindings) {
   const auto programResult =
       RunProgram("../TestPrograms/NoBindings.fgpu", evaluator, *memPoolBuff);
-  BOOST_REQUIRE_EQUAL(14, programResult.m_data.doubleVal);
+  BOOST_REQUIRE_EQUAL(14, programResult.m_data.floatVal);
 }
 
 BOOST_AUTO_TEST_CASE(SimpleCall) {
   const auto programResult =
       RunProgram("../TestPrograms/SimpleCall.fgpu", evaluator, *memPoolBuff);
-  BOOST_REQUIRE_EQUAL(42, programResult.m_data.doubleVal);
+  BOOST_REQUIRE_EQUAL(42, programResult.m_data.floatVal);
 }
 
 BOOST_AUTO_TEST_CASE(CallMultiBindings) {
   const auto programResult = RunProgram(
       "../TestPrograms/CallMultiBindings.fgpu", evaluator, *memPoolBuff);
-  BOOST_REQUIRE_EQUAL(13, programResult.m_data.doubleVal);
+  BOOST_REQUIRE_EQUAL(13, programResult.m_data.floatVal);
 }
 
 BOOST_AUTO_TEST_CASE(ListExample) {
   const auto programResult =
       RunProgram("../TestPrograms/ListExample.fgpu", evaluator, *memPoolBuff);
-  BOOST_REQUIRE_EQUAL(6, programResult.m_data.doubleVal);
+  BOOST_REQUIRE_EQUAL(6, programResult.m_data.floatVal);
 }
 
 BOOST_AUTO_TEST_CASE(MultiList) {
   const auto programResult =
       RunProgram("../TestPrograms/MultiList.fgpu", evaluator, *memPoolBuff);
-  BOOST_REQUIRE_EQUAL(3, programResult.m_data.doubleVal);
+  BOOST_REQUIRE_EQUAL(3, programResult.m_data.floatVal);
 }
 
 BOOST_AUTO_TEST_CASE(MultiLetRec) {
   const auto programResult =
       RunProgram("../TestPrograms/MultiLetRec.fgpu", evaluator, *memPoolBuff);
-  BOOST_REQUIRE_EQUAL(135, programResult.m_data.doubleVal);
+  BOOST_REQUIRE_EQUAL(135, programResult.m_data.floatVal);
 }
 
 BOOST_AUTO_TEST_CASE(MergeSort) {
   const auto programResult =
       RunProgram("../TestPrograms/MergeSort.fgpu", evaluator, *memPoolBuff);
-  BOOST_REQUIRE_EQUAL(123456, programResult.m_data.doubleVal);
+  BOOST_REQUIRE_EQUAL(123456, programResult.m_data.floatVal);
 }
 
 BOOST_AUTO_TEST_CASE(GraphColoring) {
   const auto programResult =
       RunProgram("../TestPrograms/GraphColoring.fgpu", evaluator, *memPoolBuff);
-  BOOST_REQUIRE_EQUAL(8, programResult.m_data.doubleVal);
+  BOOST_REQUIRE_EQUAL(8, programResult.m_data.floatVal);
 }
 
 BOOST_AUTO_TEST_CASE(CleanUpFixture) {

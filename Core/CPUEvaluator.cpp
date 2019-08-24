@@ -20,8 +20,8 @@ class gc_compact;
 CPUEvaluator::RuntimeBlock_t::Error
 CPUEvaluator::DependencyTracker::AddActiveBlock(
     const RuntimeBlock_t::SharedRuntimeBlockHandle_t &block) {
-  cl::sycl::atomic<unsigned int> activeBlockCount(
-      (cl::sycl::multi_ptr<unsigned int,
+  cl::sycl::atomic<Index_t> activeBlockCount(
+      (cl::sycl::multi_ptr<Index_t,
                            cl::sycl::access::address_space::global_space>(
           &m_activeBlockCountData)));
   const auto indexToInsert = activeBlockCount.fetch_add(1);
@@ -37,8 +37,8 @@ CPUEvaluator::DependencyTracker::AddActiveBlock(
 CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
     : m_dependencyTracker(std::make_shared<DependencyTracker>()),
       m_garbageCollectorHandleBuff(range<1>(1)), m_memPoolBuff(memPool),
-      m_dependencyTrackerBuff(m_dependencyTracker, range<1>(1)),
-      m_workQueue(host_selector{}) {
+      m_dependencyTrackerBuff(m_dependencyTracker, range<1>(1))
+     /* m_workQueue(host_selector{})*/ {
   std::cout << std::endl;
   std::cout << "Running on "
             << m_workQueue.get_device().get_info<info::device::name>()
@@ -65,6 +65,10 @@ CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
           });
     });
     m_workQueue.wait();
+	auto gcHandleHostAcc =
+		m_garbageCollectorHandleBuff.get_access<access::mode::read_write>();
+	auto gcHandle = gcHandleHostAcc[0];
+	int x = 1;
   } catch (cl::sycl::exception e) {
     std::cerr << "Sycl exception in init: " << e.what() << std::endl;
   }
@@ -92,6 +96,7 @@ void CPUEvaluator::CreateFirstBlock(const Compiler::ASTNodeHandle rootNode) {
                                                resultValueRefCpy, rootNode,
                                                garbageCollectorHandleAcc]() {
         auto gcRef = memPoolWrite[0].derefHandle(garbageCollectorHandleAcc[0]);
+		gcRef->SetMemPoolAcc(memPoolWrite);
         const RuntimeBlock_t::SharedRuntimeBlockHandle_t emptyBlock;
         const auto sharedInitialBlock = gcRef->AllocManaged(
             rootNode, emptyBlock, emptyBlock, dependencyTracker,
@@ -107,7 +112,7 @@ void CPUEvaluator::CreateFirstBlock(const Compiler::ASTNodeHandle rootNode) {
 
 CPUEvaluator::RuntimeBlock_t::RuntimeValue
 CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
-                              unsigned int &maxConcurrentBlocksDuringExec) {
+                              Index_t &maxConcurrentBlocksDuringExec) {
   CreateFirstBlock(rootNode);
 
   maxConcurrentBlocksDuringExec = 0;
@@ -118,19 +123,19 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
     buffer<RuntimeBlock_t::Error> errorsPerBlock(
         range<1>(m_dependencyTracker->m_newActiveBlocks.size()));
 
-    unsigned int blockErrorIdxData = 0;
-    buffer<unsigned int> blockErrorIdx(&blockErrorIdxData, range<1>(1));
+    Index_t blockErrorIdxData = 0;
+    buffer<Index_t> blockErrorIdx(&blockErrorIdxData, range<1>(1));
 
     bool markingsExpandedData = false;
     buffer<bool> markingsExpanded(&markingsExpandedData, range<1>(1));
 
-    unsigned int managedAllocdCountData = 0;
-    buffer<unsigned int> managedAllocdCount(&managedAllocdCountData,
+    Index_t managedAllocdCountData = 0;
+    buffer<Index_t> managedAllocdCount(&managedAllocdCountData,
                                             range<1>(1));
 
-    size_t ticksSinceGc = 0;
+    Index_t ticksSinceGc = 0;
     while (true) {
-      unsigned int numActiveBlocks = 0;
+      Index_t numActiveBlocks = 0;
       {
         auto hostDepTracker =
             m_dependencyTrackerBuff.get_access<access::mode::read_write>();
@@ -144,10 +149,11 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
               errorsPerBlock.get_access<access::mode::read_write>();
           std::stringstream ss;
           ss << "Block errors in previous pass: " << std::endl;
-          for (unsigned int i = 0; i < hostBlockHasErrorAcc[0]; ++i) {
+          for (Index_t i = 0; i < hostBlockHasErrorAcc[0]; ++i) {
             ss << errorsPerBlockAcc[i].GetDescription() << std::endl;
           }
-          throw std::runtime_error(ss.str());
+		  const auto errorString = ss.str();
+          throw std::runtime_error(errorString);
         }
         hostBlockHasErrorAcc[0] = 0;
       }
@@ -168,14 +174,14 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
               [dependencyTracker, workingBlocksAcc, memPoolAcc](item<1> itm) {
                 const auto idx = itm.get_linear_id();
                 workingBlocksAcc[idx] =
-                    dependencyTracker[0].GetBlockAtIndex(idx);
+                    dependencyTracker[0].GetBlockAtIndex(static_cast<Index_t>(idx));
                 const auto derefdWorking =
                     memPoolAcc[0].derefHandle(workingBlocksAcc[idx]);
               });
         });
       }
 
-      if (ticksSinceGc >= 16 || numActiveBlocks == 0) {
+      if (ticksSinceGc >= 8192 || numActiveBlocks == 0) {
         ticksSinceGc = 0;
 
         if (numActiveBlocks > 0) {
@@ -211,7 +217,7 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
         });
         m_workQueue.wait();
 
-        unsigned int managedAllocdSize;
+        Index_t managedAllocdSize;
         {
           auto managedAllocdCountHost =
               managedAllocdCount.get_access<access::mode::read>();
@@ -236,7 +242,7 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
                     auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
                     gcRef->SetMemPoolAcc(memPoolAcc);
                     const auto wereMarkingsExpandedHere =
-                        gcRef->RunMarkPass(itm.get_linear_id());
+                        gcRef->RunMarkPass(static_cast<Index_t>(itm.get_linear_id()));
                     if (wereMarkingsExpandedHere) {
                       markingsExpandedAcc[0] = true;
                     }
@@ -263,7 +269,7 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
                 [gcHandleAcc, memPoolAcc](item<1> itm) {
                   auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
                   gcRef->SetMemPoolAcc(memPoolAcc);
-                  gcRef->Sweep(itm.get_linear_id());
+                  gcRef->Sweep(static_cast<Index_t>(itm.get_linear_id()));
                 });
           });
 
@@ -281,8 +287,6 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
           });
 
           // Compact
-          // TODO can't compact in place, need seperate container to compact
-          // into.
           m_workQueue.submit([&](handler &cgh) {
             auto gcHandleAcc =
                 m_garbageCollectorHandleBuff.get_access<access::mode::read>(
@@ -293,7 +297,7 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
                 cl::sycl::range<1>(managedAllocdSize),
                 [gcHandleAcc, memPoolAcc](item<1> itm) {
                   auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
-                  gcRef->Compact(itm.get_linear_id());
+                  gcRef->Compact(static_cast<Index_t>(itm.get_linear_id()));
                 });
           });
         }
@@ -331,7 +335,7 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
                                                  dependencyTracker);
                 const auto error = derefdCurrentBlock->PerformEvalPass();
                 if (error.GetType() != RuntimeBlock_t::Error::Type::Success) {
-                  cl::sycl::atomic<unsigned int> blockErrorIdxAtomic(
+                  cl::sycl::atomic<Index_t> blockErrorIdxAtomic(
                       blockErrorIdxAtomicAcc[0]);
                   blockErrorAcc[blockErrorIdxAtomic.fetch_add(1)] = error;
                 }

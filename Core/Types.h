@@ -1,6 +1,6 @@
 #pragma once
 
 namespace FunGPU {
-using Index_t = unsigned long long int;
+using Index_t = unsigned int;
 using Float_t = double;
 }

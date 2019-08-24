@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "Types.h"
 
 namespace FunGPU {
 class SExpr {
@@ -11,19 +12,19 @@ public:
   SExpr();
   SExpr(const std::shared_ptr<std::string> &literalValue);
   void AddChild(const std::shared_ptr<SExpr> &val);
-  void DebugPrint(unsigned int indentLevel);
+  void DebugPrint(Index_t indentLevel);
   Type GetType() const { return m_type; }
   const std::shared_ptr<std::string> GetSymbol() const { return m_stringValue; }
   const std::shared_ptr<std::vector<std::shared_ptr<SExpr>>>
   GetChildren() const {
     return m_sexprValue;
   }
-  double GetDoubleVal() const { return m_numValue; }
+  Float_t GetfloatVal() const { return m_numValue; }
 
 private:
   Type m_type;
   std::shared_ptr<std::string> m_stringValue;
-  double m_numValue;
+  Float_t m_numValue;
   std::shared_ptr<std::vector<std::shared_ptr<SExpr>>> m_sexprValue;
 };
 }

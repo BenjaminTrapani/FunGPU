@@ -23,38 +23,38 @@ public:
     CPUEvaluator::RuntimeBlock_t::Error
     AddActiveBlock(const RuntimeBlock_t::SharedRuntimeBlockHandle_t &block);
 
-    unsigned int GetActiveBlockCount() {
-      cl::sycl::atomic<unsigned int> activeBlockCount(
-          (cl::sycl::multi_ptr<unsigned int,
+    Index_t GetActiveBlockCount() {
+      cl::sycl::atomic<Index_t> activeBlockCount(
+          (cl::sycl::multi_ptr<Index_t,
                                cl::sycl::access::address_space::global_space>(
               &m_activeBlockCountData)));
       return activeBlockCount.load();
     }
 
     void ResetActiveBlockCount() {
-      cl::sycl::atomic<unsigned int> activeBlockCount(
-          (cl::sycl::multi_ptr<unsigned int,
+      cl::sycl::atomic<Index_t> activeBlockCount(
+          (cl::sycl::multi_ptr<Index_t,
                                cl::sycl::access::address_space::global_space>(
               &m_activeBlockCountData)));
       activeBlockCount.store(0);
     }
 
     RuntimeBlock_t::SharedRuntimeBlockHandle_t
-    GetBlockAtIndex(const unsigned int index) {
+    GetBlockAtIndex(const Index_t index) {
       return m_newActiveBlocks[index];
     }
 
   private:
     std::array<RuntimeBlock_t::SharedRuntimeBlockHandle_t, 4096>
         m_newActiveBlocks;
-    unsigned int m_activeBlockCountData;
+    Index_t m_activeBlockCountData;
   };
 
   CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool);
   ~CPUEvaluator();
   RuntimeBlock_t::RuntimeValue
   EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
-                  unsigned int &maxConcurrentBlocksDuringExec);
+                  Index_t &maxConcurrentBlocksDuringExec);
   cl::sycl::buffer<PortableMemPool> GetMemPoolBuffer() const {
     return m_memPoolBuff;
   }
