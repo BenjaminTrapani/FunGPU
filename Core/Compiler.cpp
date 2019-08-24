@@ -82,7 +82,7 @@ Compiler::CompileListOfSExpr(std::shared_ptr<const SExpr> sexpr,
       auto bindingExprs = sexprChildren->at(1)->GetChildren();
       auto exprToEvalInBindingEnv = sexprChildren->at(2);
       const auto bindNodeHandle = memPoolAcc[0].template Alloc<BindNode>(
-          bindingExprs->size(), isRec, memPoolAcc);
+          static_cast<Index_t>(bindingExprs->size()), isRec, memPoolAcc);
       auto bindNode = memPoolAcc[0].derefHandle(bindNodeHandle);
 
       auto updatedBindings = boundIdentifiers;
@@ -133,7 +133,8 @@ Compiler::CompileListOfSExpr(std::shared_ptr<const SExpr> sexpr,
       auto exprToEval = sexprChildren->at(2);
       auto compiledASTNode = Compile(exprToEval, boundIdentifiers, memPoolAcc);
       result = memPoolAcc[0].template Alloc<LambdaNode>(
-          identifierListChildren->size(), compiledASTNode);
+          static_cast<Index_t>(identifierListChildren->size()),
+          compiledASTNode);
     } else if (firstChildSym == "if") {
       if (sexprChildren->size() != 4) {
         throw CompileException("Expected if expr to have 3 arguments");
@@ -160,8 +161,8 @@ Compiler::CompileListOfSExpr(std::shared_ptr<const SExpr> sexpr,
     auto argCount = sexprChildren->size() - 1;
     auto targetLambdaExpr = sexprChildren->at(0);
     const auto callNodeHandle = memPoolAcc[0].template Alloc<CallNode>(
-        argCount, Compile(targetLambdaExpr, boundIdentifiers, memPoolAcc),
-        memPoolAcc);
+        static_cast<Index_t>(argCount),
+        Compile(targetLambdaExpr, boundIdentifiers, memPoolAcc), memPoolAcc);
     auto callNode = memPoolAcc[0].derefHandle(callNodeHandle);
     auto argsData = memPoolAcc[0].derefHandle(callNode->m_args);
     for (Index_t i = 1; i < sexprChildren->size(); ++i) {
@@ -192,8 +193,8 @@ Compiler::Compile(std::shared_ptr<const SExpr> sexpr,
       sstream << "Unbound identifier " << *sexpr->GetSymbol() << std::endl;
       throw CompileException(sstream.str());
     }
-    result = memPoolAcc[0].template Alloc<IdentifierNode>(
-        std::distance(boundIdentifiers.begin(), identPos));
+    result = memPoolAcc[0].template Alloc<IdentifierNode>(static_cast<Index_t>(
+        std::distance(boundIdentifiers.begin(), identPos)));
     break;
   }
   case SExpr::Type::Number: {

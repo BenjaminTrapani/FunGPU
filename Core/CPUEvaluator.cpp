@@ -225,7 +225,6 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
         if (managedAllocdSize > 0) {
           // Expand markings
           bool wasMarkingsExpandedInLastPass = true;
-          std::cout << "Expanding markings" << std::endl;
           while (wasMarkingsExpandedInLastPass) {
             m_workQueue.submit([&](handler &cgh) {
               auto gcHandleAcc =
@@ -319,7 +318,6 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
           auto blockErrorAcc =
               errorsPerBlock.get_access<access::mode::read_write>(cgh);
 
-          std::cout << "Running eval pass" << std::endl;
           cgh.parallel_for<class run_eval_pass>(
               cl::sycl::range<1>(numActiveBlocks),
               [dependencyTracker, memPoolWrite, workingBlocksAcc,
