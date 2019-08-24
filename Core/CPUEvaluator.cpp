@@ -37,8 +37,8 @@ CPUEvaluator::DependencyTracker::AddActiveBlock(
 CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
     : m_dependencyTracker(std::make_shared<DependencyTracker>()),
       m_garbageCollectorHandleBuff(range<1>(1)), m_memPoolBuff(memPool),
-      m_dependencyTrackerBuff(m_dependencyTracker, range<1>(1))
-  /*m_workQueue(host_selector{})*/ {
+      m_dependencyTrackerBuff(m_dependencyTracker, range<1>(1)),
+      m_workQueue(host_selector{}) {
   std::cout << std::endl;
   std::cout << "Running on "
             << m_workQueue.get_device().get_info<info::device::name>()

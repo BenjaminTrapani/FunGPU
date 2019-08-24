@@ -1,8 +1,6 @@
 #pragma once
 
 #include "SYCL/sycl.hpp"
-#include "SpinLock.h"
-#include <atomic>
 #include <limits>
 #include <memory>
 #include <type_traits>
@@ -135,7 +133,9 @@ public:
 private:
   struct ListNode {
     ListNode(const size_t beginIndex) : m_beginIndex(beginIndex) {}
-    ListNode() : m_beginIndex(0), m_nextNode(0) {}
+    ListNode()
+        : m_beginIndex(std::numeric_limits<size_t>::max()),
+          m_nextNode(std::numeric_limits<size_t>::max()) {}
     bool operator==(const ListNode &other) const {
       return m_beginIndex == other.m_beginIndex &&
              m_nextNode == other.m_nextNode &&
@@ -164,45 +164,52 @@ private:
         listNode.m_indexInStorage = i;
         listNode.m_nextNode = i + 1;
       }
-
-      m_freeListHead = m_listNodeStorage[0];
-      m_freeListTail.m_beginIndex = m_bytes.size() + 1;
-      m_freeListTail.m_nextNode = m_listNodeStorage.size() + 1;
+      m_freeListHeadIdx = 0;
+      m_freeListTailIdx = m_listNodeStorage.size() - 1;
     }
 
     ListNode AllocFromArena() {
-      m_lock.Aquire();
-
-      if (m_freeListHead == m_freeListTail) {
-        m_lock.Release();
-        return m_freeListHead;
+      while (true) {
+        cl::sycl::atomic<unsigned int> freeListHead(
+            (cl::sycl::multi_ptr<unsigned int,
+                                 cl::sycl::access::address_space::global_space>(
+                &m_freeListHeadIdx)));
+        cl::sycl::atomic<unsigned int> freeListTail(
+            (cl::sycl::multi_ptr<unsigned int,
+                                 cl::sycl::access::address_space::global_space>(
+                &m_freeListTailIdx)));
+        auto curFreeListHead = freeListHead.load();
+        const auto curFreeListTail = freeListTail.load();
+        if (curFreeListHead == curFreeListTail) {
+          return ListNode();
+        }
+        const auto nextListNode = m_listNodeStorage[curFreeListHead].m_nextNode;
+        if (freeListHead.compare_exchange_strong(curFreeListHead,
+                                                 nextListNode)) {
+          cl::sycl::atomic<unsigned int> totalAllocations(
+              (cl::sycl::multi_ptr<
+                  unsigned int, cl::sycl::access::address_space::global_space>(
+                  &m_totalAllocations)));
+          totalAllocations.fetch_add(1);
+          return m_listNodeStorage[curFreeListHead];
+        }
       }
-
-      const auto result = m_freeListHead;
-      const auto nextListIndex = m_freeListHead.m_nextNode;
-      if (nextListIndex >= m_listNodeStorage.size()) {
-        m_freeListHead = m_freeListTail;
-      } else {
-        m_freeListHead = m_listNodeStorage[nextListIndex];
-      }
-
-      ++m_totalAllocations;
-
-      m_lock.Release();
-
-      return result;
     }
 
     void FreeFromArena(const size_t allocIndex) {
-      m_lock.Aquire();
+      cl::sycl::atomic<unsigned int> freeListTail(
+          (cl::sycl::multi_ptr<unsigned int,
+                               cl::sycl::access::address_space::global_space>(
+              &m_freeListTailIdx)));
+      const auto curFreeListTail = freeListTail.exchange(allocIndex);
+      auto &prevTail = m_listNodeStorage[curFreeListTail];
+      prevTail.m_nextNode = allocIndex;
 
-      m_listNodeStorage[allocIndex].m_nextNode =
-          m_freeListHead.m_indexInStorage;
-      m_freeListHead = m_listNodeStorage[allocIndex];
-
-      --m_totalAllocations;
-
-      m_lock.Release();
+      cl::sycl::atomic<unsigned int> totalAllocations(
+          (cl::sycl::multi_ptr<unsigned int,
+                               cl::sycl::access::address_space::global_space>(
+              &m_totalAllocations)));
+      totalAllocations.fetch_sub(1);
     }
 
     unsigned char *GetBytes(const size_t allocIndex) {
@@ -213,11 +220,10 @@ private:
     std::array<unsigned char, TotalBytes_i> m_bytes;
     std::array<ListNode, TotalBytes_i / AllocSize_i> m_listNodeStorage;
 
-    ListNode m_freeListHead;
-    ListNode m_freeListTail;
-    SpinLock m_lock;
+    unsigned int m_freeListHeadIdx;
+    unsigned int m_freeListTailIdx;
 
-    size_t m_totalAllocations = 0;
+    unsigned int m_totalAllocations = 0;
   };
 
   template <class T> struct SetHandleNoOp {
@@ -238,7 +244,7 @@ private:
                       Arena<allocSizes, totalSizes> &... arenas) {
     if (allocSize >= sizeof(T)) {
       const auto allocdListNode = arena.AllocFromArena();
-      if (allocdListNode == arena.m_freeListTail) {
+      if (allocdListNode == ListNode()) {
         return Handle<T>();
       }
 
@@ -255,7 +261,7 @@ private:
   Handle<T> AllocImpl(Arena<allocSize, totalSize> &arena) {
     if (allocSize >= sizeof(T)) {
       const auto allocdListNode = arena.AllocFromArena();
-      if (allocdListNode == arena.m_freeListTail) {
+      if (allocdListNode == ListNode()) {
         return Handle<T>();
       }
       const Handle<T> resultHandle(
@@ -274,7 +280,7 @@ private:
                                 Arena<allocSizes, totalSizes> &... arenas) {
     if (allocSize >= sizeof(T) * arraySize) {
       const auto allocdListNode = arena.AllocFromArena();
-      if (allocdListNode == arena.m_freeListTail) {
+      if (allocdListNode == ListNode()) {
         return ArrayHandle<T>();
       }
       const ArrayHandle<T> resultHandle(
@@ -297,7 +303,7 @@ private:
                                 Arena<allocSize, totalSize> &arena) {
     if (allocSize >= sizeof(T) * arraySize) {
       const auto allocdListNode = arena.AllocFromArena();
-      if (allocdListNode == arena.m_freeListTail) {
+      if (allocdListNode == ListNode()) {
         return ArrayHandle<T>();
       }
       const ArrayHandle<T> resultHandle(
@@ -403,11 +409,11 @@ private:
                               Arena<allocSizes, totalSizes> &... arenas) {
     size_t totalAllocCount = 0;
 
-    {
-      arena.m_lock.Aquire();
-      totalAllocCount += arena.m_totalAllocations;
-      arena.m_lock.Release();
-    }
+    cl::sycl::atomic<unsigned int> totalAllocations(
+        (cl::sycl::multi_ptr<unsigned int,
+                             cl::sycl::access::address_space::global_space>(
+            &arena.m_totalAllocations)));
+    totalAllocCount += totalAllocations.load();
     totalAllocCount += GetTotalAllocationCountImpl(arenas...);
 
     return totalAllocCount;
@@ -415,11 +421,11 @@ private:
 
   template <size_t allocSize, size_t totalSize>
   size_t GetTotalAllocationCountImpl(Arena<allocSize, totalSize> &arena) {
-    arena.m_lock.Aquire();
-    const auto result = arena.m_totalAllocations;
-    arena.m_lock.Release();
-
-    return result;
+    cl::sycl::atomic<unsigned int> totalAllocations(
+        (cl::sycl::multi_ptr<unsigned int,
+                             cl::sycl::access::address_space::global_space>(
+            &arena.m_totalAllocations)));
+    return totalAllocations.load();
   }
 
   static constexpr size_t binSize = 16777216;
