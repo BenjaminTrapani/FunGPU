@@ -1,19 +1,19 @@
 #pragma once
 
 #include "SYCL/sycl.hpp"
+#include "Types.h"
 #include <limits>
 #include <memory>
 #include <type_traits>
 #include <utility>
 #include <vector>
-#include "Types.h"
 
 namespace FunGPU {
 /**
-* Arena-based memory pool that can be moved around without invalidating
-* references to objects in it.
-* Required to alloc compiled nodes on host and reference them on device.
-*/
+ * Arena-based memory pool that can be moved around without invalidating
+ * references to objects in it.
+ * Required to alloc compiled nodes on host and reference them on device.
+ */
 
 class PortableMemPool {
 public:
@@ -141,49 +141,53 @@ private:
         "Expected TotalBytes to be a multiple of the allocation size");
 
     static constexpr Index_t TotalNodes = TotalBytes_i / AllocSize_i;
-	static_assert((static_cast<size_t>(std::numeric_limits<Index_t>::max()) + 1) % TotalNodes == 0, "Ring buffer counts must wrap to 0 at multiples of total nodes");
+    static_assert(
+        (static_cast<size_t>(std::numeric_limits<Index_t>::max()) + 1) %
+                TotalNodes ==
+            0,
+        "Ring buffer counts must wrap to 0 at multiples of total nodes");
 
     Arena() {
       for (Index_t i = 0; i < m_allocBeginIndices.size(); ++i) {
-		m_allocBeginIndices[i] = i * AllocSize_i;
+        m_allocBeginIndices[i] = i * AllocSize_i;
       }
     }
 
     Index_t AllocFromArena() {
-		cl::sycl::atomic<Index_t> allocCount(
-			(cl::sycl::multi_ptr<Index_t,
-				cl::sycl::access::address_space::global_space>(
-					&m_totalAllocations)));
-		const auto prevAllocCount = allocCount.fetch_add(1);
-		if (prevAllocCount >= m_allocBeginIndices.size()) {
-			return std::numeric_limits<Index_t>::max();
-		}
-		cl::sycl::atomic<Index_t> freeBlockBegin(
-			(cl::sycl::multi_ptr<Index_t,
-				cl::sycl::access::address_space::global_space>(
-					&m_freeBlockBegin)));
-		const auto allocdIndex = freeBlockBegin.fetch_add(1) % m_allocBeginIndices.size();
-		return m_allocBeginIndices[allocdIndex];
+      cl::sycl::atomic<Index_t> allocCount(
+          (cl::sycl::multi_ptr<Index_t,
+                               cl::sycl::access::address_space::global_space>(
+              &m_totalAllocations)));
+      const auto prevAllocCount = allocCount.fetch_add(1);
+      if (prevAllocCount >= m_allocBeginIndices.size()) {
+        return std::numeric_limits<Index_t>::max();
+      }
+      cl::sycl::atomic<Index_t> freeBlockBegin(
+          (cl::sycl::multi_ptr<Index_t,
+                               cl::sycl::access::address_space::global_space>(
+              &m_freeBlockBegin)));
+      const auto allocdIndex =
+          freeBlockBegin.fetch_add(1) % m_allocBeginIndices.size();
+      return m_allocBeginIndices[allocdIndex];
     }
 
     void FreeFromArena(const Index_t byteIdx) {
-		cl::sycl::atomic<Index_t> allocdBlockBegin(
-			(cl::sycl::multi_ptr<Index_t,
-				cl::sycl::access::address_space::global_space>(
-					&m_allocdBlockBegin)));
-		const auto freeDst = allocdBlockBegin.fetch_add(1) % m_allocBeginIndices.size();
-		m_allocBeginIndices[freeDst] = byteIdx;
+      cl::sycl::atomic<Index_t> allocdBlockBegin(
+          (cl::sycl::multi_ptr<Index_t,
+                               cl::sycl::access::address_space::global_space>(
+              &m_allocdBlockBegin)));
+      const auto freeDst =
+          allocdBlockBegin.fetch_add(1) % m_allocBeginIndices.size();
+      m_allocBeginIndices[freeDst] = byteIdx;
 
-		cl::sycl::atomic<Index_t> allocCount(
-			(cl::sycl::multi_ptr<Index_t,
-				cl::sycl::access::address_space::global_space>(
-					&m_totalAllocations)));
-		allocCount.fetch_sub(1);
+      cl::sycl::atomic<Index_t> allocCount(
+          (cl::sycl::multi_ptr<Index_t,
+                               cl::sycl::access::address_space::global_space>(
+              &m_totalAllocations)));
+      allocCount.fetch_sub(1);
     }
 
-    unsigned char *GetBytes(const Index_t byteIdx) {
-      return &m_bytes[byteIdx];
-    }
+    unsigned char *GetBytes(const Index_t byteIdx) { return &m_bytes[byteIdx]; }
 
     std::array<unsigned char, TotalBytes_i> m_bytes;
     std::array<Index_t, TotalBytes_i / AllocSize_i> m_allocBeginIndices;
@@ -206,8 +210,8 @@ private:
     }
   };
 
-  template <class T, Index_t allocSize, Index_t totalSize, Index_t... allocSizes,
-            Index_t... totalSizes>
+  template <class T, Index_t allocSize, Index_t totalSize,
+            Index_t... allocSizes, Index_t... totalSizes>
   Handle<T> AllocImpl(Arena<allocSize, totalSize> &arena,
                       Arena<allocSizes, totalSizes> &... arenas) {
     if (allocSize >= sizeof(T)) {
@@ -217,8 +221,7 @@ private:
       }
 
       const Handle<T> resultHandle(
-          allocdIdx,
-          std::remove_reference<decltype(arena)>::type::AllocSize);
+          allocdIdx, std::remove_reference<decltype(arena)>::type::AllocSize);
       return resultHandle;
     } else {
       return AllocImpl<T>(arenas...);
@@ -233,16 +236,15 @@ private:
         return Handle<T>();
       }
       const Handle<T> resultHandle(
-		  allocdIdx,
-          std::remove_reference<decltype(arena)>::type::AllocSize);
+          allocdIdx, std::remove_reference<decltype(arena)>::type::AllocSize);
       return resultHandle;
     } else {
       return Handle<T>();
     }
   }
 
-  template <class T, Index_t allocSize, Index_t totalSize, Index_t... allocSizes,
-            Index_t... totalSizes>
+  template <class T, Index_t allocSize, Index_t totalSize,
+            Index_t... allocSizes, Index_t... totalSizes>
   ArrayHandle<T> AllocArrayImpl(const Index_t arraySize, const T &initialValue,
                                 Arena<allocSize, totalSize> &arena,
                                 Arena<allocSizes, totalSizes> &... arenas) {
@@ -252,8 +254,8 @@ private:
         return ArrayHandle<T>();
       }
       const ArrayHandle<T> resultHandle(
-		  allocdIdx,
-          std::remove_reference<decltype(arena)>::type::AllocSize, arraySize);
+          allocdIdx, std::remove_reference<decltype(arena)>::type::AllocSize,
+          arraySize);
 
       auto tAlignedValues = derefHandle(resultHandle);
       for (Index_t i = 0; i < arraySize; ++i) {
@@ -275,8 +277,8 @@ private:
         return ArrayHandle<T>();
       }
       const ArrayHandle<T> resultHandle(
-		  allocdIdx,
-          std::remove_reference<decltype(arena)>::type::AllocSize, arraySize);
+          allocdIdx, std::remove_reference<decltype(arena)>::type::AllocSize,
+          arraySize);
 
       auto tAlignedValues = derefHandle(resultHandle);
       for (Index_t i = 0; i < arraySize; ++i) {
@@ -289,8 +291,8 @@ private:
     }
   }
 
-  template <class T, Index_t allocSize, Index_t totalSize, Index_t... allocSizes,
-            Index_t... totalSizes>
+  template <class T, Index_t allocSize, Index_t totalSize,
+            Index_t... allocSizes, Index_t... totalSizes>
   void DeallocImpl(const Handle<T> &handle, Arena<allocSize, totalSize> &arena,
                    Arena<allocSizes, totalSizes> &... arenas) {
     if (allocSize == handle.GetAllocSize()) {
@@ -314,8 +316,8 @@ private:
     }
   }
 
-  template <class T, Index_t allocSize, Index_t totalSize, Index_t... allocSizes,
-            Index_t... totalSizes>
+  template <class T, Index_t allocSize, Index_t totalSize,
+            Index_t... allocSizes, Index_t... totalSizes>
   void DeallocArrayImpl(const ArrayHandle<T> &arrayHandle,
                         Arena<allocSize, totalSize> &arena,
                         Arena<allocSizes, totalSizes> &... arenas) {
@@ -346,8 +348,8 @@ private:
     }
   }
 
-  template <class T, Index_t allocSize, Index_t totalSize, Index_t... allocSizes,
-            Index_t... totalSizes>
+  template <class T, Index_t allocSize, Index_t totalSize,
+            Index_t... allocSizes, Index_t... totalSizes>
   T *derefHandleImpl(const Handle<T> &handle,
                      Arena<allocSize, totalSize> &arena,
                      Arena<allocSizes, totalSizes> &... arenas) {
@@ -403,4 +405,4 @@ private:
   Arena<sizeof(int) * 128, binSize> m_largeBin;
   Arena<sizeof(int) * 2097152, binSize> m_extraLargeBin;
 };
-}
+} // namespace FunGPU

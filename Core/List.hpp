@@ -93,4 +93,4 @@ private:
   Index_t m_listSize = 0;
   PortableMemPool::DeviceAccessor_t m_portableMemPool;
 };
-}
+} // namespace FunGPU

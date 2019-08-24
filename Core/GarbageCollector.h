@@ -89,4 +89,4 @@ private:
   Index_t m_managedHandlesIdx;
   Index_t m_prevManagedHandlesIdx;
 };
-}
+} // namespace FunGPU

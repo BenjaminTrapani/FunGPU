@@ -74,7 +74,7 @@ public:
         return m_data.functionVal == other.m_data.functionVal;
       }
       }
-	  return false;
+      return false;
     }
 
     void SetValue(const Type type, const Data data) {
@@ -202,7 +202,7 @@ public:
   }
 
 #define RETURN_IF_FAILURE(expr)                                                \
-  {                                                                           \
+  {                                                                            \
     const auto __error = expr;                                                 \
     if (__error.GetType() != Error::Type::Success) {                           \
       return __error;                                                          \
@@ -650,4 +650,4 @@ private:
 
   bool m_isMarkedData;
 };
-}
+} // namespace FunGPU

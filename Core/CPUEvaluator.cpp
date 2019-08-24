@@ -38,7 +38,7 @@ CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
     : m_dependencyTracker(std::make_shared<DependencyTracker>()),
       m_garbageCollectorHandleBuff(range<1>(1)), m_memPoolBuff(memPool),
       m_dependencyTrackerBuff(m_dependencyTracker, range<1>(1))
-     /* m_workQueue(host_selector{})*/ {
+/* m_workQueue(host_selector{})*/ {
   std::cout << std::endl;
   std::cout << "Running on "
             << m_workQueue.get_device().get_info<info::device::name>()
@@ -65,10 +65,10 @@ CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
           });
     });
     m_workQueue.wait();
-	auto gcHandleHostAcc =
-		m_garbageCollectorHandleBuff.get_access<access::mode::read_write>();
-	auto gcHandle = gcHandleHostAcc[0];
-	int x = 1;
+    auto gcHandleHostAcc =
+        m_garbageCollectorHandleBuff.get_access<access::mode::read_write>();
+    auto gcHandle = gcHandleHostAcc[0];
+    int x = 1;
   } catch (cl::sycl::exception e) {
     std::cerr << "Sycl exception in init: " << e.what() << std::endl;
   }
@@ -96,7 +96,7 @@ void CPUEvaluator::CreateFirstBlock(const Compiler::ASTNodeHandle rootNode) {
                                                resultValueRefCpy, rootNode,
                                                garbageCollectorHandleAcc]() {
         auto gcRef = memPoolWrite[0].derefHandle(garbageCollectorHandleAcc[0]);
-		gcRef->SetMemPoolAcc(memPoolWrite);
+        gcRef->SetMemPoolAcc(memPoolWrite);
         const RuntimeBlock_t::SharedRuntimeBlockHandle_t emptyBlock;
         const auto sharedInitialBlock = gcRef->AllocManaged(
             rootNode, emptyBlock, emptyBlock, dependencyTracker,
@@ -130,8 +130,7 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
     buffer<bool> markingsExpanded(&markingsExpandedData, range<1>(1));
 
     Index_t managedAllocdCountData = 0;
-    buffer<Index_t> managedAllocdCount(&managedAllocdCountData,
-                                            range<1>(1));
+    buffer<Index_t> managedAllocdCount(&managedAllocdCountData, range<1>(1));
 
     Index_t ticksSinceGc = 0;
     while (true) {
@@ -152,7 +151,7 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
           for (Index_t i = 0; i < hostBlockHasErrorAcc[0]; ++i) {
             ss << errorsPerBlockAcc[i].GetDescription() << std::endl;
           }
-		  const auto errorString = ss.str();
+          const auto errorString = ss.str();
           throw std::runtime_error(errorString);
         }
         hostBlockHasErrorAcc[0] = 0;
@@ -173,8 +172,8 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
               cl::sycl::range<1>(numActiveBlocks),
               [dependencyTracker, workingBlocksAcc, memPoolAcc](item<1> itm) {
                 const auto idx = itm.get_linear_id();
-                workingBlocksAcc[idx] =
-                    dependencyTracker[0].GetBlockAtIndex(static_cast<Index_t>(idx));
+                workingBlocksAcc[idx] = dependencyTracker[0].GetBlockAtIndex(
+                    static_cast<Index_t>(idx));
                 const auto derefdWorking =
                     memPoolAcc[0].derefHandle(workingBlocksAcc[idx]);
               });
@@ -241,8 +240,8 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
                   [gcHandleAcc, memPoolAcc, markingsExpandedAcc](item<1> itm) {
                     auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
                     gcRef->SetMemPoolAcc(memPoolAcc);
-                    const auto wereMarkingsExpandedHere =
-                        gcRef->RunMarkPass(static_cast<Index_t>(itm.get_linear_id()));
+                    const auto wereMarkingsExpandedHere = gcRef->RunMarkPass(
+                        static_cast<Index_t>(itm.get_linear_id()));
                     if (wereMarkingsExpandedHere) {
                       markingsExpandedAcc[0] = true;
                     }
@@ -354,4 +353,4 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
   auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>();
   return *memPoolAcc[0].derefHandle(m_resultValue);
 }
-}
+} // namespace FunGPU

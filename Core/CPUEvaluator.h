@@ -71,4 +71,4 @@ private:
 
   cl::sycl::queue m_workQueue;
 };
-}
+} // namespace FunGPU

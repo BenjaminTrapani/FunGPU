@@ -1,7 +1,7 @@
 #include "Compiler.h"
+#include "Types.h"
 #include <iostream>
 #include <sstream>
-#include "Types.h"
 
 namespace FunGPU {
 Compiler::ASTNodeHandle
@@ -102,8 +102,7 @@ Compiler::CompileListOfSExpr(std::shared_ptr<const SExpr> sexpr,
         updatedBindings.push_front(*identString);
       }
 
-      auto bindingsData =
-          memPoolAcc[0].derefHandle(bindNode->m_bindings);
+      auto bindingsData = memPoolAcc[0].derefHandle(bindNode->m_bindings);
       for (Index_t i = 0; i < bindingExprs->size(); ++i) {
         auto bindExpr = bindingExprs->at(i);
         auto bindExprChildren = bindExpr->GetChildren();
@@ -448,4 +447,4 @@ void Compiler::DeallocateAST(const ASTNodeHandle rootOfASTHandle) {
   auto memPoolAcc = m_memPool.get_access<cl::sycl::access::mode::read_write>();
   DeallocateAST(rootOfASTHandle, memPoolAcc);
 }
-}
+} // namespace FunGPU

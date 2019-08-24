@@ -32,4 +32,4 @@ private:
   const Index_t m_size;
   PortableMemPool *m_pool;
 };
-}
+} // namespace FunGPU

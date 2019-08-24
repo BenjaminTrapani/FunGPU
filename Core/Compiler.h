@@ -147,4 +147,4 @@ private:
   std::shared_ptr<const SExpr> m_sExpr;
   cl::sycl::buffer<PortableMemPool> m_memPool;
 };
-}
+} // namespace FunGPU

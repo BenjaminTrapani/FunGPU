@@ -1,9 +1,9 @@
 #pragma once
 
+#include "Types.h"
 #include <memory>
 #include <string>
 #include <vector>
-#include "Types.h"
 
 namespace FunGPU {
 class SExpr {
@@ -27,4 +27,4 @@ private:
   Float_t m_numValue;
   std::shared_ptr<std::vector<std::shared_ptr<SExpr>>> m_sexprValue;
 };
-}
+} // namespace FunGPU

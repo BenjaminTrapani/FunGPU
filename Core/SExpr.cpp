@@ -50,4 +50,4 @@ void SExpr::DebugPrint(const Index_t indentLevel) {
     throw std::invalid_argument("Unexpected type in debug print");
   }
 }
-}
+} // namespace FunGPU

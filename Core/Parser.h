@@ -40,4 +40,4 @@ private:
 
   std::ifstream m_fileToRead;
 };
-}
+} // namespace FunGPU

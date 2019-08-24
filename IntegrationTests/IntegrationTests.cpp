@@ -80,7 +80,7 @@ RunProgram(const std::string &path,
 
   return programResult;
 }
-}
+} // namespace
 
 BOOST_FIXTURE_TEST_SUITE(IntegrationTests, Fixture)
 

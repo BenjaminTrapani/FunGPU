@@ -30,7 +30,7 @@ add_sycl_to_target(
 set_property(TARGET FunGPU PROPERTY CXX_STANDARD 14)
 
 file(GLOB_RECURSE ALL_SOURCE_FILES *.cpp *.h *.hpp)
-find_program (CLANGFORMAT_CMD clang-format)
+find_program (CLANGFORMAT_CMD clang-format "C:/Program Files/LLVM/bin/")
 
 add_custom_target(clangformat
     COMMAND ${CLANGFORMAT_CMD}
