@@ -10,7 +10,6 @@ class create_gc;
 class init_first_block;
 class run_eval_pass;
 class prep_blocks;
-class prep_blocks_for_retry;
 class get_managed_allocd_count;
 class gc_initial_mark;
 class gc_mark;
@@ -27,7 +26,7 @@ CPUEvaluator::DependencyTracker::AddActiveBlock(
           &m_activeBlockCountData)));
   const auto indexToInsert = activeBlockCount.fetch_add(1);
   if (indexToInsert >= m_newActiveBlocks.size()) {
-    return RuntimeBlock_t::Error(RuntimeBlock_t::Error::Type::ActiveBlockCacheUsed,
+    return RuntimeBlock_t::Error(RuntimeBlock_t::Error::Type::OutOfMemory,
                                  "Ran out of space for active blocks");
   }
   m_newActiveBlocks[indexToInsert] = block;
@@ -38,10 +37,10 @@ CPUEvaluator::DependencyTracker::AddActiveBlock(
 CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
     : m_dependencyTracker(std::make_shared<DependencyTracker>()),
       m_garbageCollectorHandleBuff(range<1>(1)), m_memPoolBuff(memPool),
-      m_dependencyTrackerBuff(m_dependencyTracker, range<1>(1)),
- m_workQueue(host_selector{}) {
+      m_dependencyTrackerBuff(m_dependencyTracker, range<1>(1))
+/* m_workQueue(host_selector{})*/ {
   std::cout << std::endl;
-  std::cout << "Compiling device code for "
+  std::cout << "Running on "
             << m_workQueue.get_device().get_info<info::device::name>()
             << std::endl;
 
@@ -66,7 +65,10 @@ CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
           });
     });
     m_workQueue.wait();
-	std::cout << "Runtime ready" << std::endl;
+    auto gcHandleHostAcc =
+        m_garbageCollectorHandleBuff.get_access<access::mode::read_write>();
+    auto gcHandle = gcHandleHostAcc[0];
+    int x = 1;
   } catch (cl::sycl::exception e) {
     std::cerr << "Sycl exception in init: " << e.what() << std::endl;
   }
@@ -130,13 +132,14 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
     Index_t managedAllocdCountData = 0;
     buffer<Index_t> managedAllocdCount(&managedAllocdCountData, range<1>(1));
 
-	bool wasOutOfMemory = false;
-	Index_t numActiveBlocks = 0;
+    Index_t ticksSinceGc = 0;
     while (true) {
-	  bool outOfMemory = false;
+      Index_t numActiveBlocks = 0;
       {
         auto hostDepTracker =
             m_dependencyTrackerBuff.get_access<access::mode::read_write>();
+        numActiveBlocks = hostDepTracker[0].GetActiveBlockCount();
+        hostDepTracker[0].ResetActiveBlockCount();
 
         auto hostBlockHasErrorAcc =
             blockErrorIdx.get_access<access::mode::read_write>();
@@ -145,84 +148,41 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
               errorsPerBlock.get_access<access::mode::read_write>();
           std::stringstream ss;
           ss << "Block errors in previous pass: " << std::endl;
-		  bool foundFatalError = false;
           for (Index_t i = 0; i < hostBlockHasErrorAcc[0]; ++i) {
-			  const auto& errorHere = errorsPerBlockAcc[i];
-			  if (errorHere.GetType() != RuntimeBlock_t::Error::Type::Success) {
-				  if (errorHere.GetType() == RuntimeBlock_t::Error::Type::OutOfMemory && !wasOutOfMemory) {
-					  outOfMemory = true;
-				  }
-				  else {
-					  foundFatalError = true;
-					  ss << errorHere.GetDescription() << std::endl;
-				  }
-			  }
+            ss << errorsPerBlockAcc[i].GetDescription() << std::endl;
           }
-		  if (foundFatalError) {
-			  const auto errorString = ss.str();
-			  throw std::runtime_error(errorString);
-		  }
+          const auto errorString = ss.str();
+          throw std::runtime_error(errorString);
         }
         hostBlockHasErrorAcc[0] = 0;
-
-		if (!outOfMemory) {
-			numActiveBlocks = hostDepTracker[0].GetActiveBlockCount();
-		}
-		hostDepTracker[0].ResetActiveBlockCount();
       }
 
       maxConcurrentBlocksDuringExec =
           std::max(numActiveBlocks, maxConcurrentBlocksDuringExec);
 
       if (numActiveBlocks > 0) {
-		  // If outOfMemory, retry current active blocks after collecting garbage, discarding active blocks marked from previous pass.
-		  if (outOfMemory) {
-			  m_workQueue.submit([&](handler &cgh) {
-				  auto memPoolWrite =
-					  m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-				  auto dependencyTracker =
-					  m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
-				  auto gcHandleAcc =
-					  m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
-				  auto workingBlocksAcc =
-					  workingBlocksBuff.get_access<access::mode::read_write>(cgh);
-
-				  cgh.parallel_for<class prep_blocks_for_retry>(
-					  cl::sycl::range<1>(numActiveBlocks),
-					  [dependencyTracker, memPoolWrite, workingBlocksAcc,
-					  gcHandleAcc](item<1> itm) {
-					  auto currentBlock = workingBlocksAcc[itm.get_linear_id()];
-					  auto derefdCurrentBlock =
-						  memPoolWrite[0].derefHandle(currentBlock);
-					  auto gcRef = memPoolWrite[0].derefHandle(gcHandleAcc[0]);
-					  gcRef->SetMemPoolAcc(memPoolWrite);
-					  derefdCurrentBlock->SetResources(memPoolWrite,
-						  dependencyTracker);
-					  derefdCurrentBlock->PrepareForRetry();
-				  });
-			  });
-		  } else {
-			  m_workQueue.submit([&](handler &cgh) {
-				  auto dependencyTracker =
-					  m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
-				  auto workingBlocksAcc =
-					  workingBlocksBuff.get_access<access::mode::read_write>(cgh);
-				  auto memPoolAcc =
-					  m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-				  cgh.parallel_for<class prep_blocks>(
-					  cl::sycl::range<1>(numActiveBlocks),
-					  [dependencyTracker, workingBlocksAcc, memPoolAcc](item<1> itm) {
-					  const auto idx = itm.get_linear_id();
-					  workingBlocksAcc[idx] = dependencyTracker[0].GetBlockAtIndex(
-						  static_cast<Index_t>(idx));
-					  const auto derefdWorking =
-						  memPoolAcc[0].derefHandle(workingBlocksAcc[idx]);
-				  });
-			  });
-		  }
+        m_workQueue.submit([&](handler &cgh) {
+          auto dependencyTracker =
+              m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
+          auto workingBlocksAcc =
+              workingBlocksBuff.get_access<access::mode::read_write>(cgh);
+          auto memPoolAcc =
+              m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+          cgh.parallel_for<class prep_blocks>(
+              cl::sycl::range<1>(numActiveBlocks),
+              [dependencyTracker, workingBlocksAcc, memPoolAcc](item<1> itm) {
+                const auto idx = itm.get_linear_id();
+                workingBlocksAcc[idx] = dependencyTracker[0].GetBlockAtIndex(
+                    static_cast<Index_t>(idx));
+                const auto derefdWorking =
+                    memPoolAcc[0].derefHandle(workingBlocksAcc[idx]);
+              });
+        });
       }
 
-      if (outOfMemory || numActiveBlocks == 0) {
+      if (ticksSinceGc >= 8192 || numActiveBlocks == 0) {
+        ticksSinceGc = 0;
+
         if (numActiveBlocks > 0) {
           m_workQueue.submit([&](handler &cgh) {
             auto workingBlocksAcc =
@@ -380,7 +340,6 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
         });
 
         m_workQueue.wait();
-		wasOutOfMemory = outOfMemory;
       } else {
         break;
       }

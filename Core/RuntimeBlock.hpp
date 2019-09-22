@@ -91,7 +91,6 @@ public:
       InvalidType,
       ArityMismatch,
       InvalidIndex,
-	  ActiveBlockCacheUsed,
     };
 
     Error() : m_type(Type::Success), m_description(nullptr) {}
@@ -120,7 +119,7 @@ public:
                const RuntimeValueHandle_t &dest,
                const PortableMemPool::DeviceAccessor_t &memPool,
                const PortableMemPool::Handle<GarbageCollector_t> &gc)
-      : m_astNode(astNode), m_originalBindingParent(bindingParent), m_bindingParent(bindingParent), m_parent(parent),
+      : m_astNode(astNode), m_bindingParent(bindingParent), m_parent(parent),
         m_depTracker(depTracker), m_dest(dest), m_dependenciesRemainingData(0),
         m_memPoolDeviceAcc(memPool), m_garbageCollectorHandle(gc),
         m_runtimeValues(memPool), m_isMarkedData(false) {}
@@ -208,23 +207,6 @@ public:
     if (__error.GetType() != Error::Type::Success) {                           \
       return __error;                                                          \
     }                                                                          \
-  }
-
-  void PrepareForRetry() {
-	  m_runtimeValues.Clear();
-	  m_dependenciesRemainingData = 0;
-	  m_wasRetried = true;
-	  if (m_filledDestValue) {
-		  if (m_parent != SharedRuntimeBlockHandle_t()) {
-			  auto derefdParent = m_memPoolDeviceAcc[0].derefHandle(m_parent);
-			  cl::sycl::atomic<int> atomicDepCount(
-				  (cl::sycl::multi_ptr<int,
-					  cl::sycl::access::address_space::global_space>(
-						  &derefdParent->m_dependenciesRemainingData)));
-			  atomicDepCount.fetch_add(1);
-		  }
-		  m_filledDestValue = false;
-	  }
   }
 
   Error PerformEvalPass() {
@@ -507,17 +489,6 @@ private:
       }
     }
     if (tempParent == SharedRuntimeBlockHandle_t()) {
-		auto tempParent = m_bindingParent;
-		while (tempParent != SharedRuntimeBlockHandle_t()) {
-			auto derefdParent = m_memPoolDeviceAcc[0].derefHandle(tempParent);
-			if (index >= derefdParent->m_runtimeValues.size()) {
-				index -= derefdParent->m_runtimeValues.size();
-				tempParent = derefdParent->m_bindingParent;
-			}
-			else {
-				break;
-			}
-		}
       error = Error(Error::Type::InvalidIndex,
                     "Failed to find runtime value for index");
       return nullptr;
@@ -648,7 +619,6 @@ private:
 
   Error FillDestValue(const typename RuntimeValue::Type type,
                       const typename RuntimeValue::Data &data) {
-	m_filledDestValue = true;
     auto destRef = m_memPoolDeviceAcc[0].derefHandle(m_dest);
     destRef->SetValue(type, data);
     if (m_parent != SharedRuntimeBlockHandle_t()) {
@@ -666,13 +636,10 @@ private:
 
   Compiler::ASTNodeHandle m_astNode;
   List<RuntimeValue> m_runtimeValues;
-  bool m_wasRetried = false;
-  bool m_filledDestValue = false;
-  const SharedRuntimeBlockHandle_t m_originalBindingParent;
   SharedRuntimeBlockHandle_t m_bindingParent;
-  const SharedRuntimeBlockHandle_t m_parent;
+  SharedRuntimeBlockHandle_t m_parent;
 
-  const RuntimeValueHandle_t m_dest;
+  RuntimeValueHandle_t m_dest;
   cl::sycl::accessor<DependencyTracker_t, 1, cl::sycl::access::mode::read_write,
                      cl::sycl::access::target::global_buffer>
       m_depTracker;
