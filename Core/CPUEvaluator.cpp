@@ -10,6 +10,7 @@ class create_gc;
 class init_first_block;
 class run_eval_pass;
 class prep_blocks;
+class check_requires_garbage_collection;
 class get_managed_allocd_count;
 class gc_initial_mark;
 class gc_mark;
@@ -132,7 +133,16 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
     Index_t managedAllocdCountData = 0;
     buffer<Index_t> managedAllocdCount(&managedAllocdCountData, range<1>(1));
 
-    Index_t ticksSinceGc = 0;
+    Index_t runtimeValuesRequiredCountData = 0;
+    buffer<Index_t> runtimeValuesRequiredCount(&runtimeValuesRequiredCountData,
+                                               range<1>(1));
+    Index_t runtimeBlocksRequiredCountData = 0;
+    buffer<Index_t> runtimeBlocksRequiredCount(&runtimeBlocksRequiredCountData,
+                                               range<1>(1));
+    bool requiresGarbageCollectionData = false;
+    buffer<bool> requiresGarbageCollection(&requiresGarbageCollectionData,
+                                           range<1>(1));
+
     while (true) {
       Index_t numActiveBlocks = 0;
       {
@@ -140,6 +150,13 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
             m_dependencyTrackerBuff.get_access<access::mode::read_write>();
         numActiveBlocks = hostDepTracker[0].GetActiveBlockCount();
         hostDepTracker[0].ResetActiveBlockCount();
+
+        auto runtimeValuesRequiredAcc =
+            runtimeValuesRequiredCount.get_access<access::mode::write>();
+        runtimeValuesRequiredAcc[0] = 0;
+        auto runtimeBlocksRequiredAcc =
+            runtimeBlocksRequiredCount.get_access<access::mode::write>();
+        runtimeBlocksRequiredAcc[0] = 0;
 
         auto hostBlockHasErrorAcc =
             blockErrorIdx.get_access<access::mode::read_write>();
@@ -168,21 +185,61 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
               workingBlocksBuff.get_access<access::mode::read_write>(cgh);
           auto memPoolAcc =
               m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+
+          auto runtimeValuesRequiredCountAtomic =
+              runtimeValuesRequiredCount.get_access<access::mode::atomic>(cgh);
+          auto runtimeBlocksRequiredCountAtomic =
+              runtimeBlocksRequiredCount.get_access<access::mode::atomic>(cgh);
           cgh.parallel_for<class prep_blocks>(
               cl::sycl::range<1>(numActiveBlocks),
-              [dependencyTracker, workingBlocksAcc, memPoolAcc](item<1> itm) {
+              [dependencyTracker, workingBlocksAcc, memPoolAcc,
+               runtimeValuesRequiredCountAtomic,
+               runtimeBlocksRequiredCountAtomic](item<1> itm) {
                 const auto idx = itm.get_linear_id();
                 workingBlocksAcc[idx] = dependencyTracker[0].GetBlockAtIndex(
                     static_cast<Index_t>(idx));
                 const auto derefdWorking =
                     memPoolAcc[0].derefHandle(workingBlocksAcc[idx]);
+                const auto requiredSpace = derefdWorking->GetRequiredAllocs();
+                runtimeValuesRequiredCountAtomic[0].fetch_add(
+                    requiredSpace.runtimeValuesRequired);
+                runtimeBlocksRequiredCountAtomic[0].fetch_add(
+                    requiredSpace.dependentBlocksRequired);
               });
         });
       }
 
-      if (ticksSinceGc >= 8192 || numActiveBlocks == 0) {
-        ticksSinceGc = 0;
+      m_workQueue.submit([&](handler &cgh) {
+        auto memPoolAcc =
+            m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+        auto runtimeValuesRequiredCountAcc =
+            runtimeValuesRequiredCount.get_access<access::mode::read>(cgh);
+        auto runtimeBlocksRequiredCountAcc =
+            runtimeBlocksRequiredCount.get_access<access::mode::read>(cgh);
+        auto requiresGarbageCollectAcc =
+            requiresGarbageCollection.get_access<access::mode::write>(cgh);
+        cgh.single_task<class check_requires_garbage_collection>(
+            [memPoolAcc, runtimeValuesRequiredCountAcc,
+             runtimeBlocksRequiredCountAcc, requiresGarbageCollectAcc] {
+              const auto numRuntimeValuesFree =
+                  memPoolAcc[0].GetNumFree<RuntimeBlock_t::RuntimeValue>();
+              const auto numRuntimeBlocksFree =
+                  memPoolAcc[0].GetNumFree<RuntimeBlock_t>();
+              requiresGarbageCollectAcc[0] =
+                  numRuntimeValuesFree < runtimeValuesRequiredCountAcc[0] ||
+                  numRuntimeBlocksFree < runtimeBlocksRequiredCountAcc[0];
+            });
+      });
+      m_workQueue.wait();
 
+      bool requiresGarbageCollectOnHost;
+      {
+        auto requiresGarbageCollectAcc =
+            requiresGarbageCollection.get_access<access::mode::read>();
+        requiresGarbageCollectOnHost = requiresGarbageCollectAcc[0];
+      }
+
+      if (requiresGarbageCollectOnHost || numActiveBlocks == 0) {
         if (numActiveBlocks > 0) {
           m_workQueue.submit([&](handler &cgh) {
             auto workingBlocksAcc =

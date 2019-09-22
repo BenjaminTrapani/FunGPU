@@ -131,6 +131,11 @@ public:
                                        m_extraLargeBin);
   }
 
+  template <class T> Index_t GetNumFree() {
+    return GetNumFreeImpl<T>(m_smallBin, m_mediumBin, m_largeBin,
+                             m_extraLargeBin);
+  }
+
 private:
   template <Index_t AllocSize_i, Index_t TotalBytes_i> struct Arena {
     static constexpr Index_t AllocSize = AllocSize_i;
@@ -396,6 +401,33 @@ private:
                              cl::sycl::access::address_space::global_space>(
             &arena.m_totalAllocations)));
     return totalAllocations.load();
+  }
+
+  template <class T, Index_t allocSize, Index_t totalSize,
+            Index_t... allocSizes, Index_t... totalSizes>
+  Index_t GetNumFreeImpl(Arena<allocSize, totalSize> &arena,
+                         Arena<allocSizes, totalSizes> &... arenas) {
+    if (allocSize >= sizeof(T)) {
+      cl::sycl::atomic<Index_t> totalAllocations(
+          (cl::sycl::multi_ptr<Index_t,
+                               cl::sycl::access::address_space::global_space>(
+              &arena.m_totalAllocations)));
+      return Arena<allocSize, totalSize>::TotalNodes - totalAllocations.load();
+    } else {
+      return GetNumFreeImpl<T>(arenas...);
+    }
+  }
+
+  template <class T, Index_t allocSize, Index_t totalSize>
+  Index_t GetNumFreeImpl(Arena<allocSize, totalSize> &arena) {
+    if (allocSize >= sizeof(T)) {
+      cl::sycl::atomic<Index_t> totalAllocations(
+          (cl::sycl::multi_ptr<Index_t,
+                               cl::sycl::access::address_space::global_space>(
+              &arena.m_totalAllocations)));
+      return Arena<allocSize, totalSize>::TotalNodes - totalAllocations.load();
+    }
+    return 0;
   }
 
   static constexpr Index_t binSize = 16777216;

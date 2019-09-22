@@ -7,18 +7,19 @@
 using namespace FunGPU;
 
 int main(int argc, char **argv) {
-  if (argc < 2) {
-    std::cerr << "Expected paths to fgpus programs to run, exiting";
-    return 1;
-  }
-
   auto memPool = std::make_shared<PortableMemPool>();
   try {
     cl::sycl::buffer<PortableMemPool> memPoolBuff(memPool,
                                                   cl::sycl::range<1>(1));
     CPUEvaluator evaluator(memPoolBuff);
-    for (int i = 1; i < argc; ++i) {
-      Parser parser((std::string(argv[i])));
+    while (true) {
+      std::cout << "Program to run(or q to quit): ";
+      std::string programPath;
+      std::cin >> programPath;
+      if (programPath == "q") {
+        break;
+      }
+      Parser parser(programPath);
       auto parsedResult = parser.ParseProgram();
 
       Compiler compiler(parsedResult, memPoolBuff);
@@ -26,9 +27,9 @@ int main(int argc, char **argv) {
       try {
         compiledResult = compiler.Compile();
       } catch (const Compiler::CompileException &e) {
-        std::cerr << "Failed to compile " << argv[i] << ": " << e.What()
+        std::cerr << "Failed to compile " << programPath << ": " << e.What()
                   << std::endl;
-        return 1;
+        continue;
       }
 
       Index_t maxConcurrentBlockCount;

@@ -209,6 +209,53 @@ public:
     }                                                                          \
   }
 
+  struct RequiredAllocDesc {
+    Index_t runtimeValuesRequired;
+    Index_t dependentBlocksRequired;
+    RequiredAllocDesc(const Index_t runtimeValuesReq,
+                      const Index_t dependentBlocksReq)
+        : runtimeValuesRequired(runtimeValuesReq),
+          dependentBlocksRequired(dependentBlocksReq) {}
+  };
+
+  RequiredAllocDesc GetRequiredAllocs() {
+    auto astNode = GetASTNode();
+    switch (astNode->m_type) {
+    case Compiler::ASTNode::Type::Bind:
+    case Compiler::ASTNode::Type::BindRec: {
+      const auto bindNode = static_cast<const Compiler::BindNode *>(astNode);
+      const auto bindingsCount = bindNode->m_bindings.GetCount();
+      return RequiredAllocDesc(bindingsCount, bindingsCount + 1);
+    }
+    case Compiler::ASTNode::Type::Call: {
+      const auto callNode = static_cast<const Compiler::CallNode *>(astNode);
+      // One additional arg implicit in lambda target
+      const auto argsCount = callNode->m_args.GetCount() + 1;
+      // One additional dependency for lambda invocation
+      return RequiredAllocDesc(argsCount, argsCount + 1);
+    }
+    case Compiler::ASTNode::Type::If: {
+      return RequiredAllocDesc(1, 2);
+    }
+    case Compiler::ASTNode::Type::Add:
+    case Compiler::ASTNode::Type::Sub:
+    case Compiler::ASTNode::Type::Mul:
+    case Compiler::ASTNode::Type::Div:
+    case Compiler::ASTNode::Type::Equal:
+    case Compiler::ASTNode::Type::GreaterThan:
+    case Compiler::ASTNode::Type::Remainder:
+      return RequiredAllocDesc(2, 2);
+    case Compiler::ASTNode::Type::Floor:
+      return RequiredAllocDesc(1, 1);
+    case Compiler::ASTNode::Type::Number:
+    case Compiler::ASTNode::Type::Identifier:
+    case Compiler::ASTNode::Type::Lambda:
+      return RequiredAllocDesc(0, 0);
+    }
+    // The eval call will fail, doesn't matter how much space.
+    return RequiredAllocDesc(0, 0);
+  }
+
   Error PerformEvalPass() {
     auto astNode = GetASTNode();
     switch (astNode->m_type) {
