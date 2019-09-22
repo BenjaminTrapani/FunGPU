@@ -9,13 +9,18 @@ public:
   List(const PortableMemPool::DeviceAccessor_t &memPool)
       : m_portableMemPool(memPool) {}
 
+  void Clear() {
+	  while (m_head != PortableMemPool::Handle<ListNode>()) {
+		  auto derefdHead = m_portableMemPool[0].derefHandle(m_head);
+		  auto nextRef = derefdHead->m_next;
+		  m_portableMemPool[0].Dealloc(m_head);
+		  m_head = nextRef;
+	  }
+	  m_listSize = 0;
+  }
+
   ~List() {
-    while (m_head != PortableMemPool::Handle<ListNode>()) {
-      auto derefdHead = m_portableMemPool[0].derefHandle(m_head);
-      auto nextRef = derefdHead->m_next;
-      m_portableMemPool[0].Dealloc(m_head);
-      m_head = nextRef;
-    }
+	  Clear();
   }
 
   void SetMemPoolAcc(const PortableMemPool::DeviceAccessor_t &acc) {
