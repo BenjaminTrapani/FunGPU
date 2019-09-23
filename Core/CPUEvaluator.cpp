@@ -65,7 +65,6 @@ CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
                 memPoolWrite[0].Alloc<GarbageCollector_t>(memPoolWrite);
           });
     });
-    m_workQueue.wait();
     auto gcHandleHostAcc =
         m_garbageCollectorHandleBuff.get_access<access::mode::read_write>();
     auto gcHandle = gcHandleHostAcc[0];
@@ -105,7 +104,6 @@ void CPUEvaluator::CreateFirstBlock(const Compiler::ASTNodeHandle rootNode) {
         dependencyTracker[0].AddActiveBlock(sharedInitialBlock);
       });
     });
-    m_workQueue.wait();
   } catch (cl::sycl::exception e) {
     std::cerr << "Sycl exception: " << e.what() << std::endl;
   }
@@ -230,7 +228,6 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
                   numRuntimeBlocksFree < runtimeBlocksRequiredCountAcc[0];
             });
       });
-      m_workQueue.wait();
 
       bool requiresGarbageCollectOnHost;
       {
@@ -271,7 +268,6 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
                     gcRef->GetManagedAllocationCount();
               });
         });
-        m_workQueue.wait();
 
         Index_t managedAllocdSize;
         {
@@ -303,7 +299,6 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
                     }
                   });
             });
-            m_workQueue.wait();
             {
               auto markingsExpandedHostAcc =
                   markingsExpanded.get_access<access::mode::read_write>();
@@ -395,8 +390,6 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
                 }
               });
         });
-
-        m_workQueue.wait();
       } else {
         break;
       }
