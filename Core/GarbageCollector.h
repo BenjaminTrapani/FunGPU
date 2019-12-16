@@ -5,7 +5,7 @@
 #pragma once
 
 #include "PortableMemPool.hpp"
-#include "SYCL/sycl.hpp"
+#include <CL/sycl.hpp>
 
 namespace FunGPU {
 template <class T, Index_t maxManagedAllocationsCount> class GarbageCollector {

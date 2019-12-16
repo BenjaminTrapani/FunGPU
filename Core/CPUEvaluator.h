@@ -2,7 +2,7 @@
 #include "GarbageCollector.h"
 #include "PortableMemPool.hpp"
 #include "RuntimeBlock.hpp"
-#include <SYCL/sycl.hpp>
+#include <CL/sycl.hpp>
 #include <array>
 #include <memory>
 

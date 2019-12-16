@@ -1,5 +1,5 @@
 #include "PortableMemPool.hpp"
-#include "SYCL/sycl.hpp"
+#include <CL/sycl.hpp>
 #include "Types.h"
 #include <memory>
 

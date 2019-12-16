@@ -2,7 +2,7 @@
 #include "GarbageCollector.h"
 #include "List.hpp"
 #include "PortableMemPool.hpp"
-#include "SYCL/sycl.hpp"
+#include <CL/sycl.hpp>
 #include "Types.h"
 
 #include <atomic>
@@ -125,8 +125,8 @@ public:
         m_runtimeValues(memPool), m_isMarkedData(false) {}
 
   bool SetMarked() {
-    cl::sycl::atomic<bool> isMarkedAtomic(
-        (cl::sycl::multi_ptr<bool,
+    cl::sycl::atomic<unsigned int> isMarkedAtomic(
+        (cl::sycl::multi_ptr<unsigned int,
                              cl::sycl::access::address_space::global_space>(
             &m_isMarkedData)));
     return isMarkedAtomic.exchange(true);
@@ -172,16 +172,16 @@ public:
   }
 
   bool GetIsMarked() {
-    cl::sycl::atomic<bool> isMarkedAtomic(
-        (cl::sycl::multi_ptr<bool,
+    cl::sycl::atomic<unsigned int> isMarkedAtomic(
+        (cl::sycl::multi_ptr<unsigned int,
                              cl::sycl::access::address_space::global_space>(
             &m_isMarkedData)));
     return isMarkedAtomic.load();
   }
 
   void ClearMarking() {
-    cl::sycl::atomic<bool> isMarkedAtomic(
-        (cl::sycl::multi_ptr<bool,
+    cl::sycl::atomic<unsigned int> isMarkedAtomic(
+        (cl::sycl::multi_ptr<unsigned int,
                              cl::sycl::access::address_space::global_space>(
             &m_isMarkedData)));
     isMarkedAtomic.store(false);
@@ -695,6 +695,6 @@ private:
   PortableMemPool::DeviceAccessor_t m_memPoolDeviceAcc;
   PortableMemPool::Handle<GarbageCollector_t> m_garbageCollectorHandle;
 
-  bool m_isMarkedData;
+  unsigned int m_isMarkedData;
 };
 } // namespace FunGPU

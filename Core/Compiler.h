@@ -3,7 +3,7 @@
 #include "Array.hpp"
 #include "PortableMemPool.hpp"
 #include "SExpr.h"
-#include "SYCL/sycl.hpp"
+#include <CL/sycl.hpp>
 #include "Types.h"
 
 #include <list>
