@@ -62,13 +62,14 @@ public:
 private:
   void CreateFirstBlock(const Compiler::ASTNodeHandle rootNode);
 
-  PortableMemPool::Handle<RuntimeBlock_t::RuntimeValue> m_resultValue;
   std::shared_ptr<DependencyTracker> m_dependencyTracker;
+  std::shared_ptr<PortableMemPool::Handle<RuntimeBlock_t::RuntimeValue>> m_resultValue;
   cl::sycl::buffer<PortableMemPool::Handle<GarbageCollector_t>>
       m_garbageCollectorHandleBuff;
   cl::sycl::buffer<PortableMemPool> m_memPoolBuff;
   cl::sycl::buffer<DependencyTracker> m_dependencyTrackerBuff;
-
+  cl::sycl::buffer<PortableMemPool::Handle<RuntimeBlock_t::RuntimeValue>> m_resultValueBuff;
+  
   cl::sycl::queue m_workQueue;
 };
 } // namespace FunGPU

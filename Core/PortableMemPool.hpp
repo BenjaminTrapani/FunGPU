@@ -87,16 +87,14 @@ public:
       return handle;
     }
 
-    auto bytesForHandle =
-        reinterpret_cast<unsigned char *>(derefHandle(handle));
+    auto* derefdAllocd = derefHandle(handle);
     // invoke T's constructor via placement new on allocated bytes
-    auto allocdT = new (bytesForHandle) T(args...);
+    auto allocdT = new (derefdAllocd) T(args...);
 
     using SetHandleFunctor_t = typename std::conditional<
         std::is_base_of<EnableHandleFromThis<T>, T>::value, SetHandleReal<T>,
         SetHandleNoOp<T>>::type;
-    auto derefedAllocd = derefHandle(handle);
-    SetHandleFunctor_t::SetHandle(*derefedAllocd, handle);
+    SetHandleFunctor_t::SetHandle(*derefdAllocd, handle);
 
     return handle;
   }
