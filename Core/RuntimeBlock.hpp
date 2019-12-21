@@ -2,8 +2,8 @@
 #include "GarbageCollector.h"
 #include "List.hpp"
 #include "PortableMemPool.hpp"
-#include <CL/sycl.hpp>
 #include "Types.h"
+#include <CL/sycl.hpp>
 
 #include <atomic>
 

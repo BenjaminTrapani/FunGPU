@@ -1,7 +1,7 @@
 #pragma once
 
-#include <CL/sycl.hpp>
 #include "Types.h"
+#include <CL/sycl.hpp>
 #include <limits>
 #include <memory>
 #include <type_traits>
@@ -87,7 +87,7 @@ public:
       return handle;
     }
 
-    auto* derefdAllocd = derefHandle(handle);
+    auto *derefdAllocd = derefHandle(handle);
     // invoke T's constructor via placement new on allocated bytes
     auto allocdT = new (derefdAllocd) T(args...);
 
@@ -192,7 +192,7 @@ private:
 
     unsigned char *GetBytes(const Index_t byteIdx) { return &m_bytes[byteIdx]; }
 
-    std::array<unsigned char, TotalBytes_i> m_bytes;
+    alignas(AllocSize_i) std::array<unsigned char, TotalBytes_i> m_bytes;
     std::array<Index_t, TotalBytes_i / AllocSize_i> m_allocBeginIndices;
 
     Index_t m_freeBlockBegin = 0;
@@ -217,7 +217,7 @@ private:
             Index_t... allocSizes, Index_t... totalSizes>
   Handle<T> AllocImpl(Arena<allocSize, totalSize> &arena,
                       Arena<allocSizes, totalSizes> &... arenas) {
-    if (allocSize >= sizeof(T)) {
+    if constexpr (allocSize >= sizeof(T)) {
       const auto allocdIdx = arena.AllocFromArena();
       if (allocdIdx == std::numeric_limits<Index_t>::max()) {
         return Handle<T>();
@@ -233,7 +233,7 @@ private:
 
   template <class T, Index_t allocSize, Index_t totalSize>
   Handle<T> AllocImpl(Arena<allocSize, totalSize> &arena) {
-    if (allocSize >= sizeof(T)) {
+    if constexpr (allocSize >= sizeof(T)) {
       const auto allocdIdx = arena.AllocFromArena();
       if (allocdIdx == std::numeric_limits<Index_t>::max()) {
         return Handle<T>();

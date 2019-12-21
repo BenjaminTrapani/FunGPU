@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
                   << std::endl;
         continue;
       }
-
+      std::cout << "Successfully compiled program " << programPath << std::endl;
       Index_t maxConcurrentBlockCount;
       const auto programResult =
           evaluator.EvaluateProgram(compiledResult, maxConcurrentBlockCount);

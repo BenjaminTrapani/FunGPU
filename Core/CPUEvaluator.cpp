@@ -37,11 +37,12 @@ CPUEvaluator::DependencyTracker::AddActiveBlock(
 
 CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
     : m_dependencyTracker(std::make_shared<DependencyTracker>()),
-      m_resultValue(std::make_shared<PortableMemPool::Handle<RuntimeBlock_t::RuntimeValue>>()),
+      m_resultValue(std::make_shared<
+                    PortableMemPool::Handle<RuntimeBlock_t::RuntimeValue>>()),
       m_garbageCollectorHandleBuff(range<1>(1)), m_memPoolBuff(memPool),
       m_dependencyTrackerBuff(m_dependencyTracker, range<1>(1)),
       m_resultValueBuff(m_resultValue, range<1>(1))
-      /* m_workQueue(host_selector{})*/ {
+/* m_workQueue(host_selector{})*/ {
   std::cout << std::endl;
   std::cout << "Running on "
             << m_workQueue.get_device().get_info<info::device::name>()
@@ -54,13 +55,16 @@ CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
       auto garbageCollectorHandleAcc =
           m_garbageCollectorHandleBuff.get_access<access::mode::read_write>(
               cgh);
-      auto memPoolHostAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-      auto resultValueWrite = m_resultValueBuff.get_access<access::mode::discard_write>(cgh);
+      auto memPoolHostAcc =
+          m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+      auto resultValueWrite =
+          m_resultValueBuff.get_access<access::mode::discard_write>(cgh);
       cgh.single_task<class create_gc>(
-				       [memPoolWrite, garbageCollectorHandleAcc, resultValueWrite]() {
+          [memPoolWrite, garbageCollectorHandleAcc, resultValueWrite]() {
             garbageCollectorHandleAcc[0] =
                 memPoolWrite[0].Alloc<GarbageCollector_t>(memPoolWrite);
-	    resultValueWrite[0] = memPoolWrite[0].Alloc<RuntimeBlock_t::RuntimeValue>();
+            resultValueWrite[0] =
+                memPoolWrite[0].Alloc<RuntimeBlock_t::RuntimeValue>();
           });
     });
   } catch (cl::sycl::exception e) {
@@ -69,16 +73,18 @@ CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
 }
 
 CPUEvaluator::~CPUEvaluator() {
-  m_workQueue.submit([&](handler& cgh) {
-		       auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-		       auto resultValueAcc = m_resultValueBuff.get_access<access::mode::read_write>(cgh);
-  auto gcHandleAcc =
-      m_garbageCollectorHandleBuff.get_access<access::mode::read_write>(cgh);
-  cgh.single_task<class evaluator_dealloc>([memPoolAcc, gcHandleAcc, resultValueAcc]() {
-					     memPoolAcc[0].Dealloc(resultValueAcc[0]);
-					     memPoolAcc[0].Dealloc(gcHandleAcc[0]);
-					   });
-		     });
+  m_workQueue.submit([&](handler &cgh) {
+    auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+    auto resultValueAcc =
+        m_resultValueBuff.get_access<access::mode::read_write>(cgh);
+    auto gcHandleAcc =
+        m_garbageCollectorHandleBuff.get_access<access::mode::read_write>(cgh);
+    cgh.single_task<class evaluator_dealloc>(
+        [memPoolAcc, gcHandleAcc, resultValueAcc]() {
+          memPoolAcc[0].Dealloc(resultValueAcc[0]);
+          memPoolAcc[0].Dealloc(gcHandleAcc[0]);
+        });
+  });
 }
 
 void CPUEvaluator::CreateFirstBlock(const Compiler::ASTNodeHandle rootNode) {
@@ -90,7 +96,8 @@ void CPUEvaluator::CreateFirstBlock(const Compiler::ASTNodeHandle rootNode) {
           m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
       auto garbageCollectorHandleAcc =
           m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
-      auto resultValueAcc = m_resultValueBuff.get_access<access::mode::read>(cgh);
+      auto resultValueAcc =
+          m_resultValueBuff.get_access<access::mode::read>(cgh);
       cgh.single_task<class init_first_block>([memPoolWrite, dependencyTracker,
                                                resultValueAcc, rootNode,
                                                garbageCollectorHandleAcc]() {
@@ -106,6 +113,7 @@ void CPUEvaluator::CreateFirstBlock(const Compiler::ASTNodeHandle rootNode) {
   } catch (cl::sycl::exception e) {
     std::cerr << "Sycl exception: " << e.what() << std::endl;
   }
+  std::cout << "Successfully created first block" << std::endl;
 }
 
 CPUEvaluator::RuntimeBlock_t::RuntimeValue
@@ -139,14 +147,22 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
     bool requiresGarbageCollectionData = false;
     buffer<bool> requiresGarbageCollection(&requiresGarbageCollectionData,
                                            range<1>(1));
-
+    Index_t numActiveBlocksData = 0;
+    buffer<Index_t> numActiveBlocksBuff(&numActiveBlocksData, range<1>(1));
     while (true) {
-      Index_t numActiveBlocks = 0;
       {
-        auto hostDepTracker =
-            m_dependencyTrackerBuff.get_access<access::mode::read_write>();
-        numActiveBlocks = hostDepTracker[0].GetActiveBlockCount();
-        hostDepTracker[0].ResetActiveBlockCount();
+        m_workQueue.submit([&](handler &cgh) {
+          auto numActiveBlocksWrite =
+              numActiveBlocksBuff.get_access<access::mode::write>(cgh);
+          auto depTrackerAcc =
+              m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
+          cgh.single_task<class update_active_block_count>(
+              [numActiveBlocksWrite, depTrackerAcc]() {
+                numActiveBlocksWrite[0] =
+                    depTrackerAcc[0].GetActiveBlockCount();
+                depTrackerAcc[0].ResetActiveBlockCount();
+              });
+        });
 
         auto runtimeValuesRequiredAcc =
             runtimeValuesRequiredCount.get_access<access::mode::write>();
@@ -171,6 +187,8 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
         hostBlockHasErrorAcc[0] = 0;
       }
 
+      const auto numActiveBlocks =
+          numActiveBlocksBuff.get_access<access::mode::read>()[0];
       maxConcurrentBlocksDuringExec =
           std::max(numActiveBlocks, maxConcurrentBlocksDuringExec);
 
@@ -398,14 +416,18 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
   }
 
   RuntimeBlock_t::RuntimeValue resultOnHostData;
-  buffer<RuntimeBlock_t::RuntimeValue> resultBufferOnHost(&resultOnHostData, range<1>(1));
-  m_workQueue.submit([&](handler& cgh) {
-		       auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-		       auto resultOnHostAcc = resultBufferOnHost.get_access<access::mode::discard_write>(cgh);
-		       auto resultValRefAcc = m_resultValueBuff.get_access<access::mode::read>(cgh);
-		       cgh.single_task<class fetch_result>([resultOnHostAcc, memPoolAcc, resultValRefAcc]() {
-							     resultOnHostAcc[0] = *memPoolAcc[0].derefHandle(resultValRefAcc[0]);
-							   });
+  buffer<RuntimeBlock_t::RuntimeValue> resultBufferOnHost(&resultOnHostData,
+                                                          range<1>(1));
+  m_workQueue.submit([&](handler &cgh) {
+    auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+    auto resultOnHostAcc =
+        resultBufferOnHost.get_access<access::mode::discard_write>(cgh);
+    auto resultValRefAcc =
+        m_resultValueBuff.get_access<access::mode::read>(cgh);
+    cgh.single_task<class fetch_result>(
+        [resultOnHostAcc, memPoolAcc, resultValRefAcc]() {
+          resultOnHostAcc[0] = *memPoolAcc[0].derefHandle(resultValRefAcc[0]);
+        });
   });
   {
     auto resultOnHostAcc = resultBufferOnHost.get_access<access::mode::read>();

@@ -1,6 +1,6 @@
 #include "PortableMemPool.hpp"
-#include <CL/sycl.hpp>
 #include "Types.h"
+#include <CL/sycl.hpp>
 #include <memory>
 
 namespace FunGPU {

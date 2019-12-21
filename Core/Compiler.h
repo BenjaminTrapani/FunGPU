@@ -3,8 +3,8 @@
 #include "Array.hpp"
 #include "PortableMemPool.hpp"
 #include "SExpr.h"
-#include <CL/sycl.hpp>
 #include "Types.h"
+#include <CL/sycl.hpp>
 
 #include <list>
 #include <memory>
