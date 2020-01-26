@@ -543,6 +543,7 @@ private:
 
   template <class UnaryOpFunctor> Error PerformUnaryOp() {
     const auto argVal = m_runtimeValues.derefFront();
+    m_runtimeValues.pop_front();
     if (argVal.m_type != RuntimeValue::Type::Float_t) {
       return Error(Error::Type::InvalidType);
     }
