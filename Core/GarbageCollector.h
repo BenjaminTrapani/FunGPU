@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "Error.hpp"
 #include "PortableMemPool.hpp"
 #include <CL/sycl.hpp>
 
@@ -15,18 +16,22 @@ public:
         m_managedHandlesIdx(0) {}
 
   template <class... Args_t>
-  PortableMemPool::Handle<T> AllocManaged(const Args_t &... args) {
-    const auto allocdHandle = m_memPoolAcc[0].template Alloc<T>(args...);
+  Error AllocManaged(PortableMemPool::Handle<T> &result, Args_t &&... args) {
     cl::sycl::atomic<Index_t> allocCount(
         (cl::sycl::multi_ptr<Index_t,
                              cl::sycl::access::address_space::global_space>(
             &m_managedAllocationsCountData)));
     const auto indexToAlloc = allocCount.fetch_add(1);
     if (indexToAlloc >= maxManagedAllocationsCount) {
-      return PortableMemPool::Handle<T>();
+      return Error(Error::Type::GCOutOfSlots);
     }
-    m_managedHandles[m_managedHandlesIdx][indexToAlloc] = allocdHandle;
-    return allocdHandle;
+
+    result = m_memPoolAcc[0].template Alloc<T>(std::forward<Args_t>(args)...);
+    if (result == PortableMemPool::Handle<T>()) {
+      return Error(Error::Type::MemPoolAllocFailure);
+    }
+    m_managedHandles[m_managedHandlesIdx][indexToAlloc] = result;
+    return Error();
   }
 
   Index_t GetManagedAllocationCount() {

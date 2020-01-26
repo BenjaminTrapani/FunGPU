@@ -1,10 +1,10 @@
 #include "Compiler.h"
+#include "Error.hpp"
 #include "GarbageCollector.h"
 #include "List.hpp"
 #include "PortableMemPool.hpp"
 #include "Types.h"
 #include <CL/sycl.hpp>
-
 #include <atomic>
 
 namespace FunGPU {
@@ -81,31 +81,6 @@ public:
       m_type = type;
       m_data = data;
     }
-  };
-
-  class Error {
-  public:
-    enum class Type {
-      Success,
-      OutOfMemory,
-      InvalidType,
-      ArityMismatch,
-      InvalidIndex,
-    };
-
-    Error() : m_type(Type::Success), m_description(nullptr) {}
-    Error(const Error &other)
-        : m_type(other.m_type), m_description(other.m_description) {}
-    Error(const Type type, const char *desc)
-        : m_type(type), m_description(desc) {}
-
-    Type GetType() const { return m_type; }
-
-    const char *GetDescription() const { return m_description; }
-
-  private:
-    Type m_type;
-    const char *m_description;
   };
 
   using RuntimeValueHandle_t = PortableMemPool::Handle<RuntimeValue>;
@@ -269,29 +244,21 @@ public:
         auto bindingsData =
             m_memPoolDeviceAcc[0].derefHandle(bindNode->m_bindings);
         for (Index_t i = 0; i < bindNode->m_bindings.GetCount(); ++i) {
-          if (!m_runtimeValues.push_front(RuntimeValue())) {
-            return Error(Error::Type::OutOfMemory,
-                         "While allocating space for bindings");
-          }
+          RETURN_IF_FAILURE(m_runtimeValues.push_front(RuntimeValue()));
           auto targetRuntimeValue = m_runtimeValues.front();
-          auto dependencyOnBinding = garbageCollector->AllocManaged(
-              bindingsData[i], isRec ? m_handle : m_bindingParent, m_handle,
-              m_depTracker, targetRuntimeValue, m_memPoolDeviceAcc,
-              m_garbageCollectorHandle);
-          if (dependencyOnBinding == SharedRuntimeBlockHandle_t()) {
-            return Error(Error::Type::OutOfMemory,
-                         "Failed to alloc dependency on binding");
-          }
+          SharedRuntimeBlockHandle_t dependencyOnBinding;
+          RETURN_IF_FAILURE(garbageCollector->AllocManaged(
+              dependencyOnBinding, bindingsData[i],
+              isRec ? m_handle : m_bindingParent, m_handle, m_depTracker,
+              targetRuntimeValue, m_memPoolDeviceAcc,
+              m_garbageCollectorHandle));
           RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnBinding));
         }
       } else {
-        auto depOnExpr = garbageCollector->AllocManaged(
-            bindNode->m_childExpr, m_handle, m_parent, m_depTracker, m_dest,
-            m_memPoolDeviceAcc, m_garbageCollectorHandle);
-        if (depOnExpr == SharedRuntimeBlockHandle_t()) {
-          return Error(Error::Type::OutOfMemory,
-                       "Failed to allocate inner expression in bind");
-        }
+        SharedRuntimeBlockHandle_t depOnExpr;
+        RETURN_IF_FAILURE(garbageCollector->AllocManaged(
+            depOnExpr, bindNode->m_childExpr, m_handle, m_parent, m_depTracker,
+            m_dest, m_memPoolDeviceAcc, m_garbageCollectorHandle));
         RETURN_IF_FAILURE(AddDependentActiveBlock(depOnExpr, false));
       }
 
@@ -304,51 +271,37 @@ public:
       if (m_runtimeValues.size() == 0) {
         auto argsData = m_memPoolDeviceAcc[0].derefHandle(callNode->m_args);
         for (Index_t i = 0; i < callNode->m_args.GetCount(); ++i) {
-          if (!m_runtimeValues.push_front(RuntimeValue())) {
-            return Error(Error::Type::OutOfMemory,
-                         "While allocating call args runtime values");
-          }
+          RETURN_IF_FAILURE(m_runtimeValues.push_front(RuntimeValue()));
           auto targetRuntimeValue = m_runtimeValues.front();
-          auto dependencyOnArg = garbageCollector->AllocManaged(
-              argsData[i], m_bindingParent, m_handle, m_depTracker,
-              targetRuntimeValue, m_memPoolDeviceAcc, m_garbageCollectorHandle);
-          if (dependencyOnArg == SharedRuntimeBlockHandle_t()) {
-            return Error(Error::Type::OutOfMemory, "Failed to alloc call arg");
-          }
+          SharedRuntimeBlockHandle_t dependencyOnArg;
+          RETURN_IF_FAILURE(garbageCollector->AllocManaged(
+              dependencyOnArg, argsData[i], m_bindingParent, m_handle,
+              m_depTracker, targetRuntimeValue, m_memPoolDeviceAcc,
+              m_garbageCollectorHandle));
           RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnArg));
         }
-
-        if (!m_runtimeValues.push_front(RuntimeValue())) {
-          return Error(Error::Type::OutOfMemory,
-                       "While allocating call lambda runtime value");
-        }
-        auto dependencyOnLambda = garbageCollector->AllocManaged(
-            callNode->m_target, m_bindingParent, m_handle, m_depTracker,
-            m_runtimeValues.front(), m_memPoolDeviceAcc,
-            m_garbageCollectorHandle);
-        if (dependencyOnLambda == SharedRuntimeBlockHandle_t()) {
-          return Error(Error::Type::OutOfMemory,
-                       "Failed to alloc space for lambda target of call");
-        }
+        RETURN_IF_FAILURE(m_runtimeValues.push_front(RuntimeValue()));
+        SharedRuntimeBlockHandle_t dependencyOnLambda;
+        RETURN_IF_FAILURE(garbageCollector->AllocManaged(
+            dependencyOnLambda, callNode->m_target, m_bindingParent, m_handle,
+            m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc,
+            m_garbageCollectorHandle));
         RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnLambda));
       } else {
         RuntimeValue lambdaVal = m_runtimeValues.derefFront();
         m_runtimeValues.pop_front();
         if (lambdaVal.m_type != RuntimeValue::Type::Function) {
-          return Error(Error::Type::InvalidType, "Cannot call non-function");
+          return Error(Error::Type::InvalidType);
         }
         if (lambdaVal.m_data.functionVal.m_argCount !=
             callNode->m_args.GetCount()) {
-          return Error(Error::Type::ArityMismatch,
-                       "Incorrect number of args in call of lambda expr");
+          return Error(Error::Type::ArityMismatch);
         }
-        auto lambdaBlock = garbageCollector->AllocManaged(
-            lambdaVal.m_data.functionVal.m_expr, m_handle, m_parent,
-            m_depTracker, m_dest, m_memPoolDeviceAcc, m_garbageCollectorHandle);
-        if (lambdaBlock == SharedRuntimeBlockHandle_t()) {
-          return Error(Error::Type::OutOfMemory,
-                       "Failed to alloc space for lambda eval of call");
-        }
+        SharedRuntimeBlockHandle_t lambdaBlock;
+        RETURN_IF_FAILURE(garbageCollector->AllocManaged(
+            lambdaBlock, lambdaVal.m_data.functionVal.m_expr, m_handle,
+            m_parent, m_depTracker, m_dest, m_memPoolDeviceAcc,
+            m_garbageCollectorHandle));
         m_bindingParent = lambdaVal.m_data.functionVal.m_bindingParent;
         RETURN_IF_FAILURE(AddDependentActiveBlock(lambdaBlock, false));
       }
@@ -360,35 +313,26 @@ public:
       auto garbageCollector =
           m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
       if (m_runtimeValues.size() == 0) {
-        if (!m_runtimeValues.push_front(RuntimeValue())) {
-          return Error(Error::Type::OutOfMemory,
-                       "While allocating runtime value for if pred");
-        }
-        auto dependencyOnPred = garbageCollector->AllocManaged(
-            ifNode->m_pred, m_bindingParent, m_handle, m_depTracker,
-            m_runtimeValues.front(), m_memPoolDeviceAcc,
-            m_garbageCollectorHandle);
-        if (dependencyOnPred == SharedRuntimeBlockHandle_t()) {
-          return Error(Error::Type::OutOfMemory,
-                       "Failed to allocate dependency on pred for if expr");
-        }
+        RETURN_IF_FAILURE(m_runtimeValues.push_front(RuntimeValue()));
+        SharedRuntimeBlockHandle_t dependencyOnPred;
+        RETURN_IF_FAILURE(garbageCollector->AllocManaged(
+            dependencyOnPred, ifNode->m_pred, m_bindingParent, m_handle,
+            m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc,
+            m_garbageCollectorHandle));
         RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnPred));
       } else {
         auto predValue = m_runtimeValues.derefFront();
         m_runtimeValues.pop_front();
         if (predValue.m_type != RuntimeValue::Type::Float_t) {
-          return Error(Error::Type::InvalidType,
-                       "Float_t is the only supported bolean type");
+          return Error(Error::Type::InvalidType);
         }
         const bool isPredTrue = static_cast<bool>(predValue.m_data.floatVal);
         const auto branchToTake = isPredTrue ? ifNode->m_then : ifNode->m_else;
-        auto dependencyOnBranch = garbageCollector->AllocManaged(
-            branchToTake, m_bindingParent, m_parent, m_depTracker, m_dest,
-            m_memPoolDeviceAcc, m_garbageCollectorHandle);
-        if (dependencyOnBranch == SharedRuntimeBlockHandle_t()) {
-          return Error(Error::Type::OutOfMemory,
-                       "Failed to allocate dependency on branch for if expr");
-        }
+        SharedRuntimeBlockHandle_t dependencyOnBranch;
+        RETURN_IF_FAILURE(garbageCollector->AllocManaged(
+            dependencyOnBranch, branchToTake, m_bindingParent, m_parent,
+            m_depTracker, m_dest, m_memPoolDeviceAcc,
+            m_garbageCollectorHandle));
         RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnBranch, false));
       }
       break;
@@ -513,7 +457,7 @@ public:
       break;
     }
     default:
-      return Error(Error::Type::InvalidType, "Unexpected AST node in eval");
+      return Error(Error::Type::InvalidType);
     }
 
     return Error();
@@ -536,8 +480,7 @@ private:
       }
     }
     if (tempParent == SharedRuntimeBlockHandle_t()) {
-      error = Error(Error::Type::InvalidIndex,
-                    "Failed to find runtime value for index");
+      error = Error(Error::Type::InvalidIndex);
       return nullptr;
     }
 
@@ -552,20 +495,14 @@ private:
   Error MaybeAddUnaryOp(bool &added) {
     if (m_runtimeValues.size() == 0) {
       auto unaryOp = static_cast<Compiler::UnaryOpNode *>(GetASTNode());
-      if (!m_runtimeValues.push_front(RuntimeValue())) {
-        return Error(Error::Type::OutOfMemory,
-                     "While allocating dest for unary op");
-      }
+      RETURN_IF_FAILURE(m_runtimeValues.push_front(RuntimeValue()));
       auto garbageCollector =
           m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
-      auto dependencyNode = garbageCollector->AllocManaged(
-          unaryOp->m_arg0, m_bindingParent, m_handle, m_depTracker,
-          m_runtimeValues.front(), m_memPoolDeviceAcc,
-          m_garbageCollectorHandle);
-      if (dependencyNode == SharedRuntimeBlockHandle_t()) {
-        return Error(Error::Type::OutOfMemory,
-                     "Failed to allocate dependency on arg for unary op");
-      }
+      SharedRuntimeBlockHandle_t dependencyNode;
+      RETURN_IF_FAILURE(garbageCollector->AllocManaged(
+          dependencyNode, unaryOp->m_arg0, m_bindingParent, m_handle,
+          m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc,
+          m_garbageCollectorHandle));
       RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyNode));
       added = true;
     } else {
@@ -578,34 +515,21 @@ private:
   Error MaybeAddBinaryOp(bool &added) {
     if (m_runtimeValues.size() == 0) {
       auto binaryOp = static_cast<Compiler::BinaryOpNode *>(GetASTNode());
-      if (!m_runtimeValues.push_front(RuntimeValue())) {
-        return Error(Error::Type::OutOfMemory,
-                     "While allocating dest for left binary op arg");
-      }
+      RETURN_IF_FAILURE(m_runtimeValues.push_front(RuntimeValue()));
       auto garbageCollector =
           m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
-      auto rightNodeBlock = garbageCollector->AllocManaged(
-          binaryOp->m_arg1, m_bindingParent, m_handle, m_depTracker,
-          m_runtimeValues.front(), m_memPoolDeviceAcc,
-          m_garbageCollectorHandle);
-      if (rightNodeBlock == SharedRuntimeBlockHandle_t()) {
-        return Error(Error::Type::OutOfMemory,
-                     "Failed to allocate right arg dep in binary op");
-      }
+      SharedRuntimeBlockHandle_t rightNodeBlock;
+      RETURN_IF_FAILURE(garbageCollector->AllocManaged(
+          rightNodeBlock, binaryOp->m_arg1, m_bindingParent, m_handle,
+          m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc,
+          m_garbageCollectorHandle));
 
-      if (!m_runtimeValues.push_front(RuntimeValue())) {
-        return Error(Error::Type::OutOfMemory,
-                     "While allocating dest for right binar op arg");
-      }
-      auto leftNodeBlock = garbageCollector->AllocManaged(
-          binaryOp->m_arg0, m_bindingParent, m_handle, m_depTracker,
-          m_runtimeValues.front(), m_memPoolDeviceAcc,
-          m_garbageCollectorHandle);
-      if (leftNodeBlock == SharedRuntimeBlockHandle_t()) {
-        return Error(Error::Type::OutOfMemory,
-                     "Failed to allocate left arg depn in binary op");
-      }
-
+      RETURN_IF_FAILURE(m_runtimeValues.push_front(RuntimeValue()));
+      SharedRuntimeBlockHandle_t leftNodeBlock;
+      RETURN_IF_FAILURE(garbageCollector->AllocManaged(
+          leftNodeBlock, binaryOp->m_arg0, m_bindingParent, m_handle,
+          m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc,
+          m_garbageCollectorHandle));
       RETURN_IF_FAILURE(AddDependentActiveBlock(rightNodeBlock));
       RETURN_IF_FAILURE(AddDependentActiveBlock(leftNodeBlock));
 
@@ -620,7 +544,7 @@ private:
   template <class UnaryOpFunctor> Error PerformUnaryOp() {
     const auto argVal = m_runtimeValues.derefFront();
     if (argVal.m_type != RuntimeValue::Type::Float_t) {
-      return Error(Error::Type::InvalidType, "Expected Float_t in unary op");
+      return Error(Error::Type::InvalidType);
     }
     typename RuntimeValue::Data dataToSet;
     dataToSet.floatVal = UnaryOpFunctor()(argVal.m_data.floatVal);
@@ -636,7 +560,7 @@ private:
     m_runtimeValues.pop_front();
     if (lArg.m_type != RuntimeValue::Type::Float_t ||
         rArg.m_type != RuntimeValue::Type::Float_t) {
-      return Error(Error::Type::InvalidType, "Expected Float_ts in binary op");
+      return Error(Error::Type::InvalidType);
     }
     typename RuntimeValue::Data dataVal;
     dataVal.floatVal =

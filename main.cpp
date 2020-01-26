@@ -36,7 +36,8 @@ int main(int argc, char **argv) {
       const auto programResult =
           evaluator.EvaluateProgram(compiledResult, maxConcurrentBlockCount);
       std::cout << programResult.m_data.floatVal << std::endl;
-
+      std::cout << "Max concurrent blocks: " << maxConcurrentBlockCount
+                << std::endl;
       compiler.DeallocateAST(compiledResult);
     }
   } catch (const cl::sycl::exception &e) {

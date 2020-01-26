@@ -1,4 +1,5 @@
 #include "Compiler.h"
+#include "Error.hpp"
 #include "GarbageCollector.h"
 #include "PortableMemPool.hpp"
 #include "RuntimeBlock.hpp"
@@ -11,7 +12,7 @@ class CPUEvaluator {
 public:
   class DependencyTracker;
 
-  using RuntimeBlock_t = RuntimeBlock<DependencyTracker, 8192 * 4>;
+  using RuntimeBlock_t = RuntimeBlock<DependencyTracker, 8192 * 32>;
   using GarbageCollector_t = RuntimeBlock_t::GarbageCollector_t;
 
   class DependencyTracker {
@@ -20,7 +21,7 @@ public:
   public:
     DependencyTracker() : m_activeBlockCountData(0) {}
 
-    CPUEvaluator::RuntimeBlock_t::Error
+    Error
     AddActiveBlock(const RuntimeBlock_t::SharedRuntimeBlockHandle_t &block);
 
     Index_t GetActiveBlockCount() {
@@ -45,7 +46,7 @@ public:
     }
 
   private:
-    std::array<RuntimeBlock_t::SharedRuntimeBlockHandle_t, 4096>
+    std::array<RuntimeBlock_t::SharedRuntimeBlockHandle_t, 8192 * 8>
         m_newActiveBlocks;
     Index_t m_activeBlockCountData;
   };
@@ -65,12 +66,24 @@ private:
   std::shared_ptr<DependencyTracker> m_dependencyTracker;
   std::shared_ptr<PortableMemPool::Handle<RuntimeBlock_t::RuntimeValue>>
       m_resultValue;
+
   cl::sycl::buffer<PortableMemPool::Handle<GarbageCollector_t>>
       m_garbageCollectorHandleBuff;
   cl::sycl::buffer<PortableMemPool> m_memPoolBuff;
   cl::sycl::buffer<DependencyTracker> m_dependencyTrackerBuff;
   cl::sycl::buffer<PortableMemPool::Handle<RuntimeBlock_t::RuntimeValue>>
       m_resultValueBuff;
+  cl::sycl::buffer<RuntimeBlock_t::SharedRuntimeBlockHandle_t>
+      m_workingBlocksBuff;
+  cl::sycl::buffer<Error> m_errorsPerBlock;
+  cl::sycl::buffer<Index_t> m_blockErrorIdx;
+  cl::sycl::buffer<bool> m_markingsExpanded;
+  cl::sycl::buffer<Index_t> m_managedAllocdCount;
+  cl::sycl::buffer<Index_t> m_runtimeValuesRequiredCount;
+  cl::sycl::buffer<Index_t> m_runtimeBlocksRequiredCount;
+  cl::sycl::buffer<bool> m_requiresGarbageCollection;
+  cl::sycl::buffer<Index_t> m_numActiveBlocksBuff;
+  cl::sycl::buffer<RuntimeBlock_t::RuntimeValue> m_resultBufferOnHost;
 
   cl::sycl::queue m_workQueue;
 };

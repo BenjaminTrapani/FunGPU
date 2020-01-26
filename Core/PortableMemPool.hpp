@@ -152,7 +152,7 @@ private:
 
     Arena() {
       for (Index_t i = 0; i < m_allocBeginIndices.size(); ++i) {
-        m_allocBeginIndices[i] = i * AllocSize_i;
+        m_allocBeginIndices[i] = i;
       }
     }
 
@@ -174,14 +174,14 @@ private:
       return m_allocBeginIndices[allocdIndex];
     }
 
-    void FreeFromArena(const Index_t byteIdx) {
+    void FreeFromArena(const Index_t allocIdx) {
       cl::sycl::atomic<Index_t> allocdBlockBegin(
           (cl::sycl::multi_ptr<Index_t,
                                cl::sycl::access::address_space::global_space>(
               &m_allocdBlockBegin)));
       const auto freeDst =
           allocdBlockBegin.fetch_add(1) % m_allocBeginIndices.size();
-      m_allocBeginIndices[freeDst] = byteIdx;
+      m_allocBeginIndices[freeDst] = allocIdx;
 
       cl::sycl::atomic<Index_t> allocCount(
           (cl::sycl::multi_ptr<Index_t,
@@ -190,9 +190,10 @@ private:
       allocCount.fetch_sub(1);
     }
 
-    unsigned char *GetBytes(const Index_t byteIdx) { return &m_bytes[byteIdx]; }
-
-    alignas(AllocSize_i) std::array<unsigned char, TotalBytes_i> m_bytes;
+    unsigned char *GetBytes(const Index_t allocIdx) {
+      return reinterpret_cast<unsigned char *>(&m_storage[allocIdx]);
+    }
+    std::aligned_storage_t<AllocSize_i> m_storage[TotalNodes];
     std::array<Index_t, TotalBytes_i / AllocSize_i> m_allocBeginIndices;
 
     Index_t m_freeBlockBegin = 0;
@@ -431,8 +432,8 @@ private:
   static constexpr Index_t binSize = 16777216;
 
   Arena<sizeof(int), binSize> m_smallBin;
-  Arena<sizeof(int) * 8, binSize> m_mediumBin;
-  Arena<sizeof(int) * 128, binSize> m_largeBin;
+  Arena<sizeof(int) * 8, binSize * 8> m_mediumBin;
+  Arena<sizeof(int) * 128, binSize * 8> m_largeBin;
   Arena<sizeof(int) * 2097152, binSize> m_extraLargeBin;
 };
 } // namespace FunGPU
