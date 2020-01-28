@@ -25,10 +25,11 @@ Error CPUEvaluator::DependencyTracker::AddActiveBlock(
                            cl::sycl::access::address_space::global_space>(
           &m_activeBlockCountData)));
   const auto indexToInsert = activeBlockCount.fetch_add(1);
-  if (indexToInsert >= m_newActiveBlocks.size()) {
+  auto &destArray = m_activeBlocks[m_activeBlocksBufferIdx];
+  if (indexToInsert >= destArray.size()) {
     return Error(Error::Type::EvaluatorOutOfActiveBlocks);
   }
-  m_newActiveBlocks[indexToInsert] = block;
+  destArray[indexToInsert] = block;
 
   return Error();
 }
@@ -40,9 +41,7 @@ CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
       m_garbageCollectorHandleBuff(range<1>(1)), m_memPoolBuff(memPool),
       m_dependencyTrackerBuff(m_dependencyTracker, range<1>(1)),
       m_resultValueBuff(m_resultValue, range<1>(1)),
-      m_workingBlocksBuff(
-          range<1>(m_dependencyTracker->m_newActiveBlocks.size())),
-      m_errorsPerBlock(range<1>(m_dependencyTracker->m_newActiveBlocks.size())),
+      m_errorsPerBlock(range<1>(m_dependencyTracker->m_activeBlocks[0].size())),
       m_blockErrorIdx(range<1>(1)), m_markingsExpanded(range<1>(1)),
       m_managedAllocdCount(range<1>(1)),
       m_runtimeValuesRequiredCount(range<1>(1)),
@@ -161,7 +160,7 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
         cgh.single_task<class update_active_block_count>(
             [numActiveBlocksWrite, depTrackerAcc]() {
               numActiveBlocksWrite[0] = depTrackerAcc[0].GetActiveBlockCount();
-              depTrackerAcc[0].ResetActiveBlockCount();
+              depTrackerAcc[0].FlipActiveBlocksBuffer();
             });
       });
       m_runtimeValuesRequiredCount
@@ -196,8 +195,6 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
         m_workQueue.submit([&](handler &cgh) {
           auto dependencyTracker =
               m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
-          auto workingBlocksAcc =
-              m_workingBlocksBuff.get_access<access::mode::read_write>(cgh);
           auto memPoolAcc =
               m_memPoolBuff.get_access<access::mode::read_write>(cgh);
 
@@ -209,14 +206,12 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
                   cgh);
           cgh.parallel_for<class prep_blocks>(
               cl::sycl::range<1>(numActiveBlocks),
-              [dependencyTracker, workingBlocksAcc, memPoolAcc,
-               runtimeValuesRequiredCountAtomic,
+              [dependencyTracker, memPoolAcc, runtimeValuesRequiredCountAtomic,
                runtimeBlocksRequiredCountAtomic](item<1> itm) {
                 const auto idx = itm.get_linear_id();
-                workingBlocksAcc[idx] = dependencyTracker[0].GetBlockAtIndex(
-                    static_cast<Index_t>(idx));
-                const auto derefdWorking =
-                    memPoolAcc[0].derefHandle(workingBlocksAcc[idx]);
+                const auto derefdWorking = memPoolAcc[0].derefHandle(
+                    dependencyTracker[0].GetBlockAtIndex(
+                        static_cast<Index_t>(idx)));
                 const auto requiredSpace = derefdWorking->GetRequiredAllocs();
                 runtimeValuesRequiredCountAtomic[0].fetch_add(
                     requiredSpace.runtimeValuesRequired);
@@ -263,16 +258,17 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
       if (requiresGarbageCollectOnHost || numActiveBlocks == 0) {
         if (numActiveBlocks > 0) {
           m_workQueue.submit([&](handler &cgh) {
-            auto workingBlocksAcc =
-                m_workingBlocksBuff.get_access<access::mode::read_write>(cgh);
             auto memPoolAcc =
                 m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+            auto dependencyTrackerAcc =
+                m_dependencyTrackerBuff.get_access<access::mode::read_write>(
+                    cgh);
             cgh.parallel_for<class gc_initial_mark>(
                 cl::sycl::range<1>(numActiveBlocks),
-                [workingBlocksAcc, memPoolAcc](item<1> itm) {
+                [memPoolAcc, dependencyTrackerAcc](item<1> itm) {
                   const auto idx = itm.get_linear_id();
-                  const auto derefdWorking =
-                      memPoolAcc[0].derefHandle(workingBlocksAcc[idx]);
+                  const auto derefdWorking = memPoolAcc[0].derefHandle(
+                      dependencyTrackerAcc[0].GetBlockAtIndex(idx));
                   derefdWorking->SetMarked();
                 });
           });
@@ -388,8 +384,6 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
               m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
           auto gcHandleAcc =
               m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
-          auto workingBlocksAcc =
-              m_workingBlocksBuff.get_access<access::mode::read_write>(cgh);
 
           auto blockErrorIdxAtomicAcc =
               m_blockErrorIdx.get_access<access::mode::atomic>(cgh);
@@ -398,10 +392,10 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
 
           cgh.parallel_for<class run_eval_pass>(
               cl::sycl::range<1>(numActiveBlocks),
-              [dependencyTracker, memPoolWrite, workingBlocksAcc,
-               blockErrorIdxAtomicAcc, blockErrorAcc,
-               gcHandleAcc](item<1> itm) {
-                auto currentBlock = workingBlocksAcc[itm.get_linear_id()];
+              [dependencyTracker, memPoolWrite, blockErrorIdxAtomicAcc,
+               blockErrorAcc, gcHandleAcc](item<1> itm) {
+                auto currentBlock =
+                    dependencyTracker[0].GetBlockAtIndex(itm.get_linear_id());
                 auto derefdCurrentBlock =
                     memPoolWrite[0].derefHandle(currentBlock);
                 auto gcRef = memPoolWrite[0].derefHandle(gcHandleAcc[0]);
