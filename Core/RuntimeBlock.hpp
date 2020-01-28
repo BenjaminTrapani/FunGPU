@@ -1,5 +1,6 @@
 #include "Compiler.h"
 #include "Error.hpp"
+#include "GarbageCollector.h"
 #include "List.hpp"
 #include "PortableMemPool.hpp"
 #include "Types.h"
@@ -7,13 +8,15 @@
 #include <atomic>
 
 namespace FunGPU {
-template <class DependencyTracker_t>
+template <class DependencyTracker_t, Index_t MaxManagedAllocsCount>
 class RuntimeBlock
     : public PortableMemPool::EnableHandleFromThis<
-          RuntimeBlock<DependencyTracker_t>> {
+          RuntimeBlock<DependencyTracker_t, MaxManagedAllocsCount>> {
 public:
   using SharedRuntimeBlockHandle_t = PortableMemPool::Handle<
-      RuntimeBlock<DependencyTracker_t>>;
+      RuntimeBlock<DependencyTracker_t, MaxManagedAllocsCount>>;
+  using GarbageCollector_t =
+      GarbageCollector<RuntimeBlock, MaxManagedAllocsCount>;
 
   class FunctionValue {
   public:
@@ -81,77 +84,82 @@ public:
   };
 
   using RuntimeValueHandle_t = PortableMemPool::Handle<RuntimeValue>;
-  using DependencyTrackerDeviceAcc_t = cl::sycl::accessor<
-    DependencyTracker_t, 1, cl::sycl::access::mode::read_write,
-    cl::sycl::access::target::global_buffer>; 
 
   RuntimeBlock(const Compiler::ASTNodeHandle astNode,
                const SharedRuntimeBlockHandle_t &bindingParent,
                const SharedRuntimeBlockHandle_t &parent,
-               const DependencyTrackerDeviceAcc_t &depTracker,
+               const cl::sycl::accessor<
+                   DependencyTracker_t, 1, cl::sycl::access::mode::read_write,
+                   cl::sycl::access::target::global_buffer> &depTracker,
                const RuntimeValueHandle_t &dest,
-               const PortableMemPool::DeviceAccessor_t &memPool)
+               const PortableMemPool::DeviceAccessor_t &memPool,
+               const PortableMemPool::Handle<GarbageCollector_t> &gc)
       : m_astNode(astNode), m_bindingParent(bindingParent), m_parent(parent),
-        m_depTracker(depTracker), m_dest(dest), m_dependenciesRemainingData(0), m_refCount(0),
-        m_memPoolDeviceAcc(memPool),
-        m_runtimeValues(memPool) {
-    if (m_bindingParent != SharedRuntimeBlockHandle_t()) {
-      auto derefdBindingParent = m_memPoolDeviceAcc[0].derefHandle(m_bindingParent);
-      derefdBindingParent->IncrementRefCount();
-    }
-    if (m_parent != SharedRuntimeBlockHandle_t()) {
-      auto derefdParent = m_memPoolDeviceAcc[0].derefHandle(m_parent);
-      derefdParent->IncrementRefCount();
-    }
+        m_depTracker(depTracker), m_dest(dest), m_dependenciesRemainingData(0),
+        m_memPoolDeviceAcc(memPool), m_garbageCollectorHandle(gc),
+        m_runtimeValues(memPool), m_isMarkedData(false) {}
+
+  bool SetMarked() {
+    cl::sycl::atomic<unsigned int> isMarkedAtomic(
+        (cl::sycl::multi_ptr<unsigned int,
+                             cl::sycl::access::address_space::global_space>(
+            &m_isMarkedData)));
+    return isMarkedAtomic.exchange(true);
   }
 
   struct MapperForFunctionVals {
-    MapperForFunctionVals(const PortableMemPool::DeviceAccessor_t &memPoolAcc,
-                          const DependencyTrackerDeviceAcc_t& depTracker)
-      : m_memPoolAcc(memPoolAcc),
-        m_depTracker(depTracker) {}
+    MapperForFunctionVals(const PortableMemPool::DeviceAccessor_t &memPoolAcc)
+        : m_anyMarkingsExpanded(false), m_memPoolAcc(memPoolAcc) {}
     void operator()(const RuntimeValue &runtimeValue) {
-      if (m_error.GetType() == Error::Type::Success && runtimeValue.m_type == RuntimeValue::Type::Function) {
+      if (runtimeValue.m_type == RuntimeValue::Type::Function) {
         auto &funv = runtimeValue.m_data.functionVal;
         if (funv.m_bindingParent != SharedRuntimeBlockHandle_t()) {
-          m_error = m_memPoolAcc[0].derefHandle(funv.m_bindingParent)->DecrementRefCount(m_depTracker);
+          m_anyMarkingsExpanded =
+              m_anyMarkingsExpanded ||
+              !m_memPoolAcc[0].derefHandle(funv.m_bindingParent)->SetMarked();
         }
       }
     }
+    bool m_anyMarkingsExpanded;
     PortableMemPool::DeviceAccessor_t m_memPoolAcc;
-    DependencyTrackerDeviceAcc_t m_depTracker;
-    Error m_error;
   };
 
-  Error ClearRefs() {
-    if (m_bindingParent != SharedRuntimeBlockHandle_t()) {
-      RETURN_IF_FAILURE(m_memPoolDeviceAcc[0].derefHandle(m_bindingParent)->DecrementRefCount(m_depTracker));
+  bool ExpandMarkings() {
+    bool anyMarkingsExpanded = false;
+    if (GetIsMarked()) {
+      if (m_bindingParent != SharedRuntimeBlockHandle_t()) {
+        anyMarkingsExpanded =
+            anyMarkingsExpanded ||
+            !m_memPoolDeviceAcc[0].derefHandle(m_bindingParent)->SetMarked();
+      }
+      if (m_parent != SharedRuntimeBlockHandle_t()) {
+        anyMarkingsExpanded =
+            anyMarkingsExpanded ||
+            !m_memPoolDeviceAcc[0].derefHandle(m_parent)->SetMarked();
+      }
+
+      MapperForFunctionVals mapper(m_memPoolDeviceAcc);
+      m_runtimeValues.map(mapper);
+
+      anyMarkingsExpanded = anyMarkingsExpanded || mapper.m_anyMarkingsExpanded;
     }
-    if (m_parent != SharedRuntimeBlockHandle_t()) {
-      RETURN_IF_FAILURE(m_memPoolDeviceAcc[0].derefHandle(m_parent)->DecrementRefCount(m_depTracker));
-    }
-    MapperForFunctionVals mapper(m_memPoolDeviceAcc, m_depTracker);
-    m_runtimeValues.map(mapper);
-    RETURN_IF_FAILURE(mapper.m_error);
-    return Error();
+    return anyMarkingsExpanded;
   }
 
-  void IncrementRefCount() {
-    cl::sycl::atomic<std::uint32_t> refCountAtomic(
-                                                   (cl::sycl::multi_ptr<std::uint32_t, cl::sycl::access::address_space::global_space>(&m_refCount)));
-    refCountAtomic.fetch_add(1);
-  }
-
-  Error DecrementRefCount(DependencyTrackerDeviceAcc_t depTracker) {
-    cl::sycl::atomic<std::uint32_t> refCountAtomic(
-        (cl::sycl::multi_ptr<std::uint32_t,
+  bool GetIsMarked() {
+    cl::sycl::atomic<unsigned int> isMarkedAtomic(
+        (cl::sycl::multi_ptr<unsigned int,
                              cl::sycl::access::address_space::global_space>(
-            &m_refCount)));
-    const auto prevRefCount = refCountAtomic.fetch_sub(1);
-    if (prevRefCount == 1) {
-      RETURN_IF_FAILURE(depTracker[0].MarkForDeletion(m_handle));
-    }
-    return Error();
+            &m_isMarkedData)));
+    return isMarkedAtomic.load();
+  }
+
+  void ClearMarking() {
+    cl::sycl::atomic<unsigned int> isMarkedAtomic(
+        (cl::sycl::multi_ptr<unsigned int,
+                             cl::sycl::access::address_space::global_space>(
+            &m_isMarkedData)));
+    isMarkedAtomic.store(false);
   }
 
   void
@@ -168,13 +176,59 @@ public:
     return m_memPoolDeviceAcc[0].derefHandle(m_astNode);
   }
 
-  template<typename... Args>
-  Error AllocRuntimeBlockChecked(SharedRuntimeBlockHandle_t& result,  Args&&... args) {
-    result = m_memPoolDeviceAcc[0].template Alloc<RuntimeBlock>(std::forward<Args>(args)...);
-    if (result == SharedRuntimeBlockHandle_t()) {
-      return Error(Error::Type::MemPoolAllocFailure);
+#define RETURN_IF_FAILURE(expr)                                                \
+  {                                                                            \
+    const auto __error = expr;                                                 \
+    if (__error.GetType() != Error::Type::Success) {                           \
+      return __error;                                                          \
+    }                                                                          \
+  }
+
+  struct RequiredAllocDesc {
+    Index_t runtimeValuesRequired;
+    Index_t dependentBlocksRequired;
+    RequiredAllocDesc(const Index_t runtimeValuesReq,
+                      const Index_t dependentBlocksReq)
+        : runtimeValuesRequired(runtimeValuesReq),
+          dependentBlocksRequired(dependentBlocksReq) {}
+  };
+
+  RequiredAllocDesc GetRequiredAllocs() {
+    auto astNode = GetASTNode();
+    switch (astNode->m_type) {
+    case Compiler::ASTNode::Type::Bind:
+    case Compiler::ASTNode::Type::BindRec: {
+      const auto bindNode = static_cast<const Compiler::BindNode *>(astNode);
+      const auto bindingsCount = bindNode->m_bindings.GetCount();
+      return RequiredAllocDesc(bindingsCount, bindingsCount + 1);
     }
-    return Error();
+    case Compiler::ASTNode::Type::Call: {
+      const auto callNode = static_cast<const Compiler::CallNode *>(astNode);
+      // One additional arg implicit in lambda target
+      const auto argsCount = callNode->m_args.GetCount() + 1;
+      // One additional dependency for lambda invocation
+      return RequiredAllocDesc(argsCount, argsCount + 1);
+    }
+    case Compiler::ASTNode::Type::If: {
+      return RequiredAllocDesc(1, 2);
+    }
+    case Compiler::ASTNode::Type::Add:
+    case Compiler::ASTNode::Type::Sub:
+    case Compiler::ASTNode::Type::Mul:
+    case Compiler::ASTNode::Type::Div:
+    case Compiler::ASTNode::Type::Equal:
+    case Compiler::ASTNode::Type::GreaterThan:
+    case Compiler::ASTNode::Type::Remainder:
+      return RequiredAllocDesc(2, 2);
+    case Compiler::ASTNode::Type::Floor:
+      return RequiredAllocDesc(1, 1);
+    case Compiler::ASTNode::Type::Number:
+    case Compiler::ASTNode::Type::Identifier:
+    case Compiler::ASTNode::Type::Lambda:
+      return RequiredAllocDesc(0, 0);
+    }
+    // The eval call will fail, doesn't matter how much space.
+    return RequiredAllocDesc(0, 0);
   }
 
   Error PerformEvalPass() {
@@ -184,6 +238,8 @@ public:
     case Compiler::ASTNode::Type::BindRec: {
       const bool isRec = astNode->m_type == Compiler::ASTNode::Type::BindRec;
       auto bindNode = static_cast<Compiler::BindNode *>(astNode);
+      auto garbageCollector =
+          m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
       if (m_runtimeValues.size() == 0) {
         auto bindingsData =
             m_memPoolDeviceAcc[0].derefHandle(bindNode->m_bindings);
@@ -191,43 +247,46 @@ public:
           RETURN_IF_FAILURE(m_runtimeValues.push_front(RuntimeValue()));
           auto targetRuntimeValue = m_runtimeValues.front();
           SharedRuntimeBlockHandle_t dependencyOnBinding;
-          RETURN_IF_FAILURE(AllocRuntimeBlockChecked(dependencyOnBinding, bindingsData[i],
+          RETURN_IF_FAILURE(garbageCollector->AllocManaged(
+              dependencyOnBinding, bindingsData[i],
               isRec ? m_handle : m_bindingParent, m_handle, m_depTracker,
-                                                     targetRuntimeValue, m_memPoolDeviceAcc));
+              targetRuntimeValue, m_memPoolDeviceAcc,
+              m_garbageCollectorHandle));
           RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnBinding));
         }
-        IncrementRefCount();
       } else {
         SharedRuntimeBlockHandle_t depOnExpr;
-        RETURN_IF_FAILURE(AllocRuntimeBlockChecked(depOnExpr, bindNode->m_childExpr, m_handle, m_parent, m_depTracker,
-                                                   m_dest, m_memPoolDeviceAcc));
-        RETURN_IF_FAILURE(ClearParent());
+        RETURN_IF_FAILURE(garbageCollector->AllocManaged(
+            depOnExpr, bindNode->m_childExpr, m_handle, m_parent, m_depTracker,
+            m_dest, m_memPoolDeviceAcc, m_garbageCollectorHandle));
         RETURN_IF_FAILURE(AddDependentActiveBlock(depOnExpr, false));
-        RETURN_IF_FAILURE(DecrementRefCount(m_depTracker));
       }
 
       break;
     }
     case Compiler::ASTNode::Type::Call: {
       auto callNode = static_cast<Compiler::CallNode *>(astNode);
+      auto garbageCollector =
+          m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
       if (m_runtimeValues.size() == 0) {
         auto argsData = m_memPoolDeviceAcc[0].derefHandle(callNode->m_args);
         for (Index_t i = 0; i < callNode->m_args.GetCount(); ++i) {
           RETURN_IF_FAILURE(m_runtimeValues.push_front(RuntimeValue()));
           auto targetRuntimeValue = m_runtimeValues.front();
           SharedRuntimeBlockHandle_t dependencyOnArg;
-          RETURN_IF_FAILURE(AllocRuntimeBlockChecked(
+          RETURN_IF_FAILURE(garbageCollector->AllocManaged(
               dependencyOnArg, argsData[i], m_bindingParent, m_handle,
-              m_depTracker, targetRuntimeValue, m_memPoolDeviceAcc));
+              m_depTracker, targetRuntimeValue, m_memPoolDeviceAcc,
+              m_garbageCollectorHandle));
           RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnArg));
         }
         RETURN_IF_FAILURE(m_runtimeValues.push_front(RuntimeValue()));
         SharedRuntimeBlockHandle_t dependencyOnLambda;
-        RETURN_IF_FAILURE(AllocRuntimeBlockChecked(
+        RETURN_IF_FAILURE(garbageCollector->AllocManaged(
             dependencyOnLambda, callNode->m_target, m_bindingParent, m_handle,
-            m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc));
+            m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc,
+            m_garbageCollectorHandle));
         RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnLambda));
-        IncrementRefCount();
       } else {
         RuntimeValue lambdaVal = m_runtimeValues.derefFront();
         m_runtimeValues.pop_front();
@@ -239,30 +298,28 @@ public:
           return Error(Error::Type::ArityMismatch);
         }
         SharedRuntimeBlockHandle_t lambdaBlock;
-        RETURN_IF_FAILURE(AllocRuntimeBlockChecked(
+        RETURN_IF_FAILURE(garbageCollector->AllocManaged(
             lambdaBlock, lambdaVal.m_data.functionVal.m_expr, m_handle,
-            m_parent, m_depTracker, m_dest, m_memPoolDeviceAcc));
-        if (m_bindingParent != SharedRuntimeBlockHandle_t()) {
-          RETURN_IF_FAILURE(m_memPoolDeviceAcc[0].derefHandle(m_bindingParent)->DecrementRefCount(m_depTracker));
-        }
+            m_parent, m_depTracker, m_dest, m_memPoolDeviceAcc,
+            m_garbageCollectorHandle));
         m_bindingParent = lambdaVal.m_data.functionVal.m_bindingParent;
         RETURN_IF_FAILURE(AddDependentActiveBlock(lambdaBlock, false));
-        RETURN_IF_FAILURE(DecrementRefCount(m_depTracker));
-        RETURN_IF_FAILURE(ClearParent());
       }
 
       break;
     }
     case Compiler::ASTNode::Type::If: {
       auto ifNode = static_cast<Compiler::IfNode *>(astNode);
+      auto garbageCollector =
+          m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
       if (m_runtimeValues.size() == 0) {
         RETURN_IF_FAILURE(m_runtimeValues.push_front(RuntimeValue()));
         SharedRuntimeBlockHandle_t dependencyOnPred;
-        RETURN_IF_FAILURE(AllocRuntimeBlockChecked(
+        RETURN_IF_FAILURE(garbageCollector->AllocManaged(
             dependencyOnPred, ifNode->m_pred, m_bindingParent, m_handle,
-            m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc));
+            m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc,
+            m_garbageCollectorHandle));
         RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnPred));
-        IncrementRefCount();
       } else {
         auto predValue = m_runtimeValues.derefFront();
         m_runtimeValues.pop_front();
@@ -272,12 +329,11 @@ public:
         const bool isPredTrue = static_cast<bool>(predValue.m_data.floatVal);
         const auto branchToTake = isPredTrue ? ifNode->m_then : ifNode->m_else;
         SharedRuntimeBlockHandle_t dependencyOnBranch;
-        RETURN_IF_FAILURE(AllocRuntimeBlockChecked(
+        RETURN_IF_FAILURE(garbageCollector->AllocManaged(
             dependencyOnBranch, branchToTake, m_bindingParent, m_parent,
-            m_depTracker, m_dest, m_memPoolDeviceAcc));
+            m_depTracker, m_dest, m_memPoolDeviceAcc,
+            m_garbageCollectorHandle));
         RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnBranch, false));
-        RETURN_IF_FAILURE(DecrementRefCount(m_depTracker));
-        RETURN_IF_FAILURE(ClearParent());
       }
       break;
     }
@@ -336,7 +392,6 @@ public:
         const bool areEq = lArg == rArg;
         typename RuntimeValue::Data dataVal;
         dataVal.floatVal = static_cast<Float_t>(areEq);
-        RETURN_IF_FAILURE(DecrementRefCount(m_depTracker));
         RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Float_t, dataVal));
       }
       break;
@@ -383,7 +438,6 @@ public:
       typename RuntimeValue::Data data;
       data.floatVal = numNode->m_value;
       RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Float_t, data));
-      RETURN_IF_FAILURE(m_depTracker[0].MarkForDeletion(m_handle));
       break;
     }
     case Compiler::ASTNode::Type::Identifier: {
@@ -392,7 +446,6 @@ public:
       const auto identVal = GetRuntimeValueForIndex(identNode->m_index, error);
       RETURN_IF_FAILURE(error);
       RETURN_IF_FAILURE(FillDestValue(identVal->m_type, identVal->m_data));
-      RETURN_IF_FAILURE(m_depTracker[0].MarkForDeletion(m_handle));
       break;
     }
     case Compiler::ASTNode::Type::Lambda: {
@@ -401,7 +454,6 @@ public:
       dataVal.functionVal = FunctionValue(
           lambdaNode->m_childExpr, m_bindingParent, lambdaNode->m_argCount);
       RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Function, dataVal));
-      RETURN_IF_FAILURE(m_depTracker[0].MarkForDeletion(m_handle));
       break;
     }
     default:
@@ -444,11 +496,13 @@ private:
     if (m_runtimeValues.size() == 0) {
       auto unaryOp = static_cast<Compiler::UnaryOpNode *>(GetASTNode());
       RETURN_IF_FAILURE(m_runtimeValues.push_front(RuntimeValue()));
+      auto garbageCollector =
+          m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
       SharedRuntimeBlockHandle_t dependencyNode;
-      RETURN_IF_FAILURE(AllocRuntimeBlockChecked(
+      RETURN_IF_FAILURE(garbageCollector->AllocManaged(
           dependencyNode, unaryOp->m_arg0, m_bindingParent, m_handle,
-          m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc));
-      IncrementRefCount();
+          m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc,
+          m_garbageCollectorHandle));
       RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyNode));
       added = true;
     } else {
@@ -462,17 +516,20 @@ private:
     if (m_runtimeValues.size() == 0) {
       auto binaryOp = static_cast<Compiler::BinaryOpNode *>(GetASTNode());
       RETURN_IF_FAILURE(m_runtimeValues.push_front(RuntimeValue()));
+      auto garbageCollector =
+          m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
       SharedRuntimeBlockHandle_t rightNodeBlock;
-      RETURN_IF_FAILURE(AllocRuntimeBlockChecked(
+      RETURN_IF_FAILURE(garbageCollector->AllocManaged(
           rightNodeBlock, binaryOp->m_arg1, m_bindingParent, m_handle,
-          m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc));
+          m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc,
+          m_garbageCollectorHandle));
 
       RETURN_IF_FAILURE(m_runtimeValues.push_front(RuntimeValue()));
       SharedRuntimeBlockHandle_t leftNodeBlock;
-      RETURN_IF_FAILURE(AllocRuntimeBlockChecked(
+      RETURN_IF_FAILURE(garbageCollector->AllocManaged(
           leftNodeBlock, binaryOp->m_arg0, m_bindingParent, m_handle,
-          m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc));
-      IncrementRefCount();
+          m_depTracker, m_runtimeValues.front(), m_memPoolDeviceAcc,
+          m_garbageCollectorHandle));
       RETURN_IF_FAILURE(AddDependentActiveBlock(rightNodeBlock));
       RETURN_IF_FAILURE(AddDependentActiveBlock(leftNodeBlock));
 
@@ -492,7 +549,6 @@ private:
     }
     typename RuntimeValue::Data dataToSet;
     dataToSet.floatVal = UnaryOpFunctor()(argVal.m_data.floatVal);
-    RETURN_IF_FAILURE(DecrementRefCount(m_depTracker));
     RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Float_t, dataToSet));
 
     return Error();
@@ -510,7 +566,6 @@ private:
     typename RuntimeValue::Data dataVal;
     dataVal.floatVal =
         BinaryOpFunctor()(lArg.m_data.floatVal, rArg.m_data.floatVal);
-    RETURN_IF_FAILURE(DecrementRefCount(m_depTracker));
     RETURN_IF_FAILURE(FillDestValue(RuntimeValue::Type::Float_t, dataVal));
 
     return Error();
@@ -538,9 +593,6 @@ private:
                       const typename RuntimeValue::Data &data) {
     auto destRef = m_memPoolDeviceAcc[0].derefHandle(m_dest);
     destRef->SetValue(type, data);
-    if (type == RuntimeValue::Type::Function && data.functionVal.m_bindingParent != SharedRuntimeBlockHandle_t()) {
-      m_memPoolDeviceAcc[0].derefHandle(data.functionVal.m_bindingParent)->IncrementRefCount();
-    }
     if (m_parent != SharedRuntimeBlockHandle_t()) {
       auto derefdParent = m_memPoolDeviceAcc[0].derefHandle(m_parent);
       cl::sycl::atomic<int> atomicDepCount(
@@ -551,15 +603,6 @@ private:
         RETURN_IF_FAILURE(m_depTracker[0].AddActiveBlock(m_parent));
       }
     }
-
-    return Error();
-  }
-
-  Error ClearParent() {
-    if (m_parent != SharedRuntimeBlockHandle_t()) {
-      RETURN_IF_FAILURE(m_memPoolDeviceAcc[0].derefHandle(m_parent)->DecrementRefCount(m_depTracker));
-      m_parent = SharedRuntimeBlockHandle_t();
-    }
     return Error();
   }
 
@@ -569,9 +612,14 @@ private:
   SharedRuntimeBlockHandle_t m_parent;
 
   RuntimeValueHandle_t m_dest;
-  DependencyTrackerDeviceAcc_t m_depTracker;
+  cl::sycl::accessor<DependencyTracker_t, 1, cl::sycl::access::mode::read_write,
+                     cl::sycl::access::target::global_buffer>
+      m_depTracker;
   int m_dependenciesRemainingData;
-  std::uint32_t m_refCount;
+
   PortableMemPool::DeviceAccessor_t m_memPoolDeviceAcc;
+  PortableMemPool::Handle<GarbageCollector_t> m_garbageCollectorHandle;
+
+  unsigned int m_isMarkedData;
 };
 } // namespace FunGPU
