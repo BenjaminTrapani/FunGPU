@@ -70,6 +70,7 @@ private:
   void ComputeRequiredResourcesForActiveSet(Index_t numActiveBlocks);
   void CheckForBlockErrors(Index_t maxConcurrentBlocksDuringExec);
   void CheckRequiresGarbageCollection();
+  void PerformGarbageCollection(Index_t numActiveBlocks);
 
   std::shared_ptr<DependencyTracker> m_dependencyTracker;
   std::shared_ptr<PortableMemPool::Handle<RuntimeBlock_t::RuntimeValue>>
