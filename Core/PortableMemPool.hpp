@@ -432,8 +432,8 @@ private:
   static constexpr Index_t binSize = 16777216;
 
   Arena<sizeof(int), binSize> m_smallBin;
-  Arena<sizeof(int) * 8, binSize * 8> m_mediumBin;
-  Arena<sizeof(int) * 128, binSize * 8> m_largeBin;
+  Arena<sizeof(int) * 8, binSize * 16> m_mediumBin;
+  Arena<sizeof(int) * 128, binSize * 16> m_largeBin;
   Arena<sizeof(int) * 2097152, binSize> m_extraLargeBin;
 };
 } // namespace FunGPU

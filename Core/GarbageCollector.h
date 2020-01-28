@@ -11,6 +11,8 @@
 namespace FunGPU {
 template <class T, Index_t maxManagedAllocationsCount> class GarbageCollector {
 public:
+  static constexpr Index_t MaxManagedAllocationsCount = maxManagedAllocationsCount;
+
   GarbageCollector(const PortableMemPool::DeviceAccessor_t memPoolAcc)
       : m_memPoolAcc(memPoolAcc), m_managedAllocationsCountData(0),
         m_managedHandlesIdx(0) {}
@@ -40,6 +42,10 @@ public:
                              cl::sycl::access::address_space::global_space>(
             &m_managedAllocationsCountData)));
     return allocCount.load();
+  }
+
+  Index_t GetNumFreeSlots() {
+    return maxManagedAllocationsCount - GetManagedAllocationCount();
   }
 
   void SetMemPoolAcc(const PortableMemPool::DeviceAccessor_t &memPoolAcc) {

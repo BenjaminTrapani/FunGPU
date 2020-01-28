@@ -229,6 +229,8 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
       m_workQueue.submit([&](handler &cgh) {
         auto memPoolAcc =
             m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+        auto gcHandleAcc =
+            m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
         auto runtimeValuesRequiredCountAcc =
             m_runtimeValuesRequiredCount.get_access<access::mode::read>(cgh);
         auto runtimeBlocksRequiredCountAcc =
@@ -237,15 +239,18 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
             m_requiresGarbageCollection.get_access<access::mode::discard_write>(
                 cgh);
         cgh.single_task<class check_requires_garbage_collection>(
-            [memPoolAcc, runtimeValuesRequiredCountAcc,
+            [memPoolAcc, gcHandleAcc, runtimeValuesRequiredCountAcc,
              runtimeBlocksRequiredCountAcc, requiresGarbageCollectAcc] {
               const auto numRuntimeValuesFree =
                   memPoolAcc[0].GetNumFree<RuntimeBlock_t::RuntimeValue>();
               const auto numRuntimeBlocksFree =
                   memPoolAcc[0].GetNumFree<RuntimeBlock_t>();
+              const auto gcNumFreeSlots =
+                  memPoolAcc[0].derefHandle(gcHandleAcc[0])->GetNumFreeSlots();
               requiresGarbageCollectAcc[0] =
                   numRuntimeValuesFree < runtimeValuesRequiredCountAcc[0] ||
-                  numRuntimeBlocksFree < runtimeBlocksRequiredCountAcc[0];
+                  numRuntimeBlocksFree < runtimeBlocksRequiredCountAcc[0] ||
+                  gcNumFreeSlots < runtimeBlocksRequiredCountAcc[0];
             });
       });
 

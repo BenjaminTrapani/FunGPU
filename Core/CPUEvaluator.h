@@ -12,7 +12,7 @@ class CPUEvaluator {
 public:
   class DependencyTracker;
 
-  using RuntimeBlock_t = RuntimeBlock<DependencyTracker, 8192 * 32>;
+  using RuntimeBlock_t = RuntimeBlock<DependencyTracker, 8192 * 52>;
   using GarbageCollector_t = RuntimeBlock_t::GarbageCollector_t;
 
   class DependencyTracker {
