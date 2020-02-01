@@ -275,52 +275,55 @@ private:
     return WithArena<T>(AllocPred<T>(), AllocHandler<T>(), arenas...);
   }
 
-  template <class T, Index_t allocSize, Index_t totalSize,
-            Index_t... allocSizes, Index_t... totalSizes>
-  ArrayHandle<T> AllocArrayImpl(const Index_t arraySize, const T &initialValue,
-                                Arena<allocSize, totalSize> &arena,
-                                Arena<allocSizes, totalSizes> &... arenas) {
-    if (allocSize >= sizeof(T) * arraySize) {
-      const auto allocdIdx = arena.AllocFromArena();
-      if (allocdIdx == std::numeric_limits<Index_t>::max()) {
-        return ArrayHandle<T>();
-      }
-      const ArrayHandle<T> resultHandle(
-          allocdIdx, std::remove_reference<decltype(arena)>::type::AllocSize,
-          arraySize);
+  template<class T>
+  struct AllocArrayPred {
+    AllocArrayPred(const Index_t arraySize) : m_arraySize(arraySize) {}
 
-      auto tAlignedValues = derefHandle(resultHandle);
-      for (Index_t i = 0; i < arraySize; ++i) {
-        tAlignedValues[i] = *(new (tAlignedValues + i) T(initialValue));
-      }
-
-      return resultHandle;
-    } else {
-      return AllocArrayImpl(arraySize, initialValue, arenas...);
+    template<Index_t allocSize, Index_t totalSize>
+    bool operator()(const Arena<allocSize, totalSize>& arena) {
+      return allocSize >= sizeof(T) * m_arraySize;
     }
-  }
 
-  template <class T, Index_t allocSize, Index_t totalSize>
-  ArrayHandle<T> AllocArrayImpl(const Index_t arraySize, const T &initialValue,
-                                Arena<allocSize, totalSize> &arena) {
-    if (allocSize >= sizeof(T) * arraySize) {
-      const auto allocdIdx = arena.AllocFromArena();
-      if (allocdIdx == std::numeric_limits<Index_t>::max()) {
-        return ArrayHandle<T>();
-      }
-      const ArrayHandle<T> resultHandle(
-          allocdIdx, std::remove_reference<decltype(arena)>::type::AllocSize,
-          arraySize);
+    const Index_t m_arraySize;
+  };
 
-      auto tAlignedValues = derefHandle(resultHandle);
-      for (Index_t i = 0; i < arraySize; ++i) {
-        tAlignedValues[i] = *(new (tAlignedValues + i) T(initialValue));
-      }
+  template<class T>
+  struct AllocArrayHandler {
+    AllocArrayHandler(const Index_t arraySize, const T& initialValue,
+                      PortableMemPool& memPool) : m_arraySize(arraySize), m_initialValue(initialValue),
+                                                                           m_memPool(memPool) {}
 
-      return resultHandle;
-    } else {
+    ArrayHandle<T> operator()() {
       return ArrayHandle<T>();
     }
+
+    template<class DispatchedArena>
+    ArrayHandle<T> operator()(DispatchedArena& arena) {
+      const auto allocdIdx = arena.AllocFromArena();
+      if (allocdIdx == std::numeric_limits<Index_t>::max()) {
+        return ArrayHandle<T>();
+      }
+      const ArrayHandle<T> resultHandle(
+          allocdIdx, std::remove_reference<decltype(arena)>::type::AllocSize,
+          m_arraySize);
+
+      auto tAlignedValues = m_memPool.derefHandle(resultHandle);
+      for (Index_t i = 0; i < m_arraySize; ++i) {
+        tAlignedValues[i] = *(new (tAlignedValues + i) T(m_initialValue));
+      }
+
+      return resultHandle;
+    }
+
+    const Index_t m_arraySize;
+    const T& m_initialValue;
+    PortableMemPool& m_memPool;
+  };
+
+  template <class T, Index_t... allocSizes, Index_t... totalSizes>
+  ArrayHandle<T> AllocArrayImpl(const Index_t arraySize, const T &initialValue,
+                                Arena<allocSizes, totalSizes> &... arenas) {
+    return WithArena<T>(AllocArrayPred<T>(arraySize), AllocArrayHandler<T>(arraySize, initialValue, *this), arenas...);
   }
 
   template <class T, Index_t allocSize, Index_t totalSize,
