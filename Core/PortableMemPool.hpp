@@ -68,6 +68,19 @@ public:
 
     Index_t GetCount() const { return m_count; }
 
+    // Do not free the handle returned from this function, that will break the
+    // allocator.
+    Handle<T> ElementHandle(const Index_t elemIdx) {
+      return Handle<T>(m_handle.GetAllocIndex() + elemIdx * sizeof(T),
+                       m_handle.GetAllocSize());
+    }
+
+    bool operator==(const ArrayHandle<T> &other) {
+      return m_handle == other.m_handle && m_count == other.m_count;
+    }
+
+    bool operator!=(const ArrayHandle<T> &other) { return !(*this == other); }
+
   private:
     Handle<T> m_handle;
     Index_t m_count;
@@ -152,7 +165,7 @@ private:
 
     Arena() {
       for (Index_t i = 0; i < m_allocBeginIndices.size(); ++i) {
-        m_allocBeginIndices[i] = i;
+        m_allocBeginIndices[i] = i * AllocSize;
       }
     }
 
@@ -191,9 +204,9 @@ private:
     }
 
     unsigned char *GetBytes(const Index_t allocIdx) {
-      return reinterpret_cast<unsigned char *>(&m_storage[allocIdx]);
+      return &m_storage[allocIdx];
     }
-    std::aligned_storage_t<AllocSize_i> m_storage[TotalNodes];
+    alignas(AllocSize) unsigned char m_storage[TotalBytes];
     std::array<Index_t, TotalBytes_i / AllocSize_i> m_allocBeginIndices;
 
     Index_t m_freeBlockBegin = 0;
