@@ -227,23 +227,32 @@ private:
     }
   };
 
-template <class T, class CB, Index_t allocSize, Index_t totalSize>
-  decltype(auto) WithAllocArena(CB&& cb, Arena<allocSize, totalSize>& arena) {
-    if constexpr (allocSize >= sizeof(T)) {
-        return cb(arena);
+  template <class T, class Pred, class CB, Index_t allocSize, Index_t totalSize>
+  decltype(auto) WithArena(Pred&& pred, CB&& cb, Arena<allocSize, totalSize>& arena) {
+    if (pred(arena)) {
+      return cb(arena);
     }
     return cb();
   }
 
-  template <class T, class CB, Index_t allocSize, Index_t totalSize,
+  template <class T, class Pred, class CB, Index_t allocSize, Index_t totalSize,
             Index_t... allocSizes, Index_t... totalSizes>
-  decltype(auto) WithAllocArena(CB&& cb, Arena<allocSize, totalSize> &arena,
+  decltype(auto) WithArena(Pred&& pred, CB&& cb, Arena<allocSize, totalSize> &arena,
                       Arena<allocSizes, totalSizes> &... arenas) {
-    if constexpr (allocSize >= sizeof(T)) {
-        return cb(arena);
+    if (pred(arena)) {
+      return cb(arena);
     }
-    return WithAllocArena<T, CB>(std::forward<CB>(cb), arenas...);
+    return WithArena<T, Pred, CB>(std::forward<Pred>(pred), std::forward<CB>(cb),
+                                 arenas...);
   }
+
+  template<class T>
+  struct AllocPred {
+    template<Index_t allocSize, Index_t totalSize>
+    constexpr bool operator()(const Arena<allocSize, totalSize>&) {
+      return sizeof(T) <= allocSize;
+    }
+  };
 
   template<class T>
   struct AllocHandler {
@@ -263,7 +272,7 @@ template <class T, class CB, Index_t allocSize, Index_t totalSize>
 
   template <class T, Index_t... allocSizes, Index_t... totalSizes>
   Handle<T> AllocImpl(Arena<allocSizes, totalSizes> &... arenas) {
-    return WithAllocArena<T>(AllocHandler<T>(), arenas...);
+    return WithArena<T>(AllocPred<T>(), AllocHandler<T>(), arenas...);
   }
 
   template <class T, Index_t allocSize, Index_t totalSize,
