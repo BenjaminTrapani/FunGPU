@@ -326,61 +326,70 @@ private:
     return WithArena<T>(AllocArrayPred<T>(arraySize), AllocArrayHandler<T>(arraySize, initialValue, *this), arenas...);
   }
 
-  template <class T, Index_t allocSize, Index_t totalSize,
-            Index_t... allocSizes, Index_t... totalSizes>
-  void DeallocImpl(const Handle<T> &handle, Arena<allocSize, totalSize> &arena,
-                   Arena<allocSizes, totalSizes> &... arenas) {
-    if (allocSize == handle.GetAllocSize()) {
-      auto derefedForHandle = derefHandle(handle);
+  template<class T>
+  struct DeallocPred {
+    DeallocPred(const Index_t allocSize) : m_allocSize(allocSize) {}
+
+    template<Index_t allocSize, Index_t totalSize>
+    bool operator()(const Arena<allocSize, totalSize>&) {
+      return allocSize == m_allocSize;
+    }
+
+    Index_t m_allocSize;
+  };
+
+  template<class T>
+  struct DeallocHandler {
+    DeallocHandler(const Handle<T>& handle, PortableMemPool& memPool) : m_handle(handle),
+                                                                        m_memPool(memPool) {}
+    void operator()() {}
+
+    template<class DispatchedArena>
+    void operator()(DispatchedArena& arena) {
+      auto derefedForHandle = m_memPool.derefHandle(m_handle);
       // Explicitly call destructor
       derefedForHandle->~T();
-      arena.FreeFromArena(handle.GetAllocIndex());
-    } else {
-      DeallocImpl(handle, arenas...);
+      arena.FreeFromArena(m_handle.GetAllocIndex());
     }
+
+    Handle<T> m_handle;
+    PortableMemPool& m_memPool;
+  };
+
+  template <class T, Index_t... allocSizes, Index_t... totalSizes>
+  void DeallocImpl(const Handle<T> &handle, Arena<allocSizes, totalSizes> &... arenas) {
+    WithArena<T>(DeallocPred<T>(handle.GetAllocSize()), DeallocHandler<T>(handle, *this), arenas...);
   }
 
-  template <class T, Index_t allocSize, Index_t totalSize>
-  void DeallocImpl(const Handle<T> &handle,
-                   Arena<allocSize, totalSize> &arena) {
-    if (allocSize == handle.GetAllocSize()) {
-      auto derefedForHandle = derefHandle(handle);
-      // Explicitly call destructor
-      derefedForHandle->~T();
+  template<class T>
+  struct DeallocArrayHandler {
+    DeallocArrayHandler(const ArrayHandle<T>& arrayHandle, PortableMemPool& memPool) :
+      m_arrayHandle(arrayHandle), m_memPool(memPool) {}
+
+    void operator()() {}
+
+    template<class DispatchedArena>
+    void operator()(DispatchedArena& arena) {
+      const auto &handle = m_arrayHandle.m_handle;
+      auto derefdHandle = m_memPool.derefHandle(handle);
+      for (Index_t i = 0; i < m_arrayHandle.GetCount(); ++i) {
+        (derefdHandle[i]).~T();
+      }
+
       arena.FreeFromArena(handle.GetAllocIndex());
     }
-  }
+
+    const ArrayHandle<T>& m_arrayHandle;
+    PortableMemPool& m_memPool;
+  };
 
   template <class T, Index_t allocSize, Index_t totalSize,
             Index_t... allocSizes, Index_t... totalSizes>
   void DeallocArrayImpl(const ArrayHandle<T> &arrayHandle,
                         Arena<allocSize, totalSize> &arena,
                         Arena<allocSizes, totalSizes> &... arenas) {
-    if (allocSize == arrayHandle.m_handle.GetAllocSize()) {
-      const auto &handle = arrayHandle.m_handle;
-      auto derefdHandle = derefHandle(handle);
-      for (Index_t i = 0; i < arrayHandle.GetCount(); ++i) {
-        (derefdHandle[i]).~T();
-      }
-
-      arena.FreeFromArena(handle.GetAllocIndex());
-    } else {
-      DeallocArrayImpl(arrayHandle, arenas...);
-    }
-  }
-
-  template <class T, Index_t allocSize, Index_t totalSize>
-  void DeallocArrayImpl(const ArrayHandle<T> &arrayHandle,
-                        Arena<allocSize, totalSize> &arena) {
-    if (allocSize == arrayHandle.m_handle.GetAllocSize()) {
-      const auto &handle = arrayHandle.m_handle;
-      auto derefdHandle = derefHandle(handle);
-      for (Index_t i = 0; i < arrayHandle.GetCount(); ++i) {
-        (derefdHandle[i]).~T();
-      }
-
-      arena.FreeFromArena(handle.GetAllocIndex());
-    }
+    WithArena<T>(DeallocPred<T>(arrayHandle.m_handle.GetAllocSize()),
+              DeallocArrayHandler<T>(arrayHandle, *this), arenas...);
   }
 
   template <class T, Index_t allocSize, Index_t totalSize,
