@@ -1,6 +1,6 @@
-#include "Compiler.h"
+#include "Compiler.hpp"
 #include "Error.hpp"
-#include "GarbageCollector.h"
+#include "GarbageCollector.hpp"
 #include "PortableMemPool.hpp"
 #include "RuntimeBlock.hpp"
 #include <CL/sycl.hpp>

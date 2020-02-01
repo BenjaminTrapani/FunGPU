@@ -1,6 +1,6 @@
 #include "Error.hpp"
 #include "PortableMemPool.hpp"
-#include "Types.h"
+#include "Types.hpp"
 #include <CL/sycl.hpp>
 #include <memory>
 

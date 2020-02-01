@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Types.h"
+#include "Types.hpp"
 #include <CL/sycl.hpp>
 #include <limits>
 #include <memory>

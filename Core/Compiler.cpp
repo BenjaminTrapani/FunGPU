@@ -1,5 +1,5 @@
-#include "Compiler.h"
-#include "Types.h"
+#include "Compiler.hpp"
+#include "Types.hpp"
 #include <iostream>
 #include <sstream>
 

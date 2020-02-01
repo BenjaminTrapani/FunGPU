@@ -2,8 +2,8 @@
 
 #include "Array.hpp"
 #include "PortableMemPool.hpp"
-#include "SExpr.h"
-#include "Types.h"
+#include "SExpr.hpp"
+#include "Types.hpp"
 #include <CL/sycl.hpp>
 
 #include <list>
@@ -31,8 +31,10 @@ public:
       Identifier,
       Lambda,
     };
-    ASTNode(Type type) : m_type(type) {}
+    ASTNode(Type type, Index_t frameSize)
+        : m_type(type), m_frameSize(frameSize) {}
     Type m_type;
+    Index_t m_frameSize;
   };
 
   using ASTNodeHandle = PortableMemPool::Handle<ASTNode>;
@@ -41,7 +43,7 @@ public:
   public:
     BindNode(const Index_t numBindings, const bool isRec,
              PortableMemPool::HostAccessor_t pool)
-        : ASTNode(isRec ? Type::BindRec : Type::Bind),
+        : ASTNode(isRec ? Type::BindRec : Type::Bind, numBindings),
           m_bindings(pool[0].template AllocArray<ASTNodeHandle>(numBindings)) {}
     PortableMemPool::ArrayHandle<ASTNodeHandle> m_bindings;
     ASTNodeHandle m_childExpr;
@@ -50,7 +52,7 @@ public:
   class UnaryOpNode : public ASTNode {
   public:
     UnaryOpNode(ASTNode::Type type, ASTNodeHandle arg0)
-        : ASTNode(type), m_arg0(arg0) {}
+        : ASTNode(type, 1), m_arg0(arg0) {}
 
     ASTNodeHandle m_arg0;
   };
@@ -58,7 +60,7 @@ public:
   class BinaryOpNode : public ASTNode {
   public:
     BinaryOpNode(ASTNode::Type type, ASTNodeHandle arg0, ASTNodeHandle arg1)
-        : ASTNode(type), m_arg0(arg0), m_arg1(arg1) {}
+        : ASTNode(type, 2), m_arg0(arg0), m_arg1(arg1) {}
 
     ASTNodeHandle m_arg0;
     ASTNodeHandle m_arg1;
@@ -67,21 +69,21 @@ public:
   class NumberNode : public ASTNode {
   public:
     NumberNode(const Float_t value)
-        : ASTNode(ASTNode::Type::Number), m_value(value) {}
+        : ASTNode(ASTNode::Type::Number, 0), m_value(value) {}
     Float_t m_value;
   };
 
   class IdentifierNode : public ASTNode {
   public:
     IdentifierNode(const Index_t index)
-        : ASTNode(ASTNode::Type::Identifier), m_index(index) {}
+        : ASTNode(ASTNode::Type::Identifier, 0), m_index(index) {}
     Index_t m_index;
   };
 
   class IfNode : public ASTNode {
   public:
     IfNode(ASTNodeHandle pred, ASTNodeHandle then, ASTNodeHandle elseExpr)
-        : ASTNode(ASTNode::Type::If), m_pred(pred), m_then(then),
+        : ASTNode(ASTNode::Type::If, 1), m_pred(pred), m_then(then),
           m_else(elseExpr) {}
     ASTNodeHandle m_pred;
     ASTNodeHandle m_then;
@@ -91,7 +93,7 @@ public:
   class LambdaNode : public ASTNode {
   public:
     LambdaNode(const Index_t argCount, ASTNodeHandle childExpr)
-        : ASTNode(ASTNode::Type::Lambda), m_argCount(argCount),
+        : ASTNode(ASTNode::Type::Lambda, 0), m_argCount(argCount),
           m_childExpr(childExpr) {}
     Index_t m_argCount;
     ASTNodeHandle m_childExpr;
@@ -101,7 +103,7 @@ public:
   public:
     CallNode(const Index_t argCount, ASTNodeHandle target,
              PortableMemPool::HostAccessor_t pool)
-        : ASTNode(ASTNode::Type::Call), m_target(target),
+        : ASTNode(ASTNode::Type::Call, argCount + 1), m_target(target),
           m_args(pool[0].template AllocArray<ASTNodeHandle>(argCount)) {}
     ASTNodeHandle m_target;
     PortableMemPool::ArrayHandle<ASTNodeHandle> m_args;

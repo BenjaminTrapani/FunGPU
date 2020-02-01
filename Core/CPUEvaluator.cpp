@@ -1,4 +1,4 @@
-#include "CPUEvaluator.h"
+#include "CPUEvaluator.hpp"
 #include <algorithm>
 #include <iostream>
 #include <sstream>

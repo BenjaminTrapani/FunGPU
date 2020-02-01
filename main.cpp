@@ -1,6 +1,6 @@
-#include "Core/CPUEvaluator.h"
-#include "Core/Compiler.h"
-#include "Core/Parser.h"
+#include "Core/CPUEvaluator.hpp"
+#include "Core/Compiler.hpp"
+#include "Core/Parser.hpp"
 #include "Core/PortableMemPool.hpp"
 #include <iostream>
 

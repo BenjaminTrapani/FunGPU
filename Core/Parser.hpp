@@ -1,7 +1,7 @@
 #pragma once
 
-#include "SExpr.h"
-#include "Types.h"
+#include "SExpr.hpp"
+#include "Types.hpp"
 #include <fstream>
 #include <memory>
 
