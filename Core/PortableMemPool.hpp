@@ -227,37 +227,43 @@ private:
     }
   };
 
-  template <class T, Index_t allocSize, Index_t totalSize,
-            Index_t... allocSizes, Index_t... totalSizes>
-  Handle<T> AllocImpl(Arena<allocSize, totalSize> &arena,
-                      Arena<allocSizes, totalSizes> &... arenas) {
+template <class T, class CB, Index_t allocSize, Index_t totalSize>
+  decltype(auto) WithAllocArena(CB&& cb, Arena<allocSize, totalSize>& arena) {
     if constexpr (allocSize >= sizeof(T)) {
-      const auto allocdIdx = arena.AllocFromArena();
-      if (allocdIdx == std::numeric_limits<Index_t>::max()) {
-        return Handle<T>();
-      }
-
-      const Handle<T> resultHandle(
-          allocdIdx, std::remove_reference<decltype(arena)>::type::AllocSize);
-      return resultHandle;
-    } else {
-      return AllocImpl<T>(arenas...);
+        return cb(arena);
     }
+    return cb();
   }
 
-  template <class T, Index_t allocSize, Index_t totalSize>
-  Handle<T> AllocImpl(Arena<allocSize, totalSize> &arena) {
+  template <class T, class CB, Index_t allocSize, Index_t totalSize,
+            Index_t... allocSizes, Index_t... totalSizes>
+  decltype(auto) WithAllocArena(CB&& cb, Arena<allocSize, totalSize> &arena,
+                      Arena<allocSizes, totalSizes> &... arenas) {
     if constexpr (allocSize >= sizeof(T)) {
+        return cb(arena);
+    }
+    return WithAllocArena<T, CB>(std::forward<CB>(cb), arenas...);
+  }
+
+  template<class T>
+  struct AllocHandler {
+    Handle<T> operator()() { return Handle<T>(); }
+    template <class DispatchedArena>
+    Handle<T> operator()(DispatchedArena &arena) {
       const auto allocdIdx = arena.AllocFromArena();
       if (allocdIdx == std::numeric_limits<Index_t>::max()) {
         return Handle<T>();
       }
+
       const Handle<T> resultHandle(
           allocdIdx, std::remove_reference<decltype(arena)>::type::AllocSize);
       return resultHandle;
-    } else {
-      return Handle<T>();
     }
+  };
+
+  template <class T, Index_t... allocSizes, Index_t... totalSizes>
+  Handle<T> AllocImpl(Arena<allocSizes, totalSizes> &... arenas) {
+    return WithAllocArena<T>(AllocHandler<T>(), arenas...);
   }
 
   template <class T, Index_t allocSize, Index_t totalSize,
