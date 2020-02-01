@@ -327,8 +327,8 @@ private:
   }
 
   template<class T>
-  struct DeallocPred {
-    DeallocPred(const Index_t allocSize) : m_allocSize(allocSize) {}
+  struct MatchAllocSizePred {
+    MatchAllocSizePred(const Index_t allocSize) : m_allocSize(allocSize) {}
 
     template<Index_t allocSize, Index_t totalSize>
     bool operator()(const Arena<allocSize, totalSize>&) {
@@ -358,7 +358,7 @@ private:
 
   template <class T, Index_t... allocSizes, Index_t... totalSizes>
   void DeallocImpl(const Handle<T> &handle, Arena<allocSizes, totalSizes> &... arenas) {
-    WithArena<T>(DeallocPred<T>(handle.GetAllocSize()), DeallocHandler<T>(handle, *this), arenas...);
+    WithArena<T>(MatchAllocSizePred<T>(handle.GetAllocSize()), DeallocHandler<T>(handle, *this), arenas...);
   }
 
   template<class T>
@@ -388,32 +388,31 @@ private:
   void DeallocArrayImpl(const ArrayHandle<T> &arrayHandle,
                         Arena<allocSize, totalSize> &arena,
                         Arena<allocSizes, totalSizes> &... arenas) {
-    WithArena<T>(DeallocPred<T>(arrayHandle.m_handle.GetAllocSize()),
+    WithArena<T>(MatchAllocSizePred<T>(arrayHandle.m_handle.GetAllocSize()),
               DeallocArrayHandler<T>(arrayHandle, *this), arenas...);
   }
 
-  template <class T, Index_t allocSize, Index_t totalSize,
-            Index_t... allocSizes, Index_t... totalSizes>
-  T *derefHandleImpl(const Handle<T> &handle,
-                     Arena<allocSize, totalSize> &arena,
-                     Arena<allocSizes, totalSizes> &... arenas) {
-    if (allocSize == handle.GetAllocSize()) {
-      auto bytesForIndex = arena.GetBytes(handle.GetAllocIndex());
-      return reinterpret_cast<T *>(bytesForIndex);
-    }
+  template<class T>
+  struct DerefHandleHandler {
+    DerefHandleHandler(const Index_t allocIndex) : m_allocIndex(allocIndex) {}
 
-    return derefHandleImpl(handle, arenas...);
-  }
-
-  template <class T, Index_t allocSize, Index_t totalSize>
-  T *derefHandleImpl(const Handle<T> &handle,
-                     Arena<allocSize, totalSize> &arena) {
-    if (allocSize == handle.GetAllocSize()) {
-      auto bytesForIndex = arena.GetBytes(handle.GetAllocIndex());
-      return reinterpret_cast<T *>(bytesForIndex);
-    } else {
+    T* operator()() {
       return nullptr;
     }
+
+    template<class DispatchedArena>
+    T* operator()(DispatchedArena& arena) {
+      return reinterpret_cast<T*>(arena.GetBytes(m_allocIndex));
+    }
+
+    const Index_t m_allocIndex;
+  };
+
+  template <class T, Index_t... allocSizes, Index_t... totalSizes>
+  T *derefHandleImpl(const Handle<T> &handle,
+                     Arena<allocSizes, totalSizes> &... arenas) {
+    return WithArena<T>(MatchAllocSizePred<T>(handle.GetAllocSize()),
+                        DerefHandleHandler<T>(handle.GetAllocIndex()), arenas...);
   }
 
   template <Index_t allocSize, Index_t totalSize, Index_t... allocSizes,

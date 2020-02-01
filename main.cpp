@@ -12,14 +12,25 @@ int main(int argc, char **argv) {
     cl::sycl::buffer<PortableMemPool> memPoolBuff(memPool,
                                                   cl::sycl::range<1>(1));
     CPUEvaluator evaluator(memPoolBuff);
+    Index_t argvIndex = 1;
     while (true) {
-      std::cout << "Program to run(or q to quit): ";
-      std::string programPath;
-      std::cin >> programPath;
-      if (programPath == "q") {
+      const auto programPath = [&] () -> std::optional<std::string> {
+                                  if (argvIndex < argc) {
+                                    return std::string(argv[argvIndex++]);
+                                  }
+
+                                  std::cout << "Program to run(or q to quit): ";
+                                  std::string interactivePath;
+                                  std::cin >> interactivePath;
+                                  if (interactivePath == "q") {
+                                    return std::optional<std::string>();
+                                  }
+                                  return interactivePath;
+      }();
+      if (!programPath) {
         break;
       }
-      Parser parser(programPath);
+      Parser parser(*programPath);
       auto parsedResult = parser.ParseProgram();
 
       Compiler compiler(parsedResult, memPoolBuff);
@@ -27,11 +38,11 @@ int main(int argc, char **argv) {
       try {
         compiledResult = compiler.Compile();
       } catch (const Compiler::CompileException &e) {
-        std::cerr << "Failed to compile " << programPath << ": " << e.What()
+        std::cerr << "Failed to compile " << *programPath << ": " << e.What()
                   << std::endl;
         continue;
       }
-      std::cout << "Successfully compiled program " << programPath << std::endl;
+      std::cout << "Successfully compiled program " << *programPath << std::endl;
       Index_t maxConcurrentBlockCount;
       const auto programResult =
           evaluator.EvaluateProgram(compiledResult, maxConcurrentBlockCount);
