@@ -12,7 +12,7 @@ class CPUEvaluator {
 public:
   class DependencyTracker;
 
-  using RuntimeBlock_t = RuntimeBlock<DependencyTracker, 8192 * 52>;
+  using RuntimeBlock_t = RuntimeBlock<DependencyTracker, 8192 * 60>;
   using GarbageCollector_t = RuntimeBlock_t::GarbageCollector_t;
 
   class DependencyTracker {
@@ -21,6 +21,7 @@ public:
   public:
     Error
     AddActiveBlock(const RuntimeBlock_t::SharedRuntimeBlockHandle_t &block);
+    void InsertActiveBlock(const RuntimeBlock_t::SharedRuntimeBlockHandle_t&, Index_t);
 
     Index_t GetActiveBlockCount() {
       cl::sycl::atomic<Index_t> activeBlockCount(
@@ -30,12 +31,12 @@ public:
       return activeBlockCount.load();
     }
 
-    void FlipActiveBlocksBuffer() {
+    void FlipActiveBlocksBuffer(const Index_t newActiveBlockCount = 0) {
       cl::sycl::atomic<Index_t> activeBlockCount(
           (cl::sycl::multi_ptr<Index_t,
                                cl::sycl::access::address_space::global_space>(
               &m_activeBlockCountData)));
-      activeBlockCount.store(0);
+      activeBlockCount.store(newActiveBlockCount);
       m_activeBlocksBufferIdx =
           (m_activeBlocksBufferIdx + 1) % m_activeBlocks.size();
       m_prevActiveBlocksBufferIdx =
@@ -67,7 +68,7 @@ public:
 
 private:
   void CreateFirstBlock(Compiler::ASTNodeHandle rootNode);
-  bool ComputeRequiredResourcesForActiveSet(Index_t numActiveBlocks);
+  Index_t ComputeRequiredResourcesForActiveSet();
   void CheckForBlockErrors(Index_t maxConcurrentBlocksDuringExec);
   void PerformGarbageCollection(Index_t numActiveBlocks);
 
