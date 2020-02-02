@@ -12,7 +12,7 @@ class CPUEvaluator {
 public:
   class DependencyTracker;
 
-  using RuntimeBlock_t = RuntimeBlock<DependencyTracker, 8192 * 60>;
+  using RuntimeBlock_t = RuntimeBlock<DependencyTracker, 8192 * 16>;
   using GarbageCollector_t = RuntimeBlock_t::GarbageCollector_t;
 
   class DependencyTracker {
@@ -90,6 +90,7 @@ private:
   cl::sycl::buffer<RuntimeBlock_t::RuntimeValue> m_resultBufferOnHost;
   cl::sycl::buffer<RuntimeBlock_t::SharedRuntimeBlockHandle_t> m_notReservedBlocksBuff;
   cl::sycl::buffer<Index_t> m_notReservedBlocksCount;
+  cl::sycl::buffer<Index_t> m_blocksToBeAllocatedInNextPass;
   cl::sycl::queue m_workQueue;
 };
 } // namespace FunGPU

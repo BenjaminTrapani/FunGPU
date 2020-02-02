@@ -121,45 +121,31 @@ public:
     return isMarkedAtomic.exchange(true);
   }
 
-  struct MapperForFunctionVals {
-    MapperForFunctionVals(const PortableMemPool::DeviceAccessor_t &memPoolAcc)
-        : m_anyMarkingsExpanded(false), m_memPoolAcc(memPoolAcc) {}
-    void operator()(const RuntimeValue &runtimeValue) {
-      if (runtimeValue.m_type == RuntimeValue::Type::Function) {
-        auto &funv = runtimeValue.m_data.functionVal;
-        if (funv.m_bindingParent != SharedRuntimeBlockHandle_t()) {
-          m_anyMarkingsExpanded =
-              m_anyMarkingsExpanded ||
-              !m_memPoolAcc[0].derefHandle(funv.m_bindingParent)->SetMarked();
-        }
-      }
-    }
-    bool m_anyMarkingsExpanded;
-    PortableMemPool::DeviceAccessor_t m_memPoolAcc;
-  };
-
   bool ExpandMarkings() {
     bool anyMarkingsExpanded = false;
     if (GetIsMarked()) {
       if (m_bindingParent != SharedRuntimeBlockHandle_t()) {
-        anyMarkingsExpanded =
-            anyMarkingsExpanded ||
+        anyMarkingsExpanded |=
             !m_memPoolDeviceAcc[0].derefHandle(m_bindingParent)->SetMarked();
       }
       if (m_parent != SharedRuntimeBlockHandle_t()) {
-        anyMarkingsExpanded =
-            anyMarkingsExpanded ||
+        anyMarkingsExpanded |=
             !m_memPoolDeviceAcc[0].derefHandle(m_parent)->SetMarked();
       }
 
-      MapperForFunctionVals mapper(m_memPoolDeviceAcc);
-      auto *derefdRuntimeValues =
-          m_memPoolDeviceAcc[0].derefHandle(m_runtimeValues);
-      for (Index_t i = 0; i < m_runtimeValues.GetCount(); ++i) {
-        mapper(derefdRuntimeValues[i]);
+      if (m_runtimeValues != PortableMemPool::ArrayHandle<RuntimeValue>()) {
+        auto *derefdRuntimeValues =
+            m_memPoolDeviceAcc[0].derefHandle(m_runtimeValues);
+        for (Index_t i = 0; i < m_runtimeValues.GetCount(); ++i) {
+          auto& runtimeValue = derefdRuntimeValues[i];
+          if (runtimeValue.m_type == RuntimeValue::Type::Function) {
+            auto &funv = runtimeValue.m_data.functionVal;
+            if (funv.m_bindingParent != SharedRuntimeBlockHandle_t()) {
+              anyMarkingsExpanded |= !m_memPoolDeviceAcc[0].derefHandle(funv.m_bindingParent)->SetMarked() || anyMarkingsExpanded;
+            }
+          }
+        }
       }
-
-      anyMarkingsExpanded = anyMarkingsExpanded || mapper.m_anyMarkingsExpanded;
     }
     return anyMarkingsExpanded;
   }
@@ -201,14 +187,20 @@ public:
     }                                                                          \
   }
 
-  bool IsScheduledReserveAllocs() {
+  std::optional<Index_t> IsScheduledReserveAllocs() {
+    std::optional<Index_t> result = 0;
     const auto TryReserveRuntimeBlock = [&](const Index_t frameCount) {
+                                          if (!result.has_value()) {
+                                            return false;
+                                          }
       if (!m_memPoolDeviceAcc[0].TryReserve<RuntimeBlock>()) {
+        result = std::nullopt;
         return false;
       }
       if (frameCount > 0 && !m_memPoolDeviceAcc[0].TryReserveArray<RuntimeValue>(frameCount)) {
         return false;
       }
+      ++(*result);
       return true;
     };
 
@@ -224,14 +216,12 @@ public:
         for (Index_t i = 0; i < bindNode->m_bindings.GetCount(); ++i) {
           auto& astForArg = *m_memPoolDeviceAcc[0].derefHandle(bindingsData[i]);
           if (!TryReserveRuntimeBlock(astForArg.GetFrameCount())) {
-            return false;
+            break;
           }
         }
-        return true;
       } else {
-        return TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(bindNode->m_childExpr)->GetFrameCount());
+        TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(bindNode->m_childExpr)->GetFrameCount());
       }
-
       break;
     }
     case Compiler::ASTNode::Type::Call: {
@@ -241,14 +231,13 @@ public:
         for (Index_t i = 0; i < callNode->m_args.GetCount(); ++i) {
           auto& astForArg = *m_memPoolDeviceAcc[0].derefHandle(argsData[i]);
           if (!TryReserveRuntimeBlock(astForArg.GetFrameCount())) {
-            return false;
+            break;
           }
         }
-        return true;
       } else {
         const RuntimeValue lambdaVal = m_memPoolDeviceAcc[0].derefHandle(
             m_runtimeValues)[callNode->m_args.GetCount()];
-        return TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(lambdaVal.m_data.functionVal.m_expr)->GetFrameCount());
+        TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(lambdaVal.m_data.functionVal.m_expr)->GetFrameCount());
       }
 
       break;
@@ -256,11 +245,11 @@ public:
     case Compiler::ASTNode::Type::If: {
       auto ifNode = static_cast<Compiler::IfNode *>(astNode);
       if (m_numBound == 0) {
-        return TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(ifNode->m_pred)->GetFrameCount());
+        TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(ifNode->m_pred)->GetFrameCount());
       } else {
         const auto& trueBranch = *m_memPoolDeviceAcc[0].derefHandle(ifNode->m_then);
         const auto& falseBranch = *m_memPoolDeviceAcc[0].derefHandle(ifNode->m_else);
-        return TryReserveRuntimeBlock(std::max(trueBranch.GetFrameCount(), falseBranch.GetFrameCount()));
+        TryReserveRuntimeBlock(std::max(trueBranch.GetFrameCount(), falseBranch.GetFrameCount()));
       }
       break;
     }
@@ -272,31 +261,27 @@ public:
     case Compiler::ASTNode::Type::GreaterThan: {
       if (m_numBound == 0) {
         auto binaryOp = static_cast<Compiler::BinaryOpNode *>(astNode);
-        if (!TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(binaryOp->m_arg0)->GetFrameCount()) ||
-            !TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(binaryOp->m_arg1)->GetFrameCount())) {
-          return false;
+        TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(binaryOp->m_arg0)->GetFrameCount());
+                               TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(binaryOp->m_arg1)->GetFrameCount());
         }
-      }
-      return true;
+      break;
     }
     case Compiler::ASTNode::Type::Remainder:
     case Compiler::ASTNode::Type::Floor: {
       if (m_numBound == 0) {
         auto unaryOpNode = static_cast<Compiler::UnaryOpNode*>(astNode);
-        if (!TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(unaryOpNode->m_arg0)->GetFrameCount())) {
-          return false;
-        }
-      }
-      return true;
+        TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(unaryOpNode->m_arg0)->GetFrameCount());
+    }
+      break;
     }
     case Compiler::ASTNode::Type::Number:
     case Compiler::ASTNode::Type::Identifier:
     case Compiler::ASTNode::Type::Lambda: {
-      return true;
+      break;
     }
     }
-      //Eval call will fail, don't bother garbage collecting / worrying about overscheduling.
-      return true;
+      //Eval call will fail for unknown cases so ok to default to 0.
+      return result;
   }
 
   Error PerformEvalPass() {

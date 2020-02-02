@@ -52,7 +52,8 @@ CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
       m_requiresGarbageCollection(range<1>(1)),
       m_numActiveBlocksBuff(range<1>(1)), m_resultBufferOnHost(range<1>(1)),
       m_notReservedBlocksBuff(range<1>(m_dependencyTracker->m_activeBlocks[0].size())),
-      m_notReservedBlocksCount(range<1>(1))
+      m_notReservedBlocksCount(range<1>(1)),
+      m_blocksToBeAllocatedInNextPass(range<1>(1))
 /* m_workQueue(host_selector{})*/ {
   std::cout << std::endl;
   std::cout << "Running on "
@@ -150,10 +151,7 @@ void CPUEvaluator::CreateFirstBlock(const Compiler::ASTNodeHandle rootNode) {
 
 Index_t CPUEvaluator::ComputeRequiredResourcesForActiveSet() {
   m_notReservedBlocksCount.get_access<access::mode::discard_write>()[0] = 0;
-  // TODO keep counter of available GC slots here too. Return opt num blocks from
-  // IsScheduledReserveAllocs indicating the number of blocks to be allocated.
-  // Keep atomic count of total blocks for next pass. If add result <= available GC slots,
-  // continue, otherwise skip block and request GC.
+  m_blocksToBeAllocatedInNextPass.get_access<access::mode::discard_write>()[0] = 0;
   const auto numActiveBlocks = m_numActiveBlocksBuff.get_access<access::mode::read>()[0];
   if (numActiveBlocks > 0) {
     m_workQueue.submit([&](handler &cgh) {
@@ -163,10 +161,13 @@ Index_t CPUEvaluator::ComputeRequiredResourcesForActiveSet() {
       auto notReservedBlocksAcc = m_notReservedBlocksBuff.get_access<access::mode::write>(cgh);
       auto notReservedBlocksCountAtomic =
           m_notReservedBlocksCount.get_access<access::mode::atomic>(cgh);
+      auto blocksToBeAllocatedInNextPassAcc = m_blocksToBeAllocatedInNextPass.get_access<access::mode::atomic>(cgh);
+      auto gcHandleAcc = m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
       cgh.parallel_for<class prep_blocks>(
           cl::sycl::range<1>(numActiveBlocks),
           [dependencyTracker, memPoolAcc, notReservedBlocksAcc,
-           notReservedBlocksCountAtomic](item<1> itm) {
+           notReservedBlocksCountAtomic, blocksToBeAllocatedInNextPassAcc,
+           gcHandleAcc](item<1> itm) {
             const auto idx = itm.get_linear_id();
             const auto blockHandle = dependencyTracker[0].GetBlockAtIndex(static_cast<Index_t>(idx));
             const auto derefdWorking =
@@ -174,11 +175,16 @@ Index_t CPUEvaluator::ComputeRequiredResourcesForActiveSet() {
             derefdWorking->SetResources(memPoolAcc, dependencyTracker);
             const auto reserved = derefdWorking->IsScheduledReserveAllocs();
             if (reserved) {
-              dependencyTracker[0].AddActiveBlock(blockHandle);
-            } else {
-              const auto idxToInsert = notReservedBlocksCountAtomic[0].fetch_add(1);
-              notReservedBlocksAcc[idxToInsert] = blockHandle;
+              const auto blocksToBeAllocatedCount = 
+                blocksToBeAllocatedInNextPassAcc[0].fetch_add(*reserved) + *reserved;
+              auto& gc = *memPoolAcc[0].derefHandle(gcHandleAcc[0]);
+              if (blocksToBeAllocatedCount <= gc.GetNumFreeSlots()) {
+                dependencyTracker[0].AddActiveBlock(blockHandle);
+                return;
+              }
             }
+            const auto idxToInsert = notReservedBlocksCountAtomic[0].fetch_add(1);
+            notReservedBlocksAcc[idxToInsert] = blockHandle;
           });
     });
 
@@ -200,9 +206,14 @@ Index_t CPUEvaluator::ComputeRequiredResourcesForActiveSet() {
       m_workQueue.submit([&](handler& cgh) {
                            auto dependencyTracker = m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
                            auto notReservedBlocksAcc = m_notReservedBlocksBuff.get_access<access::mode::read>(cgh);
-                           cgh.parallel_for<class push_not_reserved_blocks>(cl::sycl::range<1>(notReservedBlocksCountFromThisPass), [dependencyTracker, notReservedBlocksAcc] (item<1> itm) {
+                           auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+                           cgh.parallel_for<class push_not_reserved_blocks>(cl::sycl::range<1>(notReservedBlocksCountFromThisPass), [dependencyTracker, notReservedBlocksAcc, memPoolAcc] (item<1> itm) {
                                                                                                                                       const auto idx = itm.get_linear_id();
-                                                                                                                                      dependencyTracker[0].InsertActiveBlock(notReservedBlocksAcc[idx], idx);                                                                                                                                    });
+                                                                                                                                      const auto notReservedBlockHandle = notReservedBlocksAcc[idx];
+                                                                                                                                      dependencyTracker[0].InsertActiveBlock(notReservedBlockHandle, idx);
+                                                                                                                                      auto derefdBlock = memPoolAcc[0].derefHandle(notReservedBlockHandle);
+                                                                                                                                      derefdBlock->SetMarked();                             
+                                                                                                                                    });
       });
       }
     return notReservedBlocksCountFromThisPass;
@@ -231,7 +242,6 @@ void CPUEvaluator::CheckForBlockErrors(
 }
 
 void CPUEvaluator::PerformGarbageCollection(const Index_t numActiveBlocks) {
-  std::cout << "Performing GC" << std::endl;
   if (numActiveBlocks > 0) {
     m_workQueue.submit([&](handler &cgh) {
       auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
@@ -284,6 +294,7 @@ void CPUEvaluator::PerformGarbageCollection(const Index_t numActiveBlocks) {
             cl::sycl::range<1>(managedAllocdSize),
             [gcHandleAcc, memPoolAcc, markingsExpandedAcc](item<1> itm) {
               auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
+              // TODO pass mem pool in as reference when required.
               gcRef->SetMemPoolAcc(memPoolAcc);
               const auto wereMarkingsExpandedHere =
                   gcRef->RunMarkPass(static_cast<Index_t>(itm.get_linear_id()));
@@ -299,7 +310,6 @@ void CPUEvaluator::PerformGarbageCollection(const Index_t numActiveBlocks) {
         markingsExpandedHostAcc[0] = false;
       }
     }
-
     // Sweep unmarked, one pass
     m_workQueue.submit([&](handler &cgh) {
       auto gcHandleAcc =
@@ -368,10 +378,10 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
           std::max(numActiveBlocks, maxConcurrentBlocksDuringExec);
 
       if (ComputeRequiredResourcesForActiveSet() > 0 || numActiveBlocks == 0) {
+        numActiveBlocks = m_numActiveBlocksBuff.get_access<access::mode::read>()[0];
         PerformGarbageCollection(numActiveBlocks);
       }
 
-      numActiveBlocks = m_numActiveBlocksBuff.get_access<access::mode::read>()[0];
       if (numActiveBlocks > 0) {
         // main eval pass
         m_workQueue.submit([&](handler &cgh) {
