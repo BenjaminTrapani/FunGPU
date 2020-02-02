@@ -44,10 +44,10 @@ CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
       m_errorsPerBlock(range<1>(m_dependencyTracker->m_activeBlocks[0].size())),
       m_blockErrorIdx(range<1>(1)), m_markingsExpanded(range<1>(1)),
       m_managedAllocdCount(range<1>(1)),
-      m_runtimeValuesRequiredCount(range<1>(1)),
-      m_runtimeBlocksRequiredCount(range<1>(1)),
       m_requiresGarbageCollection(range<1>(1)),
-      m_numActiveBlocksBuff(range<1>(1)), m_resultBufferOnHost(range<1>(1))
+      m_numActiveBlocksBuff(range<1>(1)), m_resultBufferOnHost(range<1>(1)),
+      m_notReservedBlocksBuff(range<1>(m_dependencyTracker->m_activeBlocks[0].size())),
+      m_notReservedBlocksCount(range<1>(1))
 /* m_workQueue(host_selector{})*/ {
   std::cout << std::endl;
   std::cout << "Running on "
@@ -143,37 +143,57 @@ void CPUEvaluator::CreateFirstBlock(const Compiler::ASTNodeHandle rootNode) {
   std::cout << "Successfully created first block" << std::endl;
 }
 
-void CPUEvaluator::ComputeRequiredResourcesForActiveSet(
+bool CPUEvaluator::ComputeRequiredResourcesForActiveSet(
     const Index_t numActiveBlocks) {
-  m_runtimeValuesRequiredCount.get_access<access::mode::discard_write>()[0] = 0;
-  m_runtimeBlocksRequiredCount.get_access<access::mode::discard_write>()[0] = 0;
-
+  m_notReservedBlocksCount.get_access<access::mode::discard_write>()[0] = 0;
   if (numActiveBlocks > 0) {
     m_workQueue.submit([&](handler &cgh) {
       auto dependencyTracker =
           m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
       auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-
-      auto runtimeValuesRequiredCountAtomic =
-          m_runtimeValuesRequiredCount.get_access<access::mode::atomic>(cgh);
-      auto runtimeBlocksRequiredCountAtomic =
-          m_runtimeBlocksRequiredCount.get_access<access::mode::atomic>(cgh);
+      auto notReservedBlocksAcc = m_notReservedBlocksBuff.get_access<access::mode::write>(cgh);
+      auto notReservedBlocksCountAtomic =
+          m_notReservedBlocksCount.get_access<access::mode::atomic>(cgh);
       cgh.parallel_for<class prep_blocks>(
           cl::sycl::range<1>(numActiveBlocks),
-          [dependencyTracker, memPoolAcc, runtimeValuesRequiredCountAtomic,
-           runtimeBlocksRequiredCountAtomic](item<1> itm) {
+          [dependencyTracker, memPoolAcc, notReservedBlocksAcc,
+           notReservedBlocksCountAtomic](item<1> itm) {
             const auto idx = itm.get_linear_id();
+            const auto blockHandle = dependencyTracker[0].GetBlockAtIndex(static_cast<Index_t>(idx));
             const auto derefdWorking =
-                memPoolAcc[0].derefHandle(dependencyTracker[0].GetBlockAtIndex(
-                    static_cast<Index_t>(idx)));
-            const auto requiredSpace = derefdWorking->GetRequiredAllocs();
-            runtimeValuesRequiredCountAtomic[0].fetch_add(
-                requiredSpace.runtimeValuesRequired);
-            runtimeBlocksRequiredCountAtomic[0].fetch_add(
-                requiredSpace.dependentBlocksRequired);
+              memPoolAcc[0].derefHandle(blockHandle);
+            const auto reserved = derefdWorking->IsScheduledReserveAllocs();
+            if (reserved) {
+              dependencyTracker[0].AddActiveBlock(blockHandle);
+            } else {
+              const auto idxToInsert = notReservedBlocksCountAtomic[0].fetch_add(1);
+              notReservedBlocksAcc[idxToInsert] = blockHandle;
+            }
           });
     });
-  }
+
+    m_workQueue.submit([&](handler &cgh) {
+                         auto dependencyTracker = m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
+                         auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+                         cgh.single_task<class flip_dep_tracker>([dependencyTracker, memPoolAcc] {
+                                                                   dependencyTracker[0].FlipActiveBlocksBuffer();
+                                                                   memPoolAcc[0].ClearReservations();
+                                                                     });
+                       });
+
+    const auto notReservedBlocksCountFromThisPass = m_notReservedBlocksCount.get_access<access::mode::read>()[0];
+    if (notReservedBlocksCountFromThisPass > 0) {
+      m_workQueue.submit([&](handler& cgh) {
+                           auto dependencyTracker = m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
+                           auto notReservedBlocksAcc = m_notReservedBlocksBuff.get_access<access::mode::read>(cgh);
+                           cgh.parallel_for<class push_not_reserved_blocks>(cl::sycl::range<1>(notReservedBlocksCountFromThisPass), [dependencyTracker, notReservedBlocksAcc] (item<1> itm) {
+                                                                                                                                      const auto idx = itm.get_linear_id();
+                                                                                                                                      dependencyTracker[0].AddActiveBlock(notReservedBlocksAcc[idx]);                                                                                                                                    });
+      });
+      return false;
+      }
+    }
+    return true;
 }
 
 void CPUEvaluator::CheckForBlockErrors(
@@ -194,37 +214,6 @@ void CPUEvaluator::CheckForBlockErrors(
     throw std::runtime_error(errorString);
   }
   hostBlockHasErrorAcc[0] = 0;
-}
-
-void CPUEvaluator::CheckRequiresGarbageCollection() {
-  m_requiresGarbageCollection.get_access<access::mode::discard_write>()[0] =
-      false;
-  m_workQueue.submit([&](handler &cgh) {
-    auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-    auto gcHandleAcc =
-        m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
-    auto runtimeValuesRequiredCountAcc =
-        m_runtimeValuesRequiredCount.get_access<access::mode::read>(cgh);
-    auto runtimeBlocksRequiredCountAcc =
-        m_runtimeBlocksRequiredCount.get_access<access::mode::read>(cgh);
-    auto requiresGarbageCollectAcc =
-        m_requiresGarbageCollection.get_access<access::mode::discard_write>(
-            cgh);
-    cgh.single_task<class check_requires_garbage_collection>(
-        [memPoolAcc, gcHandleAcc, runtimeValuesRequiredCountAcc,
-         runtimeBlocksRequiredCountAcc, requiresGarbageCollectAcc] {
-          const auto numRuntimeValuesFree =
-              memPoolAcc[0].GetNumFree<RuntimeBlock_t::RuntimeValue>();
-          const auto numRuntimeBlocksFree =
-              memPoolAcc[0].GetNumFree<RuntimeBlock_t>();
-          const auto gcNumFreeSlots =
-              memPoolAcc[0].derefHandle(gcHandleAcc[0])->GetNumFreeSlots();
-          requiresGarbageCollectAcc[0] =
-              numRuntimeValuesFree < runtimeValuesRequiredCountAcc[0] ||
-              numRuntimeBlocksFree < runtimeBlocksRequiredCountAcc[0] ||
-              gcNumFreeSlots < runtimeBlocksRequiredCountAcc[0];
-        });
-  });
 }
 
 void CPUEvaluator::PerformGarbageCollection(const Index_t numActiveBlocks) {
@@ -363,11 +352,7 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
       maxConcurrentBlocksDuringExec =
           std::max(numActiveBlocks, maxConcurrentBlocksDuringExec);
 
-      ComputeRequiredResourcesForActiveSet(numActiveBlocks);
-      CheckRequiresGarbageCollection();
-
-      if (m_requiresGarbageCollection.get_access<access::mode::read>()[0] ||
-          numActiveBlocks == 0) {
+      if (!ComputeRequiredResourcesForActiveSet(numActiveBlocks) || numActiveBlocks == 0) {
         PerformGarbageCollection(numActiveBlocks);
       }
 

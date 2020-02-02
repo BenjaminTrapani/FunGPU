@@ -33,6 +33,11 @@ public:
     };
     ASTNode(Type type, Index_t frameSize)
         : m_type(type), m_frameSize(frameSize) {}
+
+    Index_t GetFrameCount() const {
+      return m_frameSize;
+    }
+
     Type m_type;
     Index_t m_frameSize;
   };

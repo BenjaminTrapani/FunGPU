@@ -201,51 +201,102 @@ public:
     }                                                                          \
   }
 
-  struct RequiredAllocDesc {
-    Index_t runtimeValuesRequired;
-    Index_t dependentBlocksRequired;
-    RequiredAllocDesc(const Index_t runtimeValuesReq,
-                      const Index_t dependentBlocksReq)
-        : runtimeValuesRequired(runtimeValuesReq),
-          dependentBlocksRequired(dependentBlocksReq) {}
-  };
+  bool IsScheduledReserveAllocs() {
+    const auto TryReserveRuntimeBlock = [&](const Index_t frameCount) {
+      if (!m_memPoolDeviceAcc[0].TryReserve<RuntimeBlock>()) {
+        return false;
+      }
+      if (frameCount > 0 && !m_memPoolDeviceAcc[0].TryReserveArray<RuntimeValue>(frameCount)) {
+        return false;
+      }
+      return true;
+    };
 
-  RequiredAllocDesc GetRequiredAllocs() {
     auto astNode = GetASTNode();
     switch (astNode->m_type) {
     case Compiler::ASTNode::Type::Bind:
     case Compiler::ASTNode::Type::BindRec: {
-      const auto bindNode = static_cast<const Compiler::BindNode *>(astNode);
-      const auto bindingsCount = bindNode->m_bindings.GetCount();
-      return RequiredAllocDesc(bindingsCount, bindingsCount + 1);
+      const bool isRec = astNode->m_type == Compiler::ASTNode::Type::BindRec;
+      auto bindNode = static_cast<Compiler::BindNode*>(astNode);
+      if (m_numBound == 0) {
+        auto bindingsData =
+            m_memPoolDeviceAcc[0].derefHandle(bindNode->m_bindings);
+        for (Index_t i = 0; i < bindNode->m_bindings.GetCount(); ++i) {
+          auto& astForArg = *m_memPoolDeviceAcc[0].derefHandle(bindingsData[i]);
+          if (!TryReserveRuntimeBlock(astForArg.GetFrameCount())) {
+            return false;
+          }
+        }
+        return true;
+      } else {
+        return TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(bindNode->m_childExpr)->GetFrameCount());
+      }
+
+      break;
     }
     case Compiler::ASTNode::Type::Call: {
-      const auto callNode = static_cast<const Compiler::CallNode *>(astNode);
-      // One additional arg implicit in lambda target
-      const auto argsCount = callNode->m_args.GetCount() + 1;
-      // One additional dependency for lambda invocation
-      return RequiredAllocDesc(argsCount, argsCount + 1);
+      auto callNode = static_cast<Compiler::CallNode *>(astNode);
+      if (m_numBound == 0) {
+        auto argsData = m_memPoolDeviceAcc[0].derefHandle(callNode->m_args);
+        for (Index_t i = 0; i < callNode->m_args.GetCount(); ++i) {
+          auto& astForArg = *m_memPoolDeviceAcc[0].derefHandle(argsData[i]);
+          if (!TryReserveRuntimeBlock(astForArg.GetFrameCount())) {
+            return false;
+          }
+        }
+        return true;
+      } else {
+        const RuntimeValue lambdaVal = m_memPoolDeviceAcc[0].derefHandle(
+            m_runtimeValues)[callNode->m_args.GetCount()];
+        return TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(lambdaVal.m_data.functionVal.m_expr)->GetFrameCount());
+      }
+
+      break;
     }
     case Compiler::ASTNode::Type::If: {
-      return RequiredAllocDesc(1, 2);
+      auto ifNode = static_cast<Compiler::IfNode *>(astNode);
+      if (m_numBound == 0) {
+        return TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(ifNode->m_pred)->GetFrameCount());
+      } else {
+        const auto& trueBranch = *m_memPoolDeviceAcc[0].derefHandle(ifNode->m_then);
+        const auto& falseBranch = *m_memPoolDeviceAcc[0].derefHandle(ifNode->m_else);
+        return TryReserveRuntimeBlock(std::max(trueBranch.GetFrameCount(), falseBranch.GetFrameCount()));
+      }
+      break;
     }
     case Compiler::ASTNode::Type::Add:
     case Compiler::ASTNode::Type::Sub:
     case Compiler::ASTNode::Type::Mul:
     case Compiler::ASTNode::Type::Div:
     case Compiler::ASTNode::Type::Equal:
-    case Compiler::ASTNode::Type::GreaterThan:
+    case Compiler::ASTNode::Type::GreaterThan: {
+      if (m_numBound == 0) {
+        auto binaryOp = static_cast<Compiler::BinaryOpNode *>(astNode);
+        if (!TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(binaryOp->m_arg0)->GetFrameCount()) ||
+            !TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(binaryOp->m_arg1)->GetFrameCount())) {
+          return false;
+        }
+      }
+      return true;
+    }
     case Compiler::ASTNode::Type::Remainder:
-      return RequiredAllocDesc(2, 2);
-    case Compiler::ASTNode::Type::Floor:
-      return RequiredAllocDesc(1, 1);
+    case Compiler::ASTNode::Type::Floor: {
+      if (m_numBound == 0) {
+        auto unaryOpNode = static_cast<Compiler::UnaryOpNode*>(astNode);
+        if (!TryReserveRuntimeBlock(m_memPoolDeviceAcc[0].derefHandle(unaryOpNode->m_arg0)->GetFrameCount())) {
+          return false;
+        }
+      }
+      return true;
+    }
     case Compiler::ASTNode::Type::Number:
     case Compiler::ASTNode::Type::Identifier:
-    case Compiler::ASTNode::Type::Lambda:
-      return RequiredAllocDesc(0, 0);
+    case Compiler::ASTNode::Type::Lambda: {
+      return true;
     }
-    // The eval call will fail, doesn't matter how much space.
-    return RequiredAllocDesc(0, 0);
+    }
+      //Eval call will fail, don't bother garbage collecting / worrying about overscheduling.
+      return true;
   }
 
   Error PerformEvalPass() {

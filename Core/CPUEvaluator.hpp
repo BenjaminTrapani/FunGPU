@@ -67,9 +67,8 @@ public:
 
 private:
   void CreateFirstBlock(Compiler::ASTNodeHandle rootNode);
-  void ComputeRequiredResourcesForActiveSet(Index_t numActiveBlocks);
+  bool ComputeRequiredResourcesForActiveSet(Index_t numActiveBlocks);
   void CheckForBlockErrors(Index_t maxConcurrentBlocksDuringExec);
-  void CheckRequiresGarbageCollection();
   void PerformGarbageCollection(Index_t numActiveBlocks);
 
   std::shared_ptr<DependencyTracker> m_dependencyTracker;
@@ -82,16 +81,14 @@ private:
   cl::sycl::buffer<DependencyTracker> m_dependencyTrackerBuff;
   cl::sycl::buffer<PortableMemPool::Handle<RuntimeBlock_t::RuntimeValue>>
       m_resultValueBuff;
-  cl::sycl::buffer<Error> m_errorsPerBlock;
-  cl::sycl::buffer<Index_t> m_blockErrorIdx;
+  cl::sycl::buffer<Error> m_errorsPerBlock;  cl::sycl::buffer<Index_t> m_blockErrorIdx;
   cl::sycl::buffer<bool> m_markingsExpanded;
   cl::sycl::buffer<Index_t> m_managedAllocdCount;
-  cl::sycl::buffer<Index_t> m_runtimeValuesRequiredCount;
-  cl::sycl::buffer<Index_t> m_runtimeBlocksRequiredCount;
   cl::sycl::buffer<bool> m_requiresGarbageCollection;
   cl::sycl::buffer<Index_t> m_numActiveBlocksBuff;
   cl::sycl::buffer<RuntimeBlock_t::RuntimeValue> m_resultBufferOnHost;
-
+  cl::sycl::buffer<RuntimeBlock_t::SharedRuntimeBlockHandle_t> m_notReservedBlocksBuff;
+  cl::sycl::buffer<Index_t> m_notReservedBlocksCount;
   cl::sycl::queue m_workQueue;
 };
 } // namespace FunGPU
