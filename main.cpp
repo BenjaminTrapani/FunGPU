@@ -14,18 +14,18 @@ int main(int argc, char **argv) {
     CPUEvaluator evaluator(memPoolBuff);
     Index_t argvIndex = 1;
     while (true) {
-      const auto programPath = [&] () -> std::optional<std::string> {
-                                  if (argvIndex < argc) {
-                                    return std::string(argv[argvIndex++]);
-                                  }
+      const auto programPath = [&]() -> std::optional<std::string> {
+        if (argvIndex < argc) {
+          return std::string(argv[argvIndex++]);
+        }
 
-                                  std::cout << "Program to run(or q to quit): ";
-                                  std::string interactivePath;
-                                  std::cin >> interactivePath;
-                                  if (interactivePath == "q") {
-                                    return std::optional<std::string>();
-                                  }
-                                  return interactivePath;
+        std::cout << "Program to run(or q to quit): ";
+        std::string interactivePath;
+        std::cin >> interactivePath;
+        if (interactivePath == "q") {
+          return std::optional<std::string>();
+        }
+        return interactivePath;
       }();
       if (!programPath) {
         break;
@@ -42,7 +42,8 @@ int main(int argc, char **argv) {
                   << std::endl;
         continue;
       }
-      std::cout << "Successfully compiled program " << *programPath << std::endl;
+      std::cout << "Successfully compiled program " << *programPath
+                << std::endl;
       Index_t maxConcurrentBlockCount;
       const auto programResult =
           evaluator.EvaluateProgram(compiledResult, maxConcurrentBlockCount);

@@ -12,7 +12,7 @@ class CPUEvaluator {
 public:
   class DependencyTracker;
 
-  using RuntimeBlock_t = RuntimeBlock<DependencyTracker, 8192 * 16>;
+  using RuntimeBlock_t = RuntimeBlock<DependencyTracker, 8192 * 60>;
   using GarbageCollector_t = RuntimeBlock_t::GarbageCollector_t;
 
   class DependencyTracker {
@@ -21,7 +21,8 @@ public:
   public:
     Error
     AddActiveBlock(const RuntimeBlock_t::SharedRuntimeBlockHandle_t &block);
-    void InsertActiveBlock(const RuntimeBlock_t::SharedRuntimeBlockHandle_t&, Index_t);
+    void InsertActiveBlock(const RuntimeBlock_t::SharedRuntimeBlockHandle_t &,
+                           Index_t);
 
     Index_t GetActiveBlockCount() {
       cl::sycl::atomic<Index_t> activeBlockCount(
@@ -82,13 +83,15 @@ private:
   cl::sycl::buffer<DependencyTracker> m_dependencyTrackerBuff;
   cl::sycl::buffer<PortableMemPool::Handle<RuntimeBlock_t::RuntimeValue>>
       m_resultValueBuff;
-  cl::sycl::buffer<Error> m_errorsPerBlock;  cl::sycl::buffer<Index_t> m_blockErrorIdx;
+  cl::sycl::buffer<Error> m_errorsPerBlock;
+  cl::sycl::buffer<Index_t> m_blockErrorIdx;
   cl::sycl::buffer<bool> m_markingsExpanded;
   cl::sycl::buffer<Index_t> m_managedAllocdCount;
   cl::sycl::buffer<bool> m_requiresGarbageCollection;
   cl::sycl::buffer<Index_t> m_numActiveBlocksBuff;
   cl::sycl::buffer<RuntimeBlock_t::RuntimeValue> m_resultBufferOnHost;
-  cl::sycl::buffer<RuntimeBlock_t::SharedRuntimeBlockHandle_t> m_notReservedBlocksBuff;
+  cl::sycl::buffer<RuntimeBlock_t::SharedRuntimeBlockHandle_t>
+      m_notReservedBlocksBuff;
   cl::sycl::buffer<Index_t> m_notReservedBlocksCount;
   cl::sycl::buffer<Index_t> m_blocksToBeAllocatedInNextPass;
   cl::sycl::queue m_workQueue;

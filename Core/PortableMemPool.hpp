@@ -113,8 +113,9 @@ public:
     return handle;
   }
 
-  template<class T> bool TryReserve() {
-    return TryReserveImpl<T>(m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
+  template <class T> bool TryReserve() {
+    return TryReserveImpl<T>(m_smallBin, m_mediumBin, m_largeBin,
+                             m_extraLargeBin);
   }
 
   template <class T>
@@ -124,8 +125,9 @@ public:
                              m_largeBin, m_extraLargeBin);
   }
 
-  template<class T> bool TryReserveArray(const Index_t arraySize) {
-    return TryReserveArrayImpl<T>(arraySize, m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
+  template <class T> bool TryReserveArray(const Index_t arraySize) {
+    return TryReserveArrayImpl<T>(arraySize, m_smallBin, m_mediumBin,
+                                  m_largeBin, m_extraLargeBin);
   }
 
   template <class T> void Dealloc(const Handle<T> &handle) {
@@ -217,10 +219,21 @@ private:
     }
 
     bool TryReserve() {
-      cl::sycl::atomic<Index_t> reservedAllocCount((cl::sycl::multi_ptr<Index_t, cl::sycl::access::address_space::global_space>(&m_reservedAllocations)));
+      cl::sycl::atomic<Index_t> reservedAllocCount(
+          (cl::sycl::multi_ptr<Index_t,
+                               cl::sycl::access::address_space::global_space>(
+              &m_reservedAllocations)));
       const auto prevReservedCount = reservedAllocCount.fetch_add(1);
-      // Implicit in this math is that no one is concurrently allocating and trying to reserve. Should have a separate reserve and alloc pass.
-      return prevReservedCount + cl::sycl::atomic<Index_t>((cl::sycl::multi_ptr<Index_t, cl::sycl::access::address_space::global_space>(&m_totalAllocations))).load() < TotalNodes;
+      // Implicit in this math is that no one is concurrently allocating and
+      // trying to reserve. Should have a separate reserve and alloc pass.
+      return prevReservedCount +
+                 cl::sycl::atomic<Index_t>(
+                     (cl::sycl::multi_ptr<
+                         Index_t,
+                         cl::sycl::access::address_space::global_space>(
+                         &m_totalAllocations)))
+                     .load() <
+             TotalNodes;
     }
 
     void ClearReserved() {
@@ -257,7 +270,8 @@ private:
   };
 
   template <class T, class Pred, class CB, Index_t allocSize, Index_t totalSize>
-  decltype(auto) WithArena(Pred&& pred, CB&& cb, Arena<allocSize, totalSize>& arena) {
+  decltype(auto) WithArena(Pred &&pred, CB &&cb,
+                           Arena<allocSize, totalSize> &arena) {
     if (pred(arena)) {
       return cb(arena);
     }
@@ -266,25 +280,24 @@ private:
 
   template <class T, class Pred, class CB, Index_t allocSize, Index_t totalSize,
             Index_t... allocSizes, Index_t... totalSizes>
-  decltype(auto) WithArena(Pred&& pred, CB&& cb, Arena<allocSize, totalSize> &arena,
-                      Arena<allocSizes, totalSizes> &... arenas) {
+  decltype(auto) WithArena(Pred &&pred, CB &&cb,
+                           Arena<allocSize, totalSize> &arena,
+                           Arena<allocSizes, totalSizes> &... arenas) {
     if (pred(arena)) {
       return cb(arena);
     }
-    return WithArena<T, Pred, CB>(std::forward<Pred>(pred), std::forward<CB>(cb),
-                                 arenas...);
+    return WithArena<T, Pred, CB>(std::forward<Pred>(pred),
+                                  std::forward<CB>(cb), arenas...);
   }
 
-  template<class T>
-  struct AllocPred {
-    template<Index_t allocSize, Index_t totalSize>
-    constexpr bool operator()(const Arena<allocSize, totalSize>&) {
+  template <class T> struct AllocPred {
+    template <Index_t allocSize, Index_t totalSize>
+    constexpr bool operator()(const Arena<allocSize, totalSize> &) {
       return sizeof(T) <= allocSize;
     }
   };
 
-  template<class T>
-  struct AllocHandler {
+  template <class T> struct AllocHandler {
     Handle<T> operator()() { return Handle<T>(); }
     template <class DispatchedArena>
     Handle<T> operator()(DispatchedArena &arena) {
@@ -312,34 +325,31 @@ private:
   };
 
   template <class T, Index_t... allocSizes, Index_t... totalSizes>
-  bool TryReserveImpl(Arena<allocSizes, totalSizes>&... arenas) {
+  bool TryReserveImpl(Arena<allocSizes, totalSizes> &... arenas) {
     return WithArena<T>(AllocPred<T>(), TryReserveHandler(), arenas...);
   }
 
-  template<class T>
-  struct AllocArrayPred {
+  template <class T> struct AllocArrayPred {
     AllocArrayPred(const Index_t arraySize) : m_arraySize(arraySize) {}
 
-    template<Index_t allocSize, Index_t totalSize>
-    bool operator()(const Arena<allocSize, totalSize>& arena) {
+    template <Index_t allocSize, Index_t totalSize>
+    bool operator()(const Arena<allocSize, totalSize> &arena) {
       return allocSize >= sizeof(T) * m_arraySize;
     }
 
     const Index_t m_arraySize;
   };
 
-  template<class T>
-  struct AllocArrayHandler {
-    AllocArrayHandler(const Index_t arraySize, const T& initialValue,
-                      PortableMemPool& memPool) : m_arraySize(arraySize), m_initialValue(initialValue),
-                                                                           m_memPool(memPool) {}
+  template <class T> struct AllocArrayHandler {
+    AllocArrayHandler(const Index_t arraySize, const T &initialValue,
+                      PortableMemPool &memPool)
+        : m_arraySize(arraySize), m_initialValue(initialValue),
+          m_memPool(memPool) {}
 
-    ArrayHandle<T> operator()() {
-      return ArrayHandle<T>();
-    }
+    ArrayHandle<T> operator()() { return ArrayHandle<T>(); }
 
-    template<class DispatchedArena>
-    ArrayHandle<T> operator()(DispatchedArena& arena) {
+    template <class DispatchedArena>
+    ArrayHandle<T> operator()(DispatchedArena &arena) {
       const auto allocdIdx = arena.AllocFromArena();
       if (allocdIdx == std::numeric_limits<Index_t>::max()) {
         return ArrayHandle<T>();
@@ -357,14 +367,16 @@ private:
     }
 
     const Index_t m_arraySize;
-    const T& m_initialValue;
-    PortableMemPool& m_memPool;
+    const T &m_initialValue;
+    PortableMemPool &m_memPool;
   };
 
   template <class T, Index_t... allocSizes, Index_t... totalSizes>
   ArrayHandle<T> AllocArrayImpl(const Index_t arraySize, const T &initialValue,
                                 Arena<allocSizes, totalSizes> &... arenas) {
-    return WithArena<T>(AllocArrayPred<T>(arraySize), AllocArrayHandler<T>(arraySize, initialValue, *this), arenas...);
+    return WithArena<T>(AllocArrayPred<T>(arraySize),
+                        AllocArrayHandler<T>(arraySize, initialValue, *this),
+                        arenas...);
   }
 
   struct ReserveArrayHandler {
@@ -373,32 +385,31 @@ private:
       return arena.TryReserve();
     }
   };
-  
-  template<class T, Index_t... allocSizes, Index_t... totalSizes>
-  bool TryReserveArrayImpl(const Index_t arraySize, Arena<allocSizes, totalSizes> &... arenas) {
-    return WithArena<T>(AllocArrayPred<T>(arraySize), ReserveArrayHandler(), arenas...);
+
+  template <class T, Index_t... allocSizes, Index_t... totalSizes>
+  bool TryReserveArrayImpl(const Index_t arraySize,
+                           Arena<allocSizes, totalSizes> &... arenas) {
+    return WithArena<T>(AllocArrayPred<T>(arraySize), ReserveArrayHandler(),
+                        arenas...);
   }
 
-  template<class T>
-  struct MatchAllocSizePred {
+  template <class T> struct MatchAllocSizePred {
     MatchAllocSizePred(const Index_t allocSize) : m_allocSize(allocSize) {}
 
-    template<Index_t allocSize, Index_t totalSize>
-    bool operator()(const Arena<allocSize, totalSize>&) {
+    template <Index_t allocSize, Index_t totalSize>
+    bool operator()(const Arena<allocSize, totalSize> &) {
       return allocSize == m_allocSize;
     }
 
     Index_t m_allocSize;
   };
 
-  template<class T>
-  struct DeallocHandler {
-    DeallocHandler(const Handle<T>& handle, PortableMemPool& memPool) : m_handle(handle),
-                                                                        m_memPool(memPool) {}
+  template <class T> struct DeallocHandler {
+    DeallocHandler(const Handle<T> &handle, PortableMemPool &memPool)
+        : m_handle(handle), m_memPool(memPool) {}
     void operator()() {}
 
-    template<class DispatchedArena>
-    void operator()(DispatchedArena& arena) {
+    template <class DispatchedArena> void operator()(DispatchedArena &arena) {
       auto derefedForHandle = m_memPool.derefHandle(m_handle);
       // Explicitly call destructor
       derefedForHandle->~T();
@@ -406,23 +417,24 @@ private:
     }
 
     Handle<T> m_handle;
-    PortableMemPool& m_memPool;
+    PortableMemPool &m_memPool;
   };
 
   template <class T, Index_t... allocSizes, Index_t... totalSizes>
-  void DeallocImpl(const Handle<T> &handle, Arena<allocSizes, totalSizes> &... arenas) {
-    WithArena<T>(MatchAllocSizePred<T>(handle.GetAllocSize()), DeallocHandler<T>(handle, *this), arenas...);
+  void DeallocImpl(const Handle<T> &handle,
+                   Arena<allocSizes, totalSizes> &... arenas) {
+    WithArena<T>(MatchAllocSizePred<T>(handle.GetAllocSize()),
+                 DeallocHandler<T>(handle, *this), arenas...);
   }
 
-  template<class T>
-  struct DeallocArrayHandler {
-    DeallocArrayHandler(const ArrayHandle<T>& arrayHandle, PortableMemPool& memPool) :
-      m_arrayHandle(arrayHandle), m_memPool(memPool) {}
+  template <class T> struct DeallocArrayHandler {
+    DeallocArrayHandler(const ArrayHandle<T> &arrayHandle,
+                        PortableMemPool &memPool)
+        : m_arrayHandle(arrayHandle), m_memPool(memPool) {}
 
     void operator()() {}
 
-    template<class DispatchedArena>
-    void operator()(DispatchedArena& arena) {
+    template <class DispatchedArena> void operator()(DispatchedArena &arena) {
       const auto &handle = m_arrayHandle.m_handle;
       auto derefdHandle = m_memPool.derefHandle(handle);
       for (Index_t i = 0; i < m_arrayHandle.GetCount(); ++i) {
@@ -432,41 +444,37 @@ private:
       arena.FreeFromArena(handle.GetAllocIndex());
     }
 
-    const ArrayHandle<T>& m_arrayHandle;
-    PortableMemPool& m_memPool;
+    const ArrayHandle<T> &m_arrayHandle;
+    PortableMemPool &m_memPool;
   };
 
   template <class T, Index_t... allocSizes, Index_t... totalSizes>
   void DeallocArrayImpl(const ArrayHandle<T> &arrayHandle,
                         Arena<allocSizes, totalSizes> &... arenas) {
     WithArena<T>(MatchAllocSizePred<T>(arrayHandle.m_handle.GetAllocSize()),
-              DeallocArrayHandler<T>(arrayHandle, *this), arenas...);
+                 DeallocArrayHandler<T>(arrayHandle, *this), arenas...);
   }
 
   template <Index_t allocSize, Index_t totalSize>
-  void ClearReservationsImpl(Arena<allocSize, totalSize>& arena) {
+  void ClearReservationsImpl(Arena<allocSize, totalSize> &arena) {
     arena.ClearReserved();
   }
 
-  template <Index_t allocSize, Index_t totalSize,
-            Index_t... allocSizes, Index_t... totalSizes>
-  void ClearReservationsImpl(Arena<allocSize, totalSize>& arena,
-                         Arena<allocSizes, totalSizes>&... arenas) {
+  template <Index_t allocSize, Index_t totalSize, Index_t... allocSizes,
+            Index_t... totalSizes>
+  void ClearReservationsImpl(Arena<allocSize, totalSize> &arena,
+                             Arena<allocSizes, totalSizes> &... arenas) {
     arena.ClearReserved();
     ClearReservationsImpl(arenas...);
   }
 
-  template<class T>
-  struct DerefHandleHandler {
+  template <class T> struct DerefHandleHandler {
     DerefHandleHandler(const Index_t allocIndex) : m_allocIndex(allocIndex) {}
 
-    T* operator()() {
-      return nullptr;
-    }
+    T *operator()() { return nullptr; }
 
-    template<class DispatchedArena>
-    T* operator()(DispatchedArena& arena) {
-      return reinterpret_cast<T*>(arena.GetBytes(m_allocIndex));
+    template <class DispatchedArena> T *operator()(DispatchedArena &arena) {
+      return reinterpret_cast<T *>(arena.GetBytes(m_allocIndex));
     }
 
     const Index_t m_allocIndex;
@@ -476,7 +484,8 @@ private:
   T *derefHandleImpl(const Handle<T> &handle,
                      Arena<allocSizes, totalSizes> &... arenas) {
     return WithArena<T>(MatchAllocSizePred<T>(handle.GetAllocSize()),
-                        DerefHandleHandler<T>(handle.GetAllocIndex()), arenas...);
+                        DerefHandleHandler<T>(handle.GetAllocIndex()),
+                        arenas...);
   }
 
   template <Index_t allocSize, Index_t totalSize, Index_t... allocSizes,
