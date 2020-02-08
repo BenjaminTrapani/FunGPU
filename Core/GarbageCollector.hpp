@@ -11,28 +11,31 @@
 namespace FunGPU {
 template <class T, Index_t maxManagedAllocationsCount> class GarbageCollector {
 public:
-  static constexpr Index_t MaxManagedAllocationsCount =
-      maxManagedAllocationsCount;
-
-  GarbageCollector(const PortableMemPool::DeviceAccessor_t memPoolAcc)
-      : m_memPoolAcc(memPoolAcc), m_managedAllocationsCountData(0),
+  GarbageCollector()
+      : m_managedAllocationsCountData(0),
         m_managedHandlesIdx(0) {}
 
   template <class... Args_t>
-  Error AllocManaged(PortableMemPool::Handle<T> &result, Args_t &&... args) {
+  Error AllocManaged(const PortableMemPool::DeviceAccessor_t& memPoolAcc, PortableMemPool::Handle<T> &result, Args_t &&... args) {
     cl::sycl::atomic<Index_t> allocCount(
         (cl::sycl::multi_ptr<Index_t,
                              cl::sycl::access::address_space::global_space>(
             &m_managedAllocationsCountData)));
-    const auto indexToAlloc = allocCount.fetch_add(1);
-    if (indexToAlloc >= maxManagedAllocationsCount) {
-      return Error(Error::Type::GCOutOfSlots);
-    }
-
-    result = m_memPoolAcc[0].template Alloc<T>(std::forward<Args_t>(args)...);
+    result = memPoolAcc[0].template Alloc<T>(std::forward<Args_t>(args)...);
     if (result == PortableMemPool::Handle<T>()) {
       return Error(Error::Type::MemPoolAllocFailure);
     }
+    auto derefdResult = memPoolAcc[0].derefHandle(result);
+    if (const auto error = derefdResult->Init(); error.GetType() != Error::Type::Success) {
+      memPoolAcc[0].Dealloc(result);
+      return error;
+    }
+    const auto indexToAlloc = allocCount.fetch_add(1);
+    if (indexToAlloc >= maxManagedAllocationsCount) {
+      memPoolAcc[0].Dealloc(result);
+      return Error(Error::Type::GCOutOfSlots);
+    }
+
     m_managedHandles[m_managedHandlesIdx][indexToAlloc] = result;
     return Error();
   }
@@ -42,28 +45,20 @@ public:
         (cl::sycl::multi_ptr<Index_t,
                              cl::sycl::access::address_space::global_space>(
             &m_managedAllocationsCountData)));
-    return allocCount.load();
+    return std::min(allocCount.load(), maxManagedAllocationsCount);
   }
 
-  Index_t GetNumFreeSlots() {
-    return maxManagedAllocationsCount - GetManagedAllocationCount();
-  }
-
-  void SetMemPoolAcc(const PortableMemPool::DeviceAccessor_t &memPoolAcc) {
-    m_memPoolAcc = memPoolAcc;
-  }
-
-  bool RunMarkPass(const Index_t idx) {
+  bool RunMarkPass(const Index_t idx, const PortableMemPool::DeviceAccessor_t& memPoolAcc) {
     const auto &handleForIdx = m_managedHandles[m_managedHandlesIdx][idx];
-    auto derefdForHandle = m_memPoolAcc[0].derefHandle(handleForIdx);
+    auto derefdForHandle = memPoolAcc[0].derefHandle(handleForIdx);
     return derefdForHandle->ExpandMarkings();
   }
 
-  void Sweep(const Index_t idx) {
+  void Sweep(const Index_t idx, const PortableMemPool::DeviceAccessor_t& memPoolAcc) {
     auto &handleForIdx = m_managedHandles[m_managedHandlesIdx][idx];
-    auto derefdForHandle = m_memPoolAcc[0].derefHandle(handleForIdx);
+    auto derefdForHandle = memPoolAcc[0].derefHandle(handleForIdx);
     if (!derefdForHandle->GetIsMarked()) {
-      m_memPoolAcc[0].Dealloc(handleForIdx);
+      memPoolAcc[0].Dealloc(handleForIdx);
       handleForIdx = PortableMemPool::Handle<T>();
     } else {
       derefdForHandle->ClearMarking();
@@ -93,7 +88,6 @@ public:
   }
 
 private:
-  PortableMemPool::DeviceAccessor_t m_memPoolAcc;
   Index_t m_managedAllocationsCountData;
   std::array<std::array<PortableMemPool::Handle<T>, maxManagedAllocationsCount>,
              2>

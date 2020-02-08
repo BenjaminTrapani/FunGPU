@@ -76,11 +76,11 @@ public:
                        m_handle.GetAllocSize());
     }
 
-    bool operator==(const ArrayHandle<T> &other) {
+    bool operator==(const ArrayHandle<T> &other) const {
       return m_handle == other.m_handle && m_count == other.m_count;
     }
 
-    bool operator!=(const ArrayHandle<T> &other) { return !(*this == other); }
+    bool operator!=(const ArrayHandle<T> &other) const { return !(*this == other); }
 
   private:
     Handle<T> m_handle;

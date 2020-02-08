@@ -7,13 +7,14 @@ class Error {
 public:
   enum class Type : std::uint8_t {
     Success = 0,
-    InvalidType = 1,
-    ArityMismatch = 2,
-    InvalidIndex = 3,
-    GCOutOfSlots = 4,
-    EvaluatorOutOfActiveBlocks = 5,
-    EvaluatorOutOfDeletionBlocks = 6,
-    MemPoolAllocFailure = 7,
+    InvalidArgType = 1,
+    InvalidASTType = 2,
+    ArityMismatch = 3,
+    InvalidIndex = 4,
+    GCOutOfSlots = 5,
+    EvaluatorOutOfActiveBlocks = 6,
+    EvaluatorOutOfDeletionBlocks = 7,
+    MemPoolAllocFailure = 8,
   };
 
   Error() : m_type(Type::Success) {}

@@ -69,7 +69,6 @@ public:
 
 private:
   void CreateFirstBlock(Compiler::ASTNodeHandle rootNode);
-  Index_t ComputeRequiredResourcesForActiveSet();
   void CheckForBlockErrors(Index_t maxConcurrentBlocksDuringExec);
   void PerformGarbageCollection(Index_t numActiveBlocks);
 
@@ -90,10 +89,6 @@ private:
   cl::sycl::buffer<bool> m_requiresGarbageCollection;
   cl::sycl::buffer<Index_t> m_numActiveBlocksBuff;
   cl::sycl::buffer<RuntimeBlock_t::RuntimeValue> m_resultBufferOnHost;
-  cl::sycl::buffer<RuntimeBlock_t::SharedRuntimeBlockHandle_t>
-      m_notReservedBlocksBuff;
-  cl::sycl::buffer<Index_t> m_notReservedBlocksCount;
-  cl::sycl::buffer<Index_t> m_blocksToBeAllocatedInNextPass;
   cl::sycl::queue m_workQueue;
 };
 } // namespace FunGPU
