@@ -26,6 +26,7 @@ public:
       Equal,
       GreaterThan,
       Remainder,
+      Expt,
       Floor,
       Number,
       Identifier,

@@ -12,11 +12,11 @@ namespace FunGPU {
 template <class T, Index_t maxManagedAllocationsCount> class GarbageCollector {
 public:
   GarbageCollector()
-      : m_managedAllocationsCountData(0),
-        m_managedHandlesIdx(0) {}
+      : m_managedAllocationsCountData(0), m_managedHandlesIdx(0) {}
 
   template <class... Args_t>
-  Error AllocManaged(const PortableMemPool::DeviceAccessor_t& memPoolAcc, PortableMemPool::Handle<T> &result, Args_t &&... args) {
+  Error AllocManaged(const PortableMemPool::DeviceAccessor_t &memPoolAcc,
+                     PortableMemPool::Handle<T> &result, Args_t &&... args) {
     cl::sycl::atomic<Index_t> allocCount(
         (cl::sycl::multi_ptr<Index_t,
                              cl::sycl::access::address_space::global_space>(
@@ -26,7 +26,8 @@ public:
       return Error(Error::Type::MemPoolAllocFailure);
     }
     auto derefdResult = memPoolAcc[0].derefHandle(result);
-    if (const auto error = derefdResult->Init(); error.GetType() != Error::Type::Success) {
+    if (const auto error = derefdResult->Init();
+        error.GetType() != Error::Type::Success) {
       memPoolAcc[0].Dealloc(result);
       return error;
     }
@@ -48,13 +49,15 @@ public:
     return std::min(allocCount.load(), maxManagedAllocationsCount);
   }
 
-  bool RunMarkPass(const Index_t idx, const PortableMemPool::DeviceAccessor_t& memPoolAcc) {
+  bool RunMarkPass(const Index_t idx,
+                   const PortableMemPool::DeviceAccessor_t &memPoolAcc) {
     const auto &handleForIdx = m_managedHandles[m_managedHandlesIdx][idx];
     auto derefdForHandle = memPoolAcc[0].derefHandle(handleForIdx);
     return derefdForHandle->ExpandMarkings();
   }
 
-  void Sweep(const Index_t idx, const PortableMemPool::DeviceAccessor_t& memPoolAcc) {
+  void Sweep(const Index_t idx,
+             const PortableMemPool::DeviceAccessor_t &memPoolAcc) {
     auto &handleForIdx = m_managedHandles[m_managedHandlesIdx][idx];
     auto derefdForHandle = memPoolAcc[0].derefHandle(handleForIdx);
     if (!derefdForHandle->GetIsMarked()) {

@@ -80,7 +80,9 @@ public:
       return m_handle == other.m_handle && m_count == other.m_count;
     }
 
-    bool operator!=(const ArrayHandle<T> &other) const { return !(*this == other); }
+    bool operator!=(const ArrayHandle<T> &other) const {
+      return !(*this == other);
+    }
 
   private:
     Handle<T> m_handle;

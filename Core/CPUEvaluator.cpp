@@ -121,9 +121,9 @@ void CPUEvaluator::CreateFirstBlock(const Compiler::ASTNodeHandle rootNode) {
                 memPoolWrite[0].derefHandle(garbageCollectorHandleAcc[0]);
             const RuntimeBlock_t::SharedRuntimeBlockHandle_t emptyBlock;
             RuntimeBlock_t::SharedRuntimeBlockHandle_t sharedInitialBlock;
-            const auto allocError = gcRef->AllocManaged(memPoolWrite,
-                sharedInitialBlock, rootNode, emptyBlock, emptyBlock,
-                dependencyTracker, resultValueAcc[0], memPoolWrite,
+            const auto allocError = gcRef->AllocManaged(
+                memPoolWrite, sharedInitialBlock, rootNode, emptyBlock,
+                emptyBlock, dependencyTracker, resultValueAcc[0], memPoolWrite,
                 garbageCollectorHandleAcc[0]);
             allocGCErrorAcc[0] = allocError;
             if (allocError.GetType() == Error::Type::Success) {
@@ -220,8 +220,8 @@ void CPUEvaluator::PerformGarbageCollection(const Index_t numActiveBlocks) {
             cl::sycl::range<1>(managedAllocdSize),
             [gcHandleAcc, memPoolAcc, markingsExpandedAcc](item<1> itm) {
               auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
-              const auto wereMarkingsExpandedHere =
-                gcRef->RunMarkPass(static_cast<Index_t>(itm.get_linear_id()), memPoolAcc);
+              const auto wereMarkingsExpandedHere = gcRef->RunMarkPass(
+                  static_cast<Index_t>(itm.get_linear_id()), memPoolAcc);
               if (wereMarkingsExpandedHere) {
                 markingsExpandedAcc[0] = true;
               }
@@ -279,7 +279,8 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
 
   maxConcurrentBlocksDuringExec = 0;
   m_blockErrorIdx.get_access<access::mode::discard_write>()[0] = 0;
-  m_requiresGarbageCollection.get_access<access::mode::discard_write>()[0] = false;
+  m_requiresGarbageCollection.get_access<access::mode::discard_write>()[0] =
+      false;
   try {
     while (true) {
       m_workQueue.submit([&](handler &cgh) {
@@ -301,7 +302,8 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
       maxConcurrentBlocksDuringExec =
           std::max(numActiveBlocks, maxConcurrentBlocksDuringExec);
       {
-        auto requiresGarbageCollectionAcc = m_requiresGarbageCollection.get_access<access::mode::read_write>();
+        auto requiresGarbageCollectionAcc =
+            m_requiresGarbageCollection.get_access<access::mode::read_write>();
         if (requiresGarbageCollectionAcc[0] || numActiveBlocks == 0) {
           PerformGarbageCollection(numActiveBlocks);
           requiresGarbageCollectionAcc[0] = false;
@@ -322,11 +324,14 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
               m_blockErrorIdx.get_access<access::mode::atomic>(cgh);
           auto blockErrorAcc =
               m_errorsPerBlock.get_access<access::mode::read_write>(cgh);
-          auto requiresGarbageCollectionAcc = m_requiresGarbageCollection.get_access<access::mode::discard_write>(cgh);
+          auto requiresGarbageCollectionAcc =
+              m_requiresGarbageCollection
+                  .get_access<access::mode::discard_write>(cgh);
           cgh.parallel_for<class run_eval_pass>(
               cl::sycl::range<1>(numActiveBlocks),
               [dependencyTracker, memPoolWrite, blockErrorIdxAtomicAcc,
-               blockErrorAcc, gcHandleAcc, requiresGarbageCollectionAcc](item<1> itm) {
+               blockErrorAcc, gcHandleAcc,
+               requiresGarbageCollectionAcc](item<1> itm) {
                 auto currentBlock =
                     dependencyTracker[0].GetBlockAtIndex(itm.get_linear_id());
                 auto derefdCurrentBlock =
@@ -335,28 +340,30 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
                 derefdCurrentBlock->SetResources(memPoolWrite,
                                                  dependencyTracker);
                 const auto error = derefdCurrentBlock->PerformEvalPass();
-                  switch (error.GetType()) {
-                  case Error::Type::Success:
+                switch (error.GetType()) {
+                case Error::Type::Success:
+                  return;
+                case Error::Type::GCOutOfSlots:
+                case Error::Type::MemPoolAllocFailure:
+                  requiresGarbageCollectionAcc[0] = true;
+                  if (const auto reAppendError =
+                          dependencyTracker[0].AddActiveBlock(currentBlock);
+                      reAppendError.GetType() == Error::Type::Success) {
                     return;
-                  case Error::Type::GCOutOfSlots:
-                  case Error::Type::MemPoolAllocFailure:
-                    requiresGarbageCollectionAcc[0] = true;
-                    if (const auto reAppendError = dependencyTracker[0].AddActiveBlock(currentBlock); reAppendError.GetType() == Error::Type::Success) {                    
-                      return;
-                    }
-                    break;
-                  case Error::Type::InvalidArgType:
-                  case Error::Type::InvalidASTType:
-                  case Error::Type::ArityMismatch:
-                  case Error::Type::InvalidIndex:
-                  case Error::Type::EvaluatorOutOfActiveBlocks:
-                  case Error::Type::EvaluatorOutOfDeletionBlocks:
-                    break;
                   }
-                  cl::sycl::atomic<Index_t> blockErrorIdxAtomic(
-                      blockErrorIdxAtomicAcc[0]);
-                  blockErrorAcc[blockErrorIdxAtomic.fetch_add(1)] = error;
-                });
+                  break;
+                case Error::Type::InvalidArgType:
+                case Error::Type::InvalidASTType:
+                case Error::Type::ArityMismatch:
+                case Error::Type::InvalidIndex:
+                case Error::Type::EvaluatorOutOfActiveBlocks:
+                case Error::Type::EvaluatorOutOfDeletionBlocks:
+                  break;
+                }
+                cl::sycl::atomic<Index_t> blockErrorIdxAtomic(
+                    blockErrorIdxAtomicAcc[0]);
+                blockErrorAcc[blockErrorIdxAtomic.fetch_add(1)] = error;
+              });
         });
       } else {
         break;

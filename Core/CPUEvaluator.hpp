@@ -50,8 +50,8 @@ public:
     }
 
   private:
-    std::array<std::array<RuntimeBlock_t::SharedRuntimeBlockHandle_t, 8192 * 8>,
-               2>
+    std::array<
+        std::array<RuntimeBlock_t::SharedRuntimeBlockHandle_t, 8192 * 16>, 2>
         m_activeBlocks;
     Index_t m_activeBlockCountData = 0;
     Index_t m_activeBlocksBufferIdx = 0;
