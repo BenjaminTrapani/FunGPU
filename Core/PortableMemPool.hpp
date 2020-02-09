@@ -26,22 +26,18 @@ public:
                          cl::sycl::access::target::host_buffer>;
   template <class T> class Handle {
   public:
-    Handle()
-        : m_allocIndex(std::numeric_limits<Index_t>::max()),
-          m_allocSize(std::numeric_limits<Index_t>::max()) {}
-    Handle(const Index_t allocIndex, const Index_t allocSize)
-        : m_allocIndex(allocIndex), m_allocSize(allocSize) {}
+    Handle() : m_distFromMemPoolBase(std::numeric_limits<Index_t>::max()) {}
+    Handle(const Index_t distFromMemPoolBase)
+        : m_distFromMemPoolBase(distFromMemPoolBase) {}
 
     template <class OtherT> Handle(const Handle<OtherT> &other) {
       *this = other;
     }
 
-    Index_t GetAllocIndex() const { return m_allocIndex; }
+    Index_t GetDistFromMemPoolBase() const { return m_distFromMemPoolBase; }
 
-    Index_t GetAllocSize() const { return m_allocSize; }
     bool operator==(const Handle &other) const {
-      return m_allocIndex == other.m_allocIndex &&
-             m_allocSize == other.m_allocSize;
+      return m_distFromMemPoolBase == other.m_distFromMemPoolBase;
     }
     bool operator!=(const Handle &other) const { return !(*this == other); }
 
@@ -49,13 +45,11 @@ public:
       static_assert(std::is_base_of<T, OtherT>::value ||
                         std::is_base_of<OtherT, T>::value,
                     "Cannot assign handle to handle of unrelated type");
-      m_allocIndex = other.GetAllocIndex();
-      m_allocSize = other.GetAllocSize();
+      m_distFromMemPoolBase = other.GetDistFromMemPoolBase();
     }
 
   private:
-    Index_t m_allocIndex;
-    Index_t m_allocSize;
+    Index_t m_distFromMemPoolBase;
   };
 
   template <class T> class ArrayHandle {
@@ -63,17 +57,15 @@ public:
 
   public:
     ArrayHandle() : m_count(std::numeric_limits<Index_t>::max()) {}
-    ArrayHandle(const Index_t allocIndex, const Index_t allocSize,
-                const Index_t count)
-        : m_handle(allocIndex, allocSize), m_count(count) {}
+    ArrayHandle(const Index_t distFromMemPoolBase, const Index_t count)
+        : m_handle(distFromMemPoolBase), m_count(count) {}
 
     Index_t GetCount() const { return m_count; }
 
     // Do not free the handle returned from this function, that will break the
     // allocator.
     Handle<T> ElementHandle(const Index_t elemIdx) {
-      return Handle<T>(m_handle.GetAllocIndex() + elemIdx * sizeof(T),
-                       m_handle.GetAllocSize());
+      return Handle<T>(m_handle.GetDistFromMemPoolBase() + elemIdx * sizeof(T));
     }
 
     bool operator==(const ArrayHandle<T> &other) const {
@@ -115,21 +107,11 @@ public:
     return handle;
   }
 
-  template <class T> bool TryReserve() {
-    return TryReserveImpl<T>(m_smallBin, m_mediumBin, m_largeBin,
-                             m_extraLargeBin);
-  }
-
   template <class T>
   ArrayHandle<T> AllocArray(const Index_t arraySize,
                             const T &initialValue = T()) {
     return AllocArrayImpl<T>(arraySize, initialValue, m_smallBin, m_mediumBin,
                              m_largeBin, m_extraLargeBin);
-  }
-
-  template <class T> bool TryReserveArray(const Index_t arraySize) {
-    return TryReserveArrayImpl<T>(arraySize, m_smallBin, m_mediumBin,
-                                  m_largeBin, m_extraLargeBin);
   }
 
   template <class T> void Dealloc(const Handle<T> &handle) {
@@ -141,13 +123,9 @@ public:
                      m_extraLargeBin);
   }
 
-  void ClearReservations() {
-    ClearReservationsImpl(m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
-  }
-
   template <class T> T *derefHandle(const Handle<T> &handle) {
-    return derefHandleImpl(handle, m_smallBin, m_mediumBin, m_largeBin,
-                           m_extraLargeBin);
+    return reinterpret_cast<T *>(reinterpret_cast<std::byte *>(this) +
+                                 handle.GetDistFromMemPoolBase());
   }
 
   template <class T> T *derefHandle(const ArrayHandle<T> &handle) {
@@ -166,34 +144,30 @@ public:
 
 private:
   template <Index_t AllocSize_i, Index_t TotalBytes_i> struct Arena {
-    static constexpr Index_t AllocSize = AllocSize_i;
-    static constexpr Index_t TotalBytes = TotalBytes_i;
-
     static_assert(
         TotalBytes_i % AllocSize_i == 0,
         "Expected TotalBytes to be a multiple of the allocation size");
 
-    static constexpr Index_t TotalNodes = TotalBytes_i / AllocSize_i;
     static_assert(
         (static_cast<size_t>(std::numeric_limits<Index_t>::max()) + 1) %
-                TotalNodes ==
+                (TotalBytes_i / AllocSize_i) ==
             0,
         "Ring buffer counts must wrap to 0 at multiples of total nodes");
 
     Arena() {
       for (Index_t i = 0; i < m_allocBeginIndices.size(); ++i) {
-        m_allocBeginIndices[i] = i * AllocSize;
+        m_allocBeginIndices[i] = i * AllocSize_i;
       }
     }
 
-    Index_t AllocFromArena() {
+    std::byte *AllocFromArena() {
       cl::sycl::atomic<Index_t> allocCount(
           (cl::sycl::multi_ptr<Index_t,
                                cl::sycl::access::address_space::global_space>(
               &m_totalAllocations)));
       const auto prevAllocCount = allocCount.fetch_add(1);
       if (prevAllocCount >= m_allocBeginIndices.size()) {
-        return std::numeric_limits<Index_t>::max();
+        return nullptr;
       }
       cl::sycl::atomic<Index_t> freeBlockBegin(
           (cl::sycl::multi_ptr<Index_t,
@@ -201,17 +175,22 @@ private:
               &m_freeBlockBegin)));
       const auto allocdIndex =
           freeBlockBegin.fetch_add(1) % m_allocBeginIndices.size();
-      return m_allocBeginIndices[allocdIndex];
+      return &m_storage[m_allocBeginIndices[allocdIndex]];
     }
 
-    void FreeFromArena(const Index_t allocIdx) {
+    bool OwnsData(const std::byte *data) const {
+      return data >= &m_storage[0] &&
+             data < &m_storage[TotalBytes_i - AllocSize_i];
+    }
+
+    void FreeFromArena(std::byte *data) {
       cl::sycl::atomic<Index_t> allocdBlockBegin(
           (cl::sycl::multi_ptr<Index_t,
                                cl::sycl::access::address_space::global_space>(
               &m_allocdBlockBegin)));
       const auto freeDst =
           allocdBlockBegin.fetch_add(1) % m_allocBeginIndices.size();
-      m_allocBeginIndices[freeDst] = allocIdx;
+      m_allocBeginIndices[freeDst] = data - &m_storage[0];
 
       cl::sycl::atomic<Index_t> allocCount(
           (cl::sycl::multi_ptr<Index_t,
@@ -220,38 +199,8 @@ private:
       allocCount.fetch_sub(1);
     }
 
-    bool TryReserve() {
-      cl::sycl::atomic<Index_t> reservedAllocCount(
-          (cl::sycl::multi_ptr<Index_t,
-                               cl::sycl::access::address_space::global_space>(
-              &m_reservedAllocations)));
-      const auto prevReservedCount = reservedAllocCount.fetch_add(1);
-      // Implicit in this math is that no one is concurrently allocating and
-      // trying to reserve. Should have a separate reserve and alloc pass.
-      return prevReservedCount +
-                 cl::sycl::atomic<Index_t>(
-                     (cl::sycl::multi_ptr<
-                         Index_t,
-                         cl::sycl::access::address_space::global_space>(
-                         &m_totalAllocations)))
-                     .load() <
-             TotalNodes;
-    }
-
-    void ClearReserved() {
-      cl::sycl::atomic<Index_t> reservedAllocCount(
-          (cl::sycl::multi_ptr<Index_t,
-                               cl::sycl::access::address_space::global_space>(
-              &m_reservedAllocations)));
-      reservedAllocCount.store(0);
-    }
-
-    unsigned char *GetBytes(const Index_t allocIdx) {
-      return &m_storage[allocIdx];
-    }
-    alignas(AllocSize) unsigned char m_storage[TotalBytes];
+    alignas(AllocSize_i) std::byte m_storage[TotalBytes_i];
     std::array<Index_t, TotalBytes_i / AllocSize_i> m_allocBeginIndices;
-
     Index_t m_freeBlockBegin = 0;
     Index_t m_allocdBlockBegin = 0;
 
@@ -300,35 +249,26 @@ private:
   };
 
   template <class T> struct AllocHandler {
+    AllocHandler(PortableMemPool &memPool) : m_memPool(memPool) {}
+
     Handle<T> operator()() { return Handle<T>(); }
+
     template <class DispatchedArena>
     Handle<T> operator()(DispatchedArena &arena) {
-      const auto allocdIdx = arena.AllocFromArena();
-      if (allocdIdx == std::numeric_limits<Index_t>::max()) {
+      const auto *data = arena.AllocFromArena();
+      if (data == nullptr) {
         return Handle<T>();
       }
 
-      const Handle<T> resultHandle(
-          allocdIdx, std::remove_reference<decltype(arena)>::type::AllocSize);
-      return resultHandle;
+      return Handle<T>(data - reinterpret_cast<std::byte *>(&m_memPool));
     }
+
+    PortableMemPool &m_memPool;
   };
 
   template <class T, Index_t... allocSizes, Index_t... totalSizes>
   Handle<T> AllocImpl(Arena<allocSizes, totalSizes> &... arenas) {
-    return WithArena<T>(AllocPred<T>(), AllocHandler<T>(), arenas...);
-  }
-
-  struct TryReserveHandler {
-    bool operator()() { return false; }
-    template <class DispatchedArena> bool operator()(DispatchedArena &arena) {
-      return arena.TryReserve();
-    }
-  };
-
-  template <class T, Index_t... allocSizes, Index_t... totalSizes>
-  bool TryReserveImpl(Arena<allocSizes, totalSizes> &... arenas) {
-    return WithArena<T>(AllocPred<T>(), TryReserveHandler(), arenas...);
+    return WithArena<T>(AllocPred<T>(), AllocHandler<T>(*this), arenas...);
   }
 
   template <class T> struct AllocArrayPred {
@@ -352,20 +292,18 @@ private:
 
     template <class DispatchedArena>
     ArrayHandle<T> operator()(DispatchedArena &arena) {
-      const auto allocdIdx = arena.AllocFromArena();
-      if (allocdIdx == std::numeric_limits<Index_t>::max()) {
+      auto *data = arena.AllocFromArena();
+      if (data == nullptr) {
         return ArrayHandle<T>();
       }
-      const ArrayHandle<T> resultHandle(
-          allocdIdx, std::remove_reference<decltype(arena)>::type::AllocSize,
-          m_arraySize);
 
-      auto tAlignedValues = m_memPool.derefHandle(resultHandle);
+      auto tAlignedValues = reinterpret_cast<T *>(data);
       for (Index_t i = 0; i < m_arraySize; ++i) {
         tAlignedValues[i] = *(new (tAlignedValues + i) T(m_initialValue));
       }
 
-      return resultHandle;
+      return ArrayHandle<T>(data - reinterpret_cast<std::byte *>(&m_memPool),
+                            m_arraySize);
     }
 
     const Index_t m_arraySize;
@@ -381,29 +319,19 @@ private:
                         arenas...);
   }
 
-  struct ReserveArrayHandler {
-    bool operator()() { return false; }
-    template <class DispatchedArena> bool operator()(DispatchedArena &arena) {
-      return arena.TryReserve();
-    }
-  };
-
-  template <class T, Index_t... allocSizes, Index_t... totalSizes>
-  bool TryReserveArrayImpl(const Index_t arraySize,
-                           Arena<allocSizes, totalSizes> &... arenas) {
-    return WithArena<T>(AllocArrayPred<T>(arraySize), ReserveArrayHandler(),
-                        arenas...);
-  }
-
-  template <class T> struct MatchAllocSizePred {
-    MatchAllocSizePred(const Index_t allocSize) : m_allocSize(allocSize) {}
+  template <class T> struct MatchArenaOffset {
+    MatchArenaOffset(const PortableMemPool &memPool,
+                     const Index_t distFromMemPoolBase)
+        : m_distFromMemPoolBase(distFromMemPoolBase), m_memPool(memPool) {}
 
     template <Index_t allocSize, Index_t totalSize>
-    bool operator()(const Arena<allocSize, totalSize> &) {
-      return allocSize == m_allocSize;
+    bool operator()(const Arena<allocSize, totalSize> &arena) {
+      return arena.OwnsData(reinterpret_cast<const std::byte *>(&m_memPool) +
+                            m_distFromMemPoolBase);
     }
 
-    Index_t m_allocSize;
+    const Index_t m_distFromMemPoolBase;
+    const PortableMemPool &m_memPool;
   };
 
   template <class T> struct DeallocHandler {
@@ -412,10 +340,10 @@ private:
     void operator()() {}
 
     template <class DispatchedArena> void operator()(DispatchedArena &arena) {
-      auto derefedForHandle = m_memPool.derefHandle(m_handle);
+      auto derefdForHandle = m_memPool.derefHandle(m_handle);
       // Explicitly call destructor
-      derefedForHandle->~T();
-      arena.FreeFromArena(m_handle.GetAllocIndex());
+      derefdForHandle->~T();
+      arena.FreeFromArena(reinterpret_cast<std::byte *>(derefdForHandle));
     }
 
     Handle<T> m_handle;
@@ -425,7 +353,7 @@ private:
   template <class T, Index_t... allocSizes, Index_t... totalSizes>
   void DeallocImpl(const Handle<T> &handle,
                    Arena<allocSizes, totalSizes> &... arenas) {
-    WithArena<T>(MatchAllocSizePred<T>(handle.GetAllocSize()),
+    WithArena<T>(MatchArenaOffset<T>(*this, handle.GetDistFromMemPoolBase()),
                  DeallocHandler<T>(handle, *this), arenas...);
   }
 
@@ -443,7 +371,7 @@ private:
         (derefdHandle[i]).~T();
       }
 
-      arena.FreeFromArena(handle.GetAllocIndex());
+      arena.FreeFromArena(reinterpret_cast<std::byte *>(derefdHandle));
     }
 
     const ArrayHandle<T> &m_arrayHandle;
@@ -453,41 +381,9 @@ private:
   template <class T, Index_t... allocSizes, Index_t... totalSizes>
   void DeallocArrayImpl(const ArrayHandle<T> &arrayHandle,
                         Arena<allocSizes, totalSizes> &... arenas) {
-    WithArena<T>(MatchAllocSizePred<T>(arrayHandle.m_handle.GetAllocSize()),
+    WithArena<T>(MatchArenaOffset<T>(
+                     *this, arrayHandle.m_handle.GetDistFromMemPoolBase()),
                  DeallocArrayHandler<T>(arrayHandle, *this), arenas...);
-  }
-
-  template <Index_t allocSize, Index_t totalSize>
-  void ClearReservationsImpl(Arena<allocSize, totalSize> &arena) {
-    arena.ClearReserved();
-  }
-
-  template <Index_t allocSize, Index_t totalSize, Index_t... allocSizes,
-            Index_t... totalSizes>
-  void ClearReservationsImpl(Arena<allocSize, totalSize> &arena,
-                             Arena<allocSizes, totalSizes> &... arenas) {
-    arena.ClearReserved();
-    ClearReservationsImpl(arenas...);
-  }
-
-  template <class T> struct DerefHandleHandler {
-    DerefHandleHandler(const Index_t allocIndex) : m_allocIndex(allocIndex) {}
-
-    T *operator()() { return nullptr; }
-
-    template <class DispatchedArena> T *operator()(DispatchedArena &arena) {
-      return reinterpret_cast<T *>(arena.GetBytes(m_allocIndex));
-    }
-
-    const Index_t m_allocIndex;
-  };
-
-  template <class T, Index_t... allocSizes, Index_t... totalSizes>
-  T *derefHandleImpl(const Handle<T> &handle,
-                     Arena<allocSizes, totalSizes> &... arenas) {
-    return WithArena<T>(MatchAllocSizePred<T>(handle.GetAllocSize()),
-                        DerefHandleHandler<T>(handle.GetAllocIndex()),
-                        arenas...);
   }
 
   template <Index_t allocSize, Index_t totalSize, Index_t... allocSizes,
@@ -525,7 +421,7 @@ private:
           (cl::sycl::multi_ptr<Index_t,
                                cl::sycl::access::address_space::global_space>(
               &arena.m_totalAllocations)));
-      return Arena<allocSize, totalSize>::TotalNodes - totalAllocations.load();
+      return (totalSize / allocSize) - totalAllocations.load();
     } else {
       return GetNumFreeImpl<T>(arenas...);
     }
@@ -538,16 +434,18 @@ private:
           (cl::sycl::multi_ptr<Index_t,
                                cl::sycl::access::address_space::global_space>(
               &arena.m_totalAllocations)));
-      return Arena<allocSize, totalSize>::TotalNodes - totalAllocations.load();
+      return (totalSize / allocSize) - totalAllocations.load();
     }
     return 0;
   }
 
-  static constexpr Index_t binSize = 16777216;
-
-  Arena<sizeof(int) * 8, binSize * 16> m_smallBin;
-  Arena<sizeof(int) * 64, binSize * 16> m_mediumBin;
-  Arena<sizeof(int) * 128, binSize * 16> m_largeBin;
-  Arena<sizeof(int) * 2097152, binSize> m_extraLargeBin;
+#define BIN_SIZE 16777216
+  Arena<sizeof(int) * 8, BIN_SIZE * 16> m_smallBin;
+  Arena<sizeof(int) * 64, BIN_SIZE * 16> m_mediumBin;
+  Arena<sizeof(int) * 128, BIN_SIZE * 16> m_largeBin;
+  Arena<sizeof(int) * 2097152, BIN_SIZE> m_extraLargeBin;
+#undef BIN_SIZE
 };
+static_assert(sizeof(PortableMemPool) < std::numeric_limits<Index_t>::max(),
+              "All pointer diffs need to be representable by Index_t");
 } // namespace FunGPU

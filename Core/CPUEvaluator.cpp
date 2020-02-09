@@ -135,7 +135,7 @@ void CPUEvaluator::CreateFirstBlock(const Compiler::ASTNodeHandle rootNode) {
     auto allocGCErrorVal = allocGCErrorBuf.get_access<access::mode::read>()[0];
     if (allocGCErrorVal.GetType() != Error::Type::Success) {
       std::stringstream errorStream;
-      errorStream << "Error allocating garbage collector: "
+      errorStream << "Error allocating initial block: "
                   << static_cast<std::underlying_type_t<Error::Type>>(
                          allocGCErrorVal.GetType())
                   << std::endl;
