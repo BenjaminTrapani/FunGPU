@@ -1,1 +1,1 @@
-[![Build Status](http://192.168.2.40:8081/buildStatus/icon?job=FunGPU%2Fmaster)](http://192.168.2.40:8081/job/FunGPU/job/master/)
+[![Build Status](http://skytopsoftware.ddns.net:8081/job/FunGPU/job/master/badge/icon)](http://skytopsoftware.ddns.net:8081/job/FunGPU/job/master/)
