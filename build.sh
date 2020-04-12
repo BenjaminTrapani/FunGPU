@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 mkdir build
 cd build
-cmake ../
-make -j
+cmake -DCMAKE_CXX_COMPILER=syclcc-clang -G Ninja ../
+ninja all

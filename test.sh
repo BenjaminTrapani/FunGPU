@@ -1,2 +1,2 @@
 cd build
-make test
+ninja test
