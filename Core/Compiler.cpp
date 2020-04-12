@@ -1,5 +1,5 @@
-#include "Compiler.h"
-#include "Types.h"
+#include "Compiler.hpp"
+#include "Types.hpp"
 #include <iostream>
 #include <sstream>
 
@@ -71,6 +71,14 @@ Compiler::CompileListOfSExpr(std::shared_ptr<const SExpr> sexpr,
       }
       result = memPoolAcc[0].template Alloc<BinaryOpNode>(
           ASTNode::Type::Remainder,
+          Compile(sexprChildren->at(1), boundIdentifiers, memPoolAcc),
+          Compile(sexprChildren->at(2), boundIdentifiers, memPoolAcc));
+    } else if (firstChildSym == "expt") {
+      if (sexprChildren->size() != 3) {
+        throw CompileException("Expected expt to have 2 args");
+      }
+      result = memPoolAcc[0].template Alloc<BinaryOpNode>(
+          ASTNode::Type::Expt,
           Compile(sexprChildren->at(1), boundIdentifiers, memPoolAcc),
           Compile(sexprChildren->at(2), boundIdentifiers, memPoolAcc));
     } else if (firstChildSym == "let" || firstChildSym == "letrec") {
@@ -314,6 +322,14 @@ void Compiler::DebugPrintAST(ASTNodeHandle rootOfASTHandle,
     std::cout << ")";
     break;
   }
+  case ASTNode::Type::Expt: {
+    std::cout << "(expt ";
+    auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
+    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc);
+    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc);
+    std::cout << ")";
+    break;
+  }
   case ASTNode::Type::Floor: {
     std::cout << "(floor ";
     auto unaryOpNode = static_cast<UnaryOpNode *>(rootOfAST);
@@ -391,7 +407,8 @@ void Compiler::DeallocateAST(const ASTNodeHandle &rootOfASTHandle,
   case ASTNode::Type::Div:
   case ASTNode::Type::Equal:
   case ASTNode::Type::GreaterThan:
-  case ASTNode::Type::Remainder: {
+  case ASTNode::Type::Remainder:
+  case ASTNode::Type::Expt: {
     auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
     DeallocateAST(binaryOpNode->m_arg0, memPoolAcc);
     DeallocateAST(binaryOpNode->m_arg1, memPoolAcc);

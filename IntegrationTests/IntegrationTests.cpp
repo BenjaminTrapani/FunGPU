@@ -9,9 +9,9 @@
 #undef max
 #undef min
 
-#include "CPUEvaluator.h"
-#include "Compiler.h"
-#include "Parser.h"
+#include "CPUEvaluator.hpp"
+#include "Compiler.hpp"
+#include "Parser.hpp"
 #include "PortableMemPool.hpp"
 
 using namespace FunGPU;

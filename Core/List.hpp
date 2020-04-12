@@ -1,6 +1,7 @@
+#include "Error.hpp"
 #include "PortableMemPool.hpp"
-#include "SYCL/sycl.hpp"
-#include "Types.h"
+#include "Types.hpp"
+#include <CL/sycl.hpp>
 #include <memory>
 
 namespace FunGPU {
@@ -23,11 +24,11 @@ public:
   }
 
   Index_t size() const { return m_listSize; }
-  bool push_front(const T &val) {
+  Error push_front(const T &val) {
     const auto newNodeHandle =
         m_portableMemPool[0].template Alloc<ListNode>(val);
     if (newNodeHandle == PortableMemPool::Handle<ListNode>()) {
-      return false;
+      return Error(Error::Type::MemPoolAllocFailure);
     }
 
     auto newNode = m_portableMemPool[0].derefHandle(newNodeHandle);
@@ -36,7 +37,7 @@ public:
     m_head = newNodeHandle;
     ++m_listSize;
 
-    return true;
+    return Error();
   }
 
   PortableMemPool::Handle<T> front() { return m_head; }
@@ -75,7 +76,6 @@ public:
     }
     if (tempHead == PortableMemPool::Handle<ListNode>()) {
       return PortableMemPool::Handle<T>();
-      // throw std::invalid_argument("Index out of range in list");
     }
     return tempHead;
   }

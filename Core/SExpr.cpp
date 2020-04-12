@@ -1,4 +1,4 @@
-#include "SExpr.h"
+#include "SExpr.hpp"
 #include <cstdlib>
 #include <iostream>
 
@@ -10,7 +10,7 @@ SExpr::SExpr()
 SExpr::SExpr(const std::shared_ptr<std::string> &literalValue) {
   try {
     const Float_t tempVal =
-        static_cast<Float_t>(std::stod(literalValue->c_str()));
+        static_cast<Float_t>(std::stof(literalValue->c_str()));
     m_type = Type::Number;
     m_numValue = tempVal;
   } catch (const std::exception &) {
