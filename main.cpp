@@ -1,3 +1,4 @@
+#include "Core/BlockPrep.hpp"
 #include "Core/CPUEvaluator.hpp"
 #include "Core/Compiler.hpp"
 #include "Core/Parser.hpp"
@@ -13,6 +14,7 @@ int main(int argc, char **argv) {
                                                   cl::sycl::range<1>(1));
     CPUEvaluator evaluator(memPoolBuff);
     Index_t argvIndex = 1;
+    BlockPrep blockPrep(64, 32, 32, memPoolBuff);
     while (true) {
       const auto programPath = [&]() -> std::optional<std::string> {
         if (argvIndex < argc) {
@@ -42,6 +44,13 @@ int main(int argc, char **argv) {
                   << std::endl;
         continue;
       }
+      std::cout << "Original compilation without any modifications: "
+                << std::endl;
+      compiler.DebugPrintAST(compiledResult);
+      std::cout << std::endl;
+      std::cout << "Updated for block generation: " << std::endl;
+      compiledResult = blockPrep.PrepareForBlockGeneration(compiledResult);
+      compiler.DebugPrintAST(compiledResult);
       std::cout << "Successfully compiled program " << *programPath
                 << std::endl;
       Index_t maxConcurrentBlockCount;

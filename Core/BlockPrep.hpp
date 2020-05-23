@@ -1,18 +1,38 @@
 #include "Compiler.hpp"
 #include "PortableMemPool.hpp"
 #include "Types.hpp"
+#include <set>
+#include <vector>
 
 namespace FunGPU {
 class BlockPrep {
 public:
   BlockPrep(Index_t registersPerBlock, Index_t instructionsPerCycle,
-            Index_t cyclesPerBlock);
+            Index_t cyclesPerBlock, cl::sycl::buffer<PortableMemPool> pool);
+
   Compiler::ASTNodeHandle
   PrepareForBlockGeneration(Compiler::ASTNodeHandle root);
 
 private:
-  /*
+  Compiler::ASTNodeHandle
+  PrepareForBlockGeneration(Compiler::ASTNodeHandle root,
+                            PortableMemPool::HostAccessor_t memPoolAcc);
+  static Compiler::ASTNodeHandle
+  RewriteAsPrimOps(Compiler::ASTNodeHandle root,
+                   PortableMemPool::HostAccessor_t memPoolAcc);
 
+  static void GetPrimOps(Compiler::ASTNodeHandle &root,
+                         PortableMemPool::HostAccessor_t memPoolAcc,
+                         std::vector<Compiler::ASTNodeHandle *> &out);
+  static void IncreaseBindingRefIndices(
+      Compiler::ASTNodeHandle, std::size_t increment,
+      PortableMemPool::HostAccessor_t memPoolAcc,
+      std::size_t minRefForIncrement,
+      const std::set<Compiler::ASTNodeHandle> &identsToExclude);
+  static void CollectAllIdentifiers(Compiler::ASTNodeHandle root,
+                                    PortableMemPool::HostAccessor_t memPoolAcc,
+                                    std::set<Compiler::ASTNodeHandle> &result);
+  /*
     Output of this whole process:
     Array of RuntimeBlock instances for each lambda, initial call instruction.
 
@@ -164,5 +184,6 @@ private:
   const Index_t m_registersPerBlock;
   const Index_t m_instructionsPerCycle;
   const Index_t m_cyclesPerBlock;
+  cl::sycl::buffer<PortableMemPool> m_pool;
 };
 } // namespace FunGPU

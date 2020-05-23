@@ -40,6 +40,9 @@ public:
       return m_distFromMemPoolBase == other.m_distFromMemPoolBase;
     }
     bool operator!=(const Handle &other) const { return !(*this == other); }
+    bool operator<(const Handle &other) const {
+      return m_distFromMemPoolBase < other.m_distFromMemPoolBase;
+    }
 
     template <class OtherT> void operator=(const Handle<OtherT> &other) {
       static_assert(std::is_base_of<T, OtherT>::value ||
@@ -64,7 +67,7 @@ public:
 
     // Do not free the handle returned from this function, that will break the
     // allocator.
-    Handle<T> ElementHandle(const Index_t elemIdx) {
+    Handle<T> ElementHandle(const Index_t elemIdx) const {
       return Handle<T>(m_handle.GetDistFromMemPoolBase() + elemIdx * sizeof(T));
     }
 
