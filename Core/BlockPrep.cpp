@@ -264,6 +264,39 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
         PortableMemPool::HostAccessor_t inputMemPoolAcc)
         : m_root(inputRoot), m_memPoolAcc(inputMemPoolAcc) {}
 
+    Compiler::ASTNodeHandle pullPrimOpsUnderUp(Compiler::ASTNodeHandle& root) {
+      std::vector<Compiler::ASTNodeHandle *> primOpsUnderAdd;
+      GetPrimOps(root, m_memPoolAcc, primOpsUnderAdd);
+      // This binary node is a prim op, no need to rewrite this node
+      if (primOpsUnderAdd.size() == 1 && primOpsUnderAdd[0] == &root) {
+        return root;
+      }
+      auto bindNodeForPrimOps =
+          m_memPoolAcc[0].template Alloc<Compiler::BindNode>(
+              primOpsUnderAdd.size(), false, m_memPoolAcc);
+      auto &derefdBindNodeForPrimOps =
+          *m_memPoolAcc[0].derefHandle(bindNodeForPrimOps);
+      // Only increase references to binding ops if the reference references
+      // something above root, otherwise should not increment.
+      std::set<Compiler::ASTNodeHandle> identsToExclude;
+      for (const auto primOpHandle : primOpsUnderAdd) {
+        CollectAllIdentifiers(*primOpHandle, m_memPoolAcc, identsToExclude);
+      }
+      IncreaseBindingRefIndices(root, primOpsUnderAdd.size(), m_memPoolAcc, 0,
+                                identsToExclude);
+      auto *bindingsData =
+          m_memPoolAcc[0].derefHandle(derefdBindNodeForPrimOps.m_bindings);
+      for (size_t i = 0; i < primOpsUnderAdd.size(); ++i) {
+        bindingsData[i] = *primOpsUnderAdd[i];
+        *primOpsUnderAdd[i] =
+            m_memPoolAcc[0].template Alloc<Compiler::IdentifierNode>(
+                primOpsUnderAdd.size() - i - 1);
+      }
+      derefdBindNodeForPrimOps.m_childExpr =
+          RewriteAsPrimOps(root, m_memPoolAcc);
+      return bindNodeForPrimOps;
+    }
+
     Compiler::ASTNodeHandle operator()(Compiler::BindNode &node) {
       // TODO actually rewrite, pull prim ops up into outer let expression.
       auto *bindingsData = m_memPoolAcc[0].derefHandle(node.m_bindings);
@@ -275,13 +308,7 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
     }
 
     Compiler::ASTNodeHandle operator()(Compiler::CallNode &call) {
-      // TODO actually rewrite, pull prim ops up into outer let expression.
-      auto *argData = m_memPoolAcc[0].derefHandle(call.m_args);
-      for (size_t i = 0; i < call.m_args.GetCount(); ++i) {
-        argData[i] = RewriteAsPrimOps(argData[i], m_memPoolAcc);
-      }
-      call.m_target = RewriteAsPrimOps(call.m_target, m_memPoolAcc);
-      return m_root;
+      return pullPrimOpsUnderUp(m_root);
     }
 
     Compiler::ASTNodeHandle operator()(Compiler::IfNode &ifNode) {
@@ -292,37 +319,8 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
       return m_root;
     }
 
-    Compiler::ASTNodeHandle operator()(const Compiler::BinaryOpNode &) {
-      std::vector<Compiler::ASTNodeHandle *> primOpsUnderAdd;
-      GetPrimOps(m_root, m_memPoolAcc, primOpsUnderAdd);
-      // This binary node is a prim op, no need to rewrite this node
-      if (primOpsUnderAdd.size() == 1 && primOpsUnderAdd[0] == &m_root) {
-        return m_root;
-      }
-      auto bindNodeForPrimOps =
-          m_memPoolAcc[0].template Alloc<Compiler::BindNode>(
-              primOpsUnderAdd.size(), false, m_memPoolAcc);
-      auto &derefdBindNodeForPrimOps =
-          *m_memPoolAcc[0].derefHandle(bindNodeForPrimOps);
-      // Only increase references to binding ops if the reference references
-      // something above m_root, otherwise should not increment.
-      std::set<Compiler::ASTNodeHandle> identsToExclude;
-      for (const auto primOpHandle : primOpsUnderAdd) {
-        CollectAllIdentifiers(*primOpHandle, m_memPoolAcc, identsToExclude);
-      }
-      IncreaseBindingRefIndices(m_root, primOpsUnderAdd.size(), m_memPoolAcc, 0,
-                                identsToExclude);
-      auto *bindingsData =
-          m_memPoolAcc[0].derefHandle(derefdBindNodeForPrimOps.m_bindings);
-      for (size_t i = 0; i < primOpsUnderAdd.size(); ++i) {
-        bindingsData[i] = *primOpsUnderAdd[i];
-        *primOpsUnderAdd[i] =
-            m_memPoolAcc[0].template Alloc<Compiler::IdentifierNode>(
-                primOpsUnderAdd.size() - i - 1);
-      }
-      derefdBindNodeForPrimOps.m_childExpr =
-          RewriteAsPrimOps(m_root, m_memPoolAcc);
-      return bindNodeForPrimOps;
+    Compiler::ASTNodeHandle operator()(const Compiler::BinaryOpNode&) {
+      return pullPrimOpsUnderUp(m_root);
     }
 
     Compiler::ASTNodeHandle operator()(Compiler::UnaryOpNode &node) {
