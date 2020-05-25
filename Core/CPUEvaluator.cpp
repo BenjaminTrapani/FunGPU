@@ -310,64 +310,62 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
         }
       }
 
-      if (numActiveBlocks > 0) {
-        // main eval pass
-        m_workQueue.submit([&](handler &cgh) {
-          auto memPoolWrite =
-              m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-          auto dependencyTracker =
-              m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
-          auto gcHandleAcc =
-              m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
-
-          auto blockErrorIdxAtomicAcc =
-              m_blockErrorIdx.get_access<access::mode::atomic>(cgh);
-          auto blockErrorAcc =
-              m_errorsPerBlock.get_access<access::mode::read_write>(cgh);
-          auto requiresGarbageCollectionAcc =
-              m_requiresGarbageCollection
-                  .get_access<access::mode::discard_write>(cgh);
-          cgh.parallel_for<class run_eval_pass>(
-              cl::sycl::range<1>(numActiveBlocks),
-              [dependencyTracker, memPoolWrite, blockErrorIdxAtomicAcc,
-               blockErrorAcc, gcHandleAcc,
-               requiresGarbageCollectionAcc](item<1> itm) {
-                auto currentBlock =
-                    dependencyTracker[0].GetBlockAtIndex(itm.get_linear_id());
-                auto derefdCurrentBlock =
-                    memPoolWrite[0].derefHandle(currentBlock);
-                auto gcRef = memPoolWrite[0].derefHandle(gcHandleAcc[0]);
-                derefdCurrentBlock->SetResources(memPoolWrite,
-                                                 dependencyTracker);
-                const auto error = derefdCurrentBlock->PerformEvalPass();
-                switch (error.GetType()) {
-                case Error::Type::Success:
-                  return;
-                case Error::Type::GCOutOfSlots:
-                case Error::Type::MemPoolAllocFailure:
-                  requiresGarbageCollectionAcc[0] = true;
-                  if (const auto reAppendError =
-                          dependencyTracker[0].AddActiveBlock(currentBlock);
-                      reAppendError.GetType() == Error::Type::Success) {
-                    return;
-                  }
-                  break;
-                case Error::Type::InvalidArgType:
-                case Error::Type::InvalidASTType:
-                case Error::Type::ArityMismatch:
-                case Error::Type::InvalidIndex:
-                case Error::Type::EvaluatorOutOfActiveBlocks:
-                case Error::Type::EvaluatorOutOfDeletionBlocks:
-                  break;
-                }
-                cl::sycl::atomic<Index_t> blockErrorIdxAtomic(
-                    blockErrorIdxAtomicAcc[0]);
-                blockErrorAcc[blockErrorIdxAtomic.fetch_add(1)] = error;
-              });
-        });
-      } else {
+      if (numActiveBlocks == 0) {
         break;
       }
+      // main eval pass
+      m_workQueue.submit([&](handler &cgh) {
+        auto memPoolWrite =
+            m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+        auto dependencyTracker =
+            m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
+        auto gcHandleAcc =
+            m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
+
+        auto blockErrorIdxAtomicAcc =
+            m_blockErrorIdx.get_access<access::mode::atomic>(cgh);
+        auto blockErrorAcc =
+            m_errorsPerBlock.get_access<access::mode::read_write>(cgh);
+        auto requiresGarbageCollectionAcc =
+            m_requiresGarbageCollection.get_access<access::mode::discard_write>(
+                cgh);
+        cgh.parallel_for<class run_eval_pass>(
+            cl::sycl::range<1>(numActiveBlocks),
+            [dependencyTracker, memPoolWrite, blockErrorIdxAtomicAcc,
+             blockErrorAcc, gcHandleAcc,
+             requiresGarbageCollectionAcc](item<1> itm) {
+              auto currentBlock =
+                  dependencyTracker[0].GetBlockAtIndex(itm.get_linear_id());
+              auto derefdCurrentBlock =
+                  memPoolWrite[0].derefHandle(currentBlock);
+              auto gcRef = memPoolWrite[0].derefHandle(gcHandleAcc[0]);
+              derefdCurrentBlock->SetResources(memPoolWrite, dependencyTracker);
+              const auto error = derefdCurrentBlock->PerformEvalPass();
+              switch (error.GetType()) {
+              case Error::Type::Success:
+                return;
+              case Error::Type::GCOutOfSlots:
+              case Error::Type::MemPoolAllocFailure:
+                requiresGarbageCollectionAcc[0] = true;
+                if (const auto reAppendError =
+                        dependencyTracker[0].AddActiveBlock(currentBlock);
+                    reAppendError.GetType() == Error::Type::Success) {
+                  return;
+                }
+                break;
+              case Error::Type::InvalidArgType:
+              case Error::Type::InvalidASTType:
+              case Error::Type::ArityMismatch:
+              case Error::Type::InvalidIndex:
+              case Error::Type::EvaluatorOutOfActiveBlocks:
+              case Error::Type::EvaluatorOutOfDeletionBlocks:
+                break;
+              }
+              cl::sycl::atomic<Index_t> blockErrorIdxAtomic(
+                  blockErrorIdxAtomicAcc[0]);
+              blockErrorAcc[blockErrorIdxAtomic.fetch_add(1)] = error;
+            });
+      });
     }
   } catch (cl::sycl::exception e) {
     std::cerr << "Sycl exception: " << e.what() << std::endl;

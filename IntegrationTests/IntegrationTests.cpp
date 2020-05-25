@@ -70,34 +70,45 @@ RunProgram(const std::string &path,
   compiler.DebugPrintAST(compiledResult);
   std::cout << std::endl;
 
-  Index_t maxBlocksForExec;
-  const auto programResult =
+  const auto checkEvalProgram = [&](const auto program) {
+    Index_t maxBlocksForExec;
+    const auto allocCountPreEval = GetAllocCount(memPoolBuff);
+    const auto programResult =
       evaluator->EvaluateProgram(compiledResult, maxBlocksForExec);
-  std::cout << "Max concurrent blocks during exec: " << maxBlocksForExec
-            << std::endl;
+    const auto allocCountPostEval = GetAllocCount(memPoolBuff);
+    BOOST_CHECK_EQUAL(allocCountPreEval, allocCountPostEval);
+    std::cout << "Max concurrent blocks during exec: " << maxBlocksForExec
+              << std::endl;
+    return programResult;
+  };
+
+  const auto programResult = checkEvalProgram(compiledResult);
 
   BlockPrep blockPrep(64, 32, 32, memPoolBuff);
   compiledResult = blockPrep.PrepareForBlockGeneration(compiledResult);
   std::cout << "Program after prep for block generation: " << std::endl;
   compiler.DebugPrintAST(compiledResult);
   std::cout << std::endl;
-  maxBlocksForExec = 0;
-  const auto compiledProgramResult =
-      evaluator->EvaluateProgram(compiledResult, maxBlocksForExec);
-  std::cout << "Max concurrent blocks during exec: " << maxBlocksForExec
-            << std::endl;
+  const auto compiledProgramResult = checkEvalProgram(compiledResult);
 
   compiler.DeallocateAST(compiledResult);
 
   const auto finalAllocCount = GetAllocCount(memPoolBuff);
-  BOOST_REQUIRE_EQUAL(initialAllocCount, finalAllocCount);
-  BOOST_REQUIRE_EQUAL(expectedVal, programResult.m_data.floatVal);
-  BOOST_REQUIRE_EQUAL(expectedVal, compiledProgramResult.m_data.floatVal);
+  BOOST_CHECK_EQUAL(initialAllocCount, finalAllocCount);
+  BOOST_CHECK_EQUAL(expectedVal, programResult.m_data.floatVal);
+  BOOST_CHECK_EQUAL(expectedVal, compiledProgramResult.m_data.floatVal);
   return programResult;
 }
 } // namespace
 
 BOOST_FIXTURE_TEST_SUITE(IntegrationTests, Fixture)
+
+// TODO memory leak in this one, fix it before enabling
+/*
+BOOST_AUTO_TEST_CASE(NumericIntegration) {
+  RunProgram("../TestPrograms/NumericIntegration.fgpu", evaluator, *memPoolBuff, -1.18747);
+}
+*/
 
 BOOST_AUTO_TEST_CASE(MultiLet) {
   const auto programResult =
