@@ -227,12 +227,20 @@ Compiler::Compile(std::shared_ptr<const SExpr> sexpr,
 
 void Compiler::DebugPrintAST(ASTNodeHandle rootOfASTHandle) {
   auto memPoolAcc = m_memPool.get_access<cl::sycl::access::mode::read_write>();
-  DebugPrintAST(rootOfASTHandle, memPoolAcc);
+  DebugPrintAST(rootOfASTHandle, memPoolAcc, 0);
 }
 
 void Compiler::DebugPrintAST(ASTNodeHandle rootOfASTHandle,
-                             PortableMemPool::HostAccessor_t memPoolAcc) {
+                             PortableMemPool::HostAccessor_t memPoolAcc,
+                             const std::size_t indent) {
   auto rootOfAST = memPoolAcc[0].derefHandle(rootOfASTHandle);
+
+  const auto startNewLine = [&] {
+    std::cout << std::endl;
+    for (std::size_t i = 0; i < indent; ++i) {
+      std::cout << " ";
+    }
+  };
 
   switch (rootOfAST->m_type) {
   case ASTNode::Type::Bind:
@@ -246,94 +254,102 @@ void Compiler::DebugPrintAST(ASTNodeHandle rootOfASTHandle,
     std::cout << "(";
     auto bindingsData = memPoolAcc[0].derefHandle(bindNode->m_bindings);
     for (Index_t i = 0; i < bindNode->m_bindings.GetCount(); ++i) {
-      DebugPrintAST(bindingsData[i], memPoolAcc);
-      std::cout << " ";
+      startNewLine();
+      DebugPrintAST(bindingsData[i], memPoolAcc, indent + 1);
     }
     std::cout << ")";
-    std::cout << std::endl;
-    DebugPrintAST(bindNode->m_childExpr, memPoolAcc);
+    startNewLine();
+    DebugPrintAST(bindNode->m_childExpr, memPoolAcc, indent + 2);
     std::cout << ")";
     break;
   }
   case ASTNode::Type::If: {
     std::cout << "(if ";
     auto ifNode = static_cast<IfNode *>(rootOfAST);
-    DebugPrintAST(ifNode->m_pred, memPoolAcc);
-    std::cout << std::endl;
-    DebugPrintAST(ifNode->m_then, memPoolAcc);
-    std::cout << std::endl;
-    DebugPrintAST(ifNode->m_else, memPoolAcc);
+    DebugPrintAST(ifNode->m_pred, memPoolAcc, indent + 1);
+    startNewLine();
+    DebugPrintAST(ifNode->m_then, memPoolAcc, indent + 2);
+    startNewLine();
+    DebugPrintAST(ifNode->m_else, memPoolAcc, indent + 2);
     std::cout << ")";
     break;
   }
   case ASTNode::Type::Add: {
     std::cout << "(+ ";
     auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
-    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc);
-    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc);
+    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc, indent + 1);
+    std::cout << " ";
+    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc, indent + 1);
     std::cout << ")";
     break;
   }
   case ASTNode::Type::Sub: {
     std::cout << "(- ";
     auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
-    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc);
-    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc);
+    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc, indent + 1);
+    std::cout << " ";
+    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc, indent + 1);
     std::cout << ")";
     break;
   }
   case ASTNode::Type::Mul: {
     std::cout << "(* ";
     auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
-    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc);
-    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc);
+    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc, indent + 1);
+    std::cout << " ";
+    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc, indent + 1);
     std::cout << ")";
     break;
   }
   case ASTNode::Type::Div: {
     std::cout << "(/ ";
     auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
-    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc);
-    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc);
+    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc, indent + 1);
+    std::cout << " ";
+    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc, indent + 1);
     std::cout << ")";
     break;
   }
   case ASTNode::Type::Equal: {
     std::cout << "(= ";
     auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
-    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc);
-    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc);
+    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc, indent + 1);
+    std::cout << " ";
+    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc, indent + 1);
     std::cout << ")";
     break;
   }
   case ASTNode::Type::GreaterThan: {
     std::cout << "(> ";
     auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
-    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc);
-    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc);
+    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc, indent + 1);
+    std::cout << " ";
+    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc, indent + 1);
     std::cout << ")";
     break;
   }
   case ASTNode::Type::Remainder: {
     std::cout << "(remainder ";
     auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
-    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc);
-    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc);
+    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc, indent + 1);
+    std::cout << " ";
+    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc, indent + 1);
     std::cout << ")";
     break;
   }
   case ASTNode::Type::Expt: {
     std::cout << "(expt ";
     auto binaryOpNode = static_cast<BinaryOpNode *>(rootOfAST);
-    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc);
-    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc);
+    DebugPrintAST(binaryOpNode->m_arg0, memPoolAcc, indent + 1);
+    std::cout << " ";
+    DebugPrintAST(binaryOpNode->m_arg1, memPoolAcc, indent + 1);
     std::cout << ")";
     break;
   }
   case ASTNode::Type::Floor: {
     std::cout << "(floor ";
     auto unaryOpNode = static_cast<UnaryOpNode *>(rootOfAST);
-    DebugPrintAST(unaryOpNode->m_arg0, memPoolAcc);
+    DebugPrintAST(unaryOpNode->m_arg0, memPoolAcc, indent + 1);
     std::cout << ")";
     break;
   }
@@ -350,19 +366,19 @@ void Compiler::DebugPrintAST(ASTNodeHandle rootOfASTHandle,
   case ASTNode::Type::Lambda: {
     auto lambdaNode = static_cast<LambdaNode *>(rootOfAST);
     std::cout << "(lambda (argCount: " << lambdaNode->m_argCount << ")";
-    std::cout << std::endl;
-    DebugPrintAST(lambdaNode->m_childExpr, memPoolAcc);
+    startNewLine();
+    DebugPrintAST(lambdaNode->m_childExpr, memPoolAcc, indent + 1);
     std::cout << ")";
     break;
   }
   case ASTNode::Type::Call: {
     auto callExpr = static_cast<CallNode *>(rootOfAST);
     std::cout << "(call ";
-    DebugPrintAST(callExpr->m_target, memPoolAcc);
+    DebugPrintAST(callExpr->m_target, memPoolAcc, indent + 1);
     std::cout << " ";
     auto argsData = memPoolAcc[0].derefHandle(callExpr->m_args);
     for (Index_t i = 0; i < callExpr->m_args.GetCount(); ++i) {
-      DebugPrintAST(argsData[i], memPoolAcc);
+      DebugPrintAST(argsData[i], memPoolAcc, indent + 1);
       std::cout << " ";
     }
     std::cout << ")";
