@@ -138,7 +138,8 @@ public:
 
 private:
   static void DebugPrintAST(ASTNodeHandle rootOfAST,
-                            PortableMemPool::HostAccessor_t memPoolAcc);
+                            PortableMemPool::HostAccessor_t memPoolAcc,
+                            std::size_t indent);
   static void DeallocateAST(const ASTNodeHandle &handle,
                             PortableMemPool::HostAccessor_t memPoolAcc);
 
