@@ -144,6 +144,10 @@ BOOST_AUTO_TEST_CASE(GraphColoring) {
       RunProgram("../TestPrograms/GraphColoring.fgpu", evaluator, *memPoolBuff, 8);
 }
 
+BOOST_AUTO_TEST_CASE(ComplexBindings) {
+  const auto programResult = RunProgram("../TestPrograms/ComplexBindings.fgpu", evaluator, *memPoolBuff, 13);
+}
+
 BOOST_AUTO_TEST_CASE(CleanUpFixture) {
   evaluator = nullptr;
   memPoolBuff = nullptr;

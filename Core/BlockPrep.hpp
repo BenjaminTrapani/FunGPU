@@ -29,9 +29,10 @@ private:
       PortableMemPool::HostAccessor_t memPoolAcc,
       std::size_t minRefForIncrement,
       const std::set<Compiler::ASTNodeHandle> &identsToExclude);
-  static void CollectAllIdentifiers(Compiler::ASTNodeHandle root,
-                                    PortableMemPool::HostAccessor_t memPoolAcc,
-                                    std::set<Compiler::ASTNodeHandle> &result);
+  static void CollectAll(Compiler::ASTNodeHandle& root,
+                        PortableMemPool::HostAccessor_t memPoolAcc,
+                        const std::set<Compiler::ASTNode::Type>& types,
+                        std::set<Compiler::ASTNodeHandle*> &result);
   /*
     Output of this whole process:
     Array of RuntimeBlock instances for each lambda, initial call instruction.
