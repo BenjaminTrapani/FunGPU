@@ -382,10 +382,28 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
       std::set<Compiler::ASTNodeHandle *> allNestedBindings;
       auto *bindingsData = m_memPoolAcc[0].derefHandle(node.m_bindings);
       for (size_t i = 0; i < node.m_bindings.GetCount(); ++i) {
-        CollectAll(
-            bindingsData[i], m_memPoolAcc,
-            {Compiler::ASTNode::Type::Bind, Compiler::ASTNode::Type::BindRec},
-            allNestedBindings);
+        std::set<Compiler::ASTNodeHandle *> curBindings;
+        CollectAll(bindingsData[i], m_memPoolAcc,
+                   {Compiler::ASTNode::Type::Bind,
+                    Compiler::ASTNode::Type::BindRec,
+                    Compiler::ASTNode::Type::Lambda},
+                   curBindings);
+        // Collect lambdas to prevent collection of binds inside lambda, cannot
+        // move these.
+        for (auto elem : curBindings) {
+          const auto type = m_memPoolAcc[0].derefHandle(*elem)->m_type;
+          switch (type) {
+          case Compiler::ASTNode::Type::Bind:
+          case Compiler::ASTNode::Type::BindRec:
+            allNestedBindings.emplace(elem);
+            break;
+          case Compiler::ASTNode::Type::Lambda:
+            *elem = RewriteAsPrimOps(*elem, m_memPoolAcc);
+            break;
+          default:
+            throw std::invalid_argument("Unexpected node type");
+          }
+        }
       }
 
       if (!allNestedBindings.empty()) {
@@ -442,14 +460,17 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
     }
 
     Compiler::ASTNodeHandle operator()(Compiler::IfNode &ifNode) {
-      // TODO fix this, need to do some custom logic to pull primitives only on
-      // pred up.
-      ifNode.m_pred = pullPrimOpsUnderUp(ifNode.m_pred);
-      // Need to leave primitives in branches where they are (at least under the
-      // if)
-      ifNode.m_then = RewriteAsPrimOps(ifNode.m_then, m_memPoolAcc);
-      ifNode.m_else = RewriteAsPrimOps(ifNode.m_else, m_memPoolAcc);
-      return m_root;
+      std::vector<Compiler::ASTNodeHandle *> primOpsUnderPred;
+      GetPrimOps(ifNode.m_pred, m_memPoolAcc, primOpsUnderPred);
+      // Branch is already a prim op. Rewrite both sub branches.
+      if (primOpsUnderPred.size() == 1 &&
+          primOpsUnderPred[0] == &ifNode.m_pred) {
+        ifNode.m_then = RewriteAsPrimOps(ifNode.m_then, m_memPoolAcc);
+        ifNode.m_else = RewriteAsPrimOps(ifNode.m_else, m_memPoolAcc);
+        return m_root;
+      }
+
+      return PullPrimOpsAbove(m_root, primOpsUnderPred);
     }
 
     Compiler::ASTNodeHandle operator()(const Compiler::BinaryOpNode &) {
