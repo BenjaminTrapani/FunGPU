@@ -43,8 +43,8 @@ private:
 
    For each lambda:
    Generate globally unique integer idx for the lambda (this will be used for
-   indirect calls later) Add it to the vector of working programs along with
-   the generated ID.
+   indirect calls later) Add (lambda, lambda idx) to the vector of working
+   programs.
 
    While working program set > 0:
     For each program:
@@ -95,15 +95,21 @@ private:
    layers of instructions should be moved into the construction of the new
    synthetic lambda. Synthetic lambda should be created at the top level of the
    current closure. Add lambda to set of pending programs to generate.
+   (TODO if the function was already too big, need a heap allocation or store
+   the bound values outside of block somehow, maybe generate indirect calls to
+   lambda to compute. Generate lambda with overflow bindings, selector from [0,
+   num bindings) and return overflow binding per index as result of arg to
+   lambda.)
 
       If coloring succeeds, go back to inlining step and repeat. If no
    inlining possible break out of loop. Store coloring, since colors represent
    destination register indices per instruction.
 
       Target objects are as follows:
-      Add:
+      struct Add {
         Index_t lhs_register_idx;
         Index_t rhs_register_idx;
+      };
 
      Sub:
        Index_t lhs_register_idx;
