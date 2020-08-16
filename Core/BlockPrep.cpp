@@ -2,6 +2,7 @@
 #include "Compiler.hpp"
 #include "PortableMemPool.hpp"
 #include "Types.hpp"
+#include "Visitor.hpp"
 
 namespace FunGPU {
 BlockPrep::BlockPrep(const Index_t registersPerBlock,
@@ -122,89 +123,43 @@ void BlockPrep::IncreaseBindingRefIndices(
     const Compiler::ASTNodeHandle root, const std::size_t increment,
     PortableMemPool::HostAccessor_t memPoolAcc, std::size_t minRefForIncrement,
     const std::set<Compiler::ASTNodeHandle> &identsToExclude) {
-  struct BindingIndexIncrementer {
-    BindingIndexIncrementer(
-        const std::size_t inputIncrement,
-        PortableMemPool::HostAccessor_t inputMemPoolAcc,
-        const std::size_t minRefForIncrement,
-        const std::set<Compiler::ASTNodeHandle> &identsToExclude,
-        const Compiler::ASTNodeHandle root)
-        : m_increment(inputIncrement), m_memPoolAcc(inputMemPoolAcc),
-          m_minRefForIncrement(minRefForIncrement),
-          m_toExclude(identsToExclude), m_root(root) {}
-
-    void operator()(const Compiler::BindNode &node) {
-      const auto *bindingsData = m_memPoolAcc[0].derefHandle(node.m_bindings);
-      const auto isRec = node.m_type == Compiler::ASTNode::Type::BindRec;
-      for (size_t i = 0; i < node.m_bindings.GetCount(); ++i) {
-        IncreaseBindingRefIndices(bindingsData[i], m_increment, m_memPoolAcc,
-                                  isRec ? m_minRefForIncrement +
-                                              node.m_bindings.GetCount()
-                                        : m_minRefForIncrement,
-                                  m_toExclude);
-      }
-      IncreaseBindingRefIndices(
-          node.m_childExpr, m_increment, m_memPoolAcc,
-          m_minRefForIncrement + node.m_bindings.GetCount(), m_toExclude);
-    }
-
-    void operator()(const Compiler::CallNode &node) {
-      IncreaseBindingRefIndices(node.m_target, m_increment, m_memPoolAcc,
-                                m_minRefForIncrement, m_toExclude);
-      const auto *argsData = m_memPoolAcc[0].derefHandle(node.m_args);
-      for (size_t i = 0; i < node.m_args.GetCount(); ++i) {
-        IncreaseBindingRefIndices(argsData[i], m_increment, m_memPoolAcc,
-                                  m_minRefForIncrement, m_toExclude);
-      }
-    }
-
-    void operator()(const Compiler::IfNode &node) {
-      IncreaseBindingRefIndices(node.m_pred, m_increment, m_memPoolAcc,
-                                m_minRefForIncrement, m_toExclude);
-      IncreaseBindingRefIndices(node.m_then, m_increment, m_memPoolAcc,
-                                m_minRefForIncrement, m_toExclude);
-      IncreaseBindingRefIndices(node.m_else, m_increment, m_memPoolAcc,
-                                m_minRefForIncrement, m_toExclude);
-    }
-
-    void operator()(const Compiler::BinaryOpNode &node) {
-      IncreaseBindingRefIndices(node.m_arg0, m_increment, m_memPoolAcc,
-                                m_minRefForIncrement, m_toExclude);
-      IncreaseBindingRefIndices(node.m_arg1, m_increment, m_memPoolAcc,
-                                m_minRefForIncrement, m_toExclude);
-    }
-
-    void operator()(const Compiler::UnaryOpNode &node) {
-      IncreaseBindingRefIndices(node.m_arg0, m_increment, m_memPoolAcc,
-                                m_minRefForIncrement, m_toExclude);
-    }
-
-    void operator()(const Compiler::NumberNode &) {}
-
-    void operator()(Compiler::IdentifierNode &node) {
-      if (node.m_index >= m_minRefForIncrement &&
-          m_toExclude.find(m_root) == m_toExclude.end()) {
-        node.m_index += m_increment;
-      }
-    }
-
-    void operator()(Compiler::LambdaNode &node) {
-      IncreaseBindingRefIndices(node.m_childExpr, m_increment, m_memPoolAcc,
-                                m_minRefForIncrement + node.m_argCount,
-                                m_toExclude);
-    }
-
-    const std::size_t m_increment;
-    PortableMemPool::HostAccessor_t m_memPoolAcc;
-    const std::size_t m_minRefForIncrement;
-    const std::set<Compiler::ASTNodeHandle> &m_toExclude;
-    const Compiler::ASTNodeHandle m_root;
-  } incrementer(increment, memPoolAcc, minRefForIncrement, identsToExclude,
-                root);
-
-  visit(*memPoolAcc[0].derefHandle(root), incrementer, [](const auto &node) {
-    throw std::invalid_argument("Unexpected node");
-  });
+  visit(
+      *memPoolAcc[0].derefHandle(root),
+      Visitor{
+          [&](const Compiler::BindNode &node) {
+            const auto *bindingsData =
+                memPoolAcc[0].derefHandle(node.m_bindings);
+            const auto isRec = node.m_type == Compiler::ASTNode::Type::BindRec;
+            for (size_t i = 0; i < node.m_bindings.GetCount(); ++i) {
+              IncreaseBindingRefIndices(bindingsData[i], increment, memPoolAcc,
+                                        isRec ? minRefForIncrement +
+                                                    node.m_bindings.GetCount()
+                                              : minRefForIncrement,
+                                        identsToExclude);
+            }
+            IncreaseBindingRefIndices(node.m_childExpr, increment, memPoolAcc,
+                                      minRefForIncrement +
+                                          node.m_bindings.GetCount(),
+                                      identsToExclude);
+          },
+          [&](Compiler::IdentifierNode &node) {
+            if (node.m_index >= minRefForIncrement &&
+                identsToExclude.find(root) == identsToExclude.end()) {
+              node.m_index += increment;
+            }
+          },
+          [&](const Compiler::LambdaNode &node) {
+            IncreaseBindingRefIndices(node.m_childExpr, increment, memPoolAcc,
+                                      minRefForIncrement + node.m_argCount,
+                                      identsToExclude);
+          },
+          [&](const auto &standard_node) {
+            standard_node.for_each_sub_expr(memPoolAcc, [&](const auto handle) {
+              IncreaseBindingRefIndices(handle, increment, memPoolAcc,
+                                        minRefForIncrement, identsToExclude);
+            });
+          }},
+      [](const auto &node) { throw std::invalid_argument("Unexpected node"); });
 }
 
 Compiler::ASTNodeHandle
@@ -217,94 +172,20 @@ void BlockPrep::CollectAll(Compiler::ASTNodeHandle &root,
                            PortableMemPool::HostAccessor_t memPoolAcc,
                            const std::set<Compiler::ASTNode::Type> &types,
                            std::set<Compiler::ASTNodeHandle *> &result) {
-  struct CollectAllHandler {
-    CollectAllHandler(Compiler::ASTNodeHandle &root,
-                      PortableMemPool::HostAccessor_t memPoolAcc,
-                      const std::set<Compiler::ASTNode::Type> &types,
-                      std::set<Compiler::ASTNodeHandle *> &result)
-        : m_root(root), m_memPoolAcc(memPoolAcc), m_types(types),
-          m_result(result) {}
-
-    void operator()(Compiler::BindNode &node) {
-      if (m_types.find(node.m_type) != m_types.end()) {
-        m_result.emplace(&m_root);
-        return;
-      }
-      auto *allBindings = m_memPoolAcc[0].derefHandle(node.m_bindings);
-      for (size_t i = 0; i < node.m_bindings.GetCount(); ++i) {
-        CollectAll(allBindings[i], m_memPoolAcc, m_types, m_result);
-      }
-      CollectAll(node.m_childExpr, m_memPoolAcc, m_types, m_result);
-    }
-
-    void operator()(Compiler::CallNode &node) {
-      if (m_types.find(node.m_type) != m_types.end()) {
-        m_result.emplace(&m_root);
-        return;
-      }
-      auto *allArgs = m_memPoolAcc[0].derefHandle(node.m_args);
-      for (size_t i = 0; i < node.m_args.GetCount(); ++i) {
-        CollectAll(allArgs[i], m_memPoolAcc, m_types, m_result);
-      }
-      CollectAll(node.m_target, m_memPoolAcc, m_types, m_result);
-    }
-
-    void operator()(Compiler::IfNode &node) {
-      if (m_types.find(node.m_type) != m_types.end()) {
-        m_result.emplace(&m_root);
-        return;
-      }
-      CollectAll(node.m_pred, m_memPoolAcc, m_types, m_result);
-      CollectAll(node.m_then, m_memPoolAcc, m_types, m_result);
-      CollectAll(node.m_else, m_memPoolAcc, m_types, m_result);
-    }
-
-    void operator()(Compiler::BinaryOpNode &node) {
-      if (m_types.find(node.m_type) != m_types.end()) {
-        m_result.emplace(&m_root);
-        return;
-      }
-      CollectAll(node.m_arg0, m_memPoolAcc, m_types, m_result);
-      CollectAll(node.m_arg1, m_memPoolAcc, m_types, m_result);
-    }
-
-    void operator()(Compiler::UnaryOpNode &node) {
-      if (m_types.find(node.m_type) != m_types.end()) {
-        m_result.emplace(&m_root);
-        return;
-      }
-      CollectAll(node.m_arg0, m_memPoolAcc, m_types, m_result);
-    }
-
-    void operator()(Compiler::NumberNode &node) {
-      if (m_types.find(node.m_type) != m_types.end()) {
-        m_result.emplace(&m_root);
-      }
-    }
-
-    void operator()(Compiler::IdentifierNode &node) {
-      if (m_types.find(node.m_type) != m_types.end()) {
-        m_result.emplace(&m_root);
-      }
-    }
-
-    void operator()(Compiler::LambdaNode &node) {
-      if (m_types.find(node.m_type) != m_types.end()) {
-        m_result.emplace(&m_root);
-        return;
-      }
-      CollectAll(node.m_childExpr, m_memPoolAcc, m_types, m_result);
-    }
-
-    Compiler::ASTNodeHandle &m_root;
-    PortableMemPool::HostAccessor_t m_memPoolAcc;
-    const std::set<Compiler::ASTNode::Type> &m_types;
-    std::set<Compiler::ASTNodeHandle *> &m_result;
-  } collectAllHandler(root, memPoolAcc, types, result);
-  visit(*memPoolAcc[0].derefHandle(root), collectAllHandler,
-        [](const auto &unexpected) {
-          throw std::invalid_argument("Unexpected node");
+  visit(
+      *memPoolAcc[0].derefHandle(root),
+      [&](auto &node) {
+        if (types.find(node.m_type) != types.end()) {
+          result.emplace(&root);
+          return;
+        }
+        node.for_each_sub_expr(memPoolAcc, [&](auto &child_expr) {
+          BlockPrep::CollectAll(child_expr, memPoolAcc, types, result);
         });
+      },
+      [](const auto &unexpected) {
+        throw std::invalid_argument("Unexpected node");
+      });
 }
 
 Compiler::ASTNodeHandle

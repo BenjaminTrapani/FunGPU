@@ -43,12 +43,32 @@ public:
 
   using ASTNodeHandle = PortableMemPool::Handle<ASTNode>;
 
+#define DEF_MUTABLE_FOR_EACH_SUB_EXPR(Type)                                    \
+  template <typename CB>                                                       \
+  void for_each_sub_expr(PortableMemPool::HostAccessor_t &host_acc, CB &&cb)   \
+      const {                                                                  \
+    const_cast<Type *>(this)->for_each_sub_expr(                               \
+        host_acc, [&](auto &&elem) { cb(std::as_const(elem)); });              \
+  }
+
   class BindNode : public ASTNode {
   public:
     BindNode(const Index_t numBindings, const bool isRec,
              PortableMemPool::HostAccessor_t pool)
         : ASTNode(isRec ? Type::BindRec : Type::Bind, numBindings),
           m_bindings(pool[0].template AllocArray<ASTNodeHandle>(numBindings)) {}
+
+    template <typename CB>
+    void for_each_sub_expr(PortableMemPool::HostAccessor_t &host_acc, CB &&cb) {
+      auto *child_expr_data = host_acc[0].derefHandle(m_bindings);
+      for (Index_t i = 0; i < m_bindings.GetCount(); ++i) {
+        cb(child_expr_data[i]);
+      }
+      cb(m_childExpr);
+    }
+
+    DEF_MUTABLE_FOR_EACH_SUB_EXPR(BindNode)
+
     PortableMemPool::ArrayHandle<ASTNodeHandle> m_bindings;
     ASTNodeHandle m_childExpr;
   };
@@ -58,6 +78,13 @@ public:
     UnaryOpNode(ASTNode::Type type, ASTNodeHandle arg0)
         : ASTNode(type, 1), m_arg0(arg0) {}
 
+    template <typename CB>
+    void for_each_sub_expr(PortableMemPool::HostAccessor_t &, CB &&cb) {
+      cb(m_arg0);
+    }
+
+    DEF_MUTABLE_FOR_EACH_SUB_EXPR(UnaryOpNode)
+
     ASTNodeHandle m_arg0;
   };
 
@@ -65,6 +92,14 @@ public:
   public:
     BinaryOpNode(ASTNode::Type type, ASTNodeHandle arg0, ASTNodeHandle arg1)
         : ASTNode(type, 2), m_arg0(arg0), m_arg1(arg1) {}
+
+    template <typename CB>
+    void for_each_sub_expr(PortableMemPool::HostAccessor_t &, CB &&cb) {
+      cb(m_arg0);
+      cb(m_arg1);
+    }
+
+    DEF_MUTABLE_FOR_EACH_SUB_EXPR(BinaryOpNode)
 
     ASTNodeHandle m_arg0;
     ASTNodeHandle m_arg1;
@@ -74,6 +109,11 @@ public:
   public:
     NumberNode(const Float_t value)
         : ASTNode(ASTNode::Type::Number, 0), m_value(value) {}
+
+    template <typename CB>
+    void for_each_sub_expr(PortableMemPool::HostAccessor_t, CB &&) {}
+    DEF_MUTABLE_FOR_EACH_SUB_EXPR(NumberNode)
+
     Float_t m_value;
   };
 
@@ -81,6 +121,11 @@ public:
   public:
     IdentifierNode(const Index_t index)
         : ASTNode(ASTNode::Type::Identifier, 0), m_index(index) {}
+
+    template <typename CB>
+    void for_each_sub_expr(PortableMemPool::HostAccessor_t, CB &&) {}
+    DEF_MUTABLE_FOR_EACH_SUB_EXPR(IdentifierNode)
+
     Index_t m_index;
   };
 
@@ -89,6 +134,16 @@ public:
     IfNode(ASTNodeHandle pred, ASTNodeHandle then, ASTNodeHandle elseExpr)
         : ASTNode(ASTNode::Type::If, 1), m_pred(pred), m_then(then),
           m_else(elseExpr) {}
+
+    template <typename CB>
+    void for_each_sub_expr(PortableMemPool::HostAccessor_t &, CB &&cb) {
+      cb(m_pred);
+      cb(m_then);
+      cb(m_else);
+    }
+
+    DEF_MUTABLE_FOR_EACH_SUB_EXPR(IfNode)
+
     ASTNodeHandle m_pred;
     ASTNodeHandle m_then;
     ASTNodeHandle m_else;
@@ -99,6 +154,14 @@ public:
     LambdaNode(const Index_t argCount, ASTNodeHandle childExpr)
         : ASTNode(ASTNode::Type::Lambda, 0), m_argCount(argCount),
           m_childExpr(childExpr) {}
+
+    template <typename CB>
+    void for_each_sub_expr(PortableMemPool::HostAccessor_t &, CB &&cb) {
+      cb(m_childExpr);
+    }
+
+    DEF_MUTABLE_FOR_EACH_SUB_EXPR(LambdaNode)
+
     Index_t m_argCount;
     ASTNodeHandle m_childExpr;
   };
@@ -109,9 +172,23 @@ public:
              PortableMemPool::HostAccessor_t pool)
         : ASTNode(ASTNode::Type::Call, argCount + 1), m_target(target),
           m_args(pool[0].template AllocArray<ASTNodeHandle>(argCount)) {}
+
+    template <typename CB>
+    void for_each_sub_expr(PortableMemPool::HostAccessor_t &host_acc, CB &&cb) {
+      cb(m_target);
+      auto *args_data = host_acc[0].derefHandle(m_args);
+      for (Index_t i = 0; i < m_args.GetCount(); ++i) {
+        cb(args_data[i]);
+      }
+    }
+
+    DEF_MUTABLE_FOR_EACH_SUB_EXPR(CallNode)
+
     ASTNodeHandle m_target;
     PortableMemPool::ArrayHandle<ASTNodeHandle> m_args;
   };
+
+#undef DEF_MUTABLE_FOR_EACH_SUB_EXPR
 
   class CompileException {
   public:
@@ -156,16 +233,16 @@ private:
 };
 
 template <typename CB, typename UnexpectedCB>
-decltype(auto) visit(const Compiler::ASTNode &node, CB &&cb,
+decltype(auto) visit(Compiler::ASTNode &node, CB &&cb,
                      UnexpectedCB &&unexpectedCB) {
   switch (node.m_type) {
   case Compiler::ASTNode::Type::Bind:
   case Compiler::ASTNode::Type::BindRec:
-    return cb(static_cast<const Compiler::BindNode &>(node));
+    return cb(static_cast<Compiler::BindNode &>(node));
   case Compiler::ASTNode::Type::Call:
-    return cb(static_cast<const Compiler::CallNode &>(node));
+    return cb(static_cast<Compiler::CallNode &>(node));
   case Compiler::ASTNode::Type::If:
-    return cb(static_cast<const Compiler::IfNode &>(node));
+    return cb(static_cast<Compiler::IfNode &>(node));
   case Compiler::ASTNode::Type::Add:
   case Compiler::ASTNode::Type::Sub:
   case Compiler::ASTNode::Type::Mul:
@@ -174,30 +251,25 @@ decltype(auto) visit(const Compiler::ASTNode &node, CB &&cb,
   case Compiler::ASTNode::Type::GreaterThan:
   case Compiler::ASTNode::Type::Remainder:
   case Compiler::ASTNode::Type::Expt:
-    return cb(static_cast<const Compiler::BinaryOpNode &>(node));
+    return cb(static_cast<Compiler::BinaryOpNode &>(node));
   case Compiler::ASTNode::Type::Floor:
-    return cb(static_cast<const Compiler::UnaryOpNode &>(node));
+    return cb(static_cast<Compiler::UnaryOpNode &>(node));
   case Compiler::ASTNode::Type::Number:
-    return cb(static_cast<const Compiler::NumberNode &>(node));
+    return cb(static_cast<Compiler::NumberNode &>(node));
   case Compiler::ASTNode::Type::Identifier:
-    return cb(static_cast<const Compiler::IdentifierNode &>(node));
+    return cb(static_cast<Compiler::IdentifierNode &>(node));
   case Compiler::ASTNode::Type::Lambda:
-    return cb(static_cast<const Compiler::LambdaNode &>(node));
+    return cb(static_cast<Compiler::LambdaNode &>(node));
   }
   return unexpectedCB(node);
 }
 
 template <typename CB, typename UnexpectedCB>
-decltype(auto) visit(Compiler::ASTNode &node, CB &&cb,
+decltype(auto) visit(const Compiler::ASTNode &node, CB &&cb,
                      UnexpectedCB &&unexpectedCB) {
   return visit(
-      static_cast<const Compiler::ASTNode &>(node),
-      [&](const auto &derived) {
-        return cb(const_cast<std::decay_t<decltype(derived)> &>(derived));
-      },
-      [&](const auto &derived) {
-        return unexpectedCB(
-            const_cast<std::decay_t<decltype(derived)> &>(derived));
-      });
+      const_cast<Compiler::ASTNode &>(node),
+      [&](auto &derived) { return cb(std::as_const(derived)); },
+      [&](auto &derived) { return unexpectedCB(std::as_const(derived)); });
 }
 } // namespace FunGPU
