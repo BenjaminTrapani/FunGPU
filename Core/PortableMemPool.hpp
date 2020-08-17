@@ -59,7 +59,7 @@ public:
     friend class PortableMemPool;
 
   public:
-    ArrayHandle() : m_count(std::numeric_limits<Index_t>::max()) {}
+    ArrayHandle() : m_count(0) {}
     ArrayHandle(const Index_t distFromMemPoolBase, const Index_t count)
         : m_handle(distFromMemPoolBase), m_count(count) {}
 
@@ -113,6 +113,9 @@ public:
   template <class T>
   ArrayHandle<T> AllocArray(const Index_t arraySize,
                             const T &initialValue = T()) {
+    if (arraySize == 0) {
+      return ArrayHandle<T>();
+    }
     return AllocArrayImpl<T>(arraySize, initialValue, m_smallBin, m_mediumBin,
                              m_largeBin, m_extraLargeBin);
   }

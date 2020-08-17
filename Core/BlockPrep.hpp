@@ -33,6 +33,9 @@ private:
                          PortableMemPool::HostAccessor_t memPoolAcc,
                          const std::set<Compiler::ASTNode::Type> &types,
                          std::set<Compiler::ASTNodeHandle *> &result);
+  static Compiler::ASTNodeHandle
+  wrap_in_no_arg_lambda(Compiler::ASTNodeHandle root,
+                        PortableMemPool::HostAccessor_t &);
   /*
     Output of this whole process:
     Array of RuntimeBlock instances for each lambda, initial call instruction.

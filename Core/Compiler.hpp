@@ -60,9 +60,11 @@ public:
 
     template <typename CB>
     void for_each_sub_expr(PortableMemPool::HostAccessor_t &host_acc, CB &&cb) {
-      auto *child_expr_data = host_acc[0].derefHandle(m_bindings);
-      for (Index_t i = 0; i < m_bindings.GetCount(); ++i) {
-        cb(child_expr_data[i]);
+      if (m_bindings != PortableMemPool::ArrayHandle<ASTNodeHandle>()) {
+        auto *child_expr_data = host_acc[0].derefHandle(m_bindings);
+        for (Index_t i = 0; i < m_bindings.GetCount(); ++i) {
+          cb(child_expr_data[i]);
+        }
       }
       cb(m_childExpr);
     }
@@ -176,6 +178,9 @@ public:
     template <typename CB>
     void for_each_sub_expr(PortableMemPool::HostAccessor_t &host_acc, CB &&cb) {
       cb(m_target);
+      if (m_args == PortableMemPool::ArrayHandle<ASTNodeHandle>()) {
+        return;
+      }
       auto *args_data = host_acc[0].derefHandle(m_args);
       for (Index_t i = 0; i < m_args.GetCount(); ++i) {
         cb(args_data[i]);

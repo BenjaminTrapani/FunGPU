@@ -3,6 +3,7 @@
 #include "PortableMemPool.hpp"
 #include "Types.hpp"
 #include "Visitor.hpp"
+#include <map>
 
 namespace FunGPU {
 BlockPrep::BlockPrep(const Index_t registersPerBlock,
@@ -26,7 +27,6 @@ void BlockPrep::GetPrimOps(Compiler::ASTNodeHandle &root,
       const auto &derefdNode = *m_memPoolAcc[0].derefHandle(handle);
       const auto type = derefdNode.m_type;
       switch (type) {
-      case Compiler::ASTNode::Type::Number:
       case Compiler::ASTNode::Type::Identifier:
         return true;
       default:
@@ -93,15 +93,16 @@ void BlockPrep::GetPrimOps(Compiler::ASTNodeHandle &root,
     }
 
     void operator()(Compiler::IfNode &ifNode) {
-      if (isLeafNode(ifNode.m_pred) && isLeafNode(ifNode.m_then) &&
-          isLeafNode(ifNode.m_else)) {
+      if (isLeafNode(ifNode.m_pred)) {
         m_out.emplace_back(&m_root);
       } else {
         GetPrimOps(ifNode.m_pred, m_memPoolAcc, m_out);
       }
     }
 
-    void operator()(const Compiler::NumberNode &) {}
+    void operator()(const Compiler::NumberNode &) {
+      m_out.emplace_back(&m_root);
+    }
 
     void operator()(const Compiler::IdentifierNode &) {}
 
@@ -232,7 +233,7 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
       }
       derefdBindNodeForPrimOps.m_childExpr =
           RewriteAsPrimOps(root, m_memPoolAcc);
-      return bindNodeForPrimOps;
+      return RewriteAsPrimOps(bindNodeForPrimOps, m_memPoolAcc);
     }
 
     Compiler::ASTNodeHandle pullPrimOpsUnderUp(Compiler::ASTNodeHandle &root) {
@@ -342,10 +343,9 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
 
     Compiler::ASTNodeHandle operator()(Compiler::IfNode &ifNode) {
       std::vector<Compiler::ASTNodeHandle *> primOpsUnderPred;
-      GetPrimOps(ifNode.m_pred, m_memPoolAcc, primOpsUnderPred);
+      GetPrimOps(m_root, m_memPoolAcc, primOpsUnderPred);
       // Branch is already a prim op. Rewrite both sub branches.
-      if (primOpsUnderPred.size() == 1 &&
-          primOpsUnderPred[0] == &ifNode.m_pred) {
+      if (primOpsUnderPred.size() == 1 && primOpsUnderPred[0] == &m_root) {
         ifNode.m_then = RewriteAsPrimOps(ifNode.m_then, m_memPoolAcc);
         ifNode.m_else = RewriteAsPrimOps(ifNode.m_else, m_memPoolAcc);
         return m_root;
@@ -363,7 +363,15 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
     }
 
     Compiler::ASTNodeHandle operator()(const Compiler::NumberNode &) {
-      return m_root;
+      const auto bind_node =
+          m_memPoolAcc[0].Alloc<Compiler::BindNode>(1, false, m_memPoolAcc);
+      auto &derefd_bind_node = *m_memPoolAcc[0].derefHandle(bind_node);
+      auto *binding_data =
+          m_memPoolAcc[0].derefHandle(derefd_bind_node.m_bindings);
+      binding_data[0] = m_root;
+      derefd_bind_node.m_childExpr =
+          m_memPoolAcc[0].Alloc<Compiler::IdentifierNode>(0);
+      return bind_node;
     }
 
     Compiler::ASTNodeHandle operator()(const Compiler::IdentifierNode &) {
@@ -385,8 +393,21 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
                });
 }
 
+Compiler::ASTNodeHandle BlockPrep::wrap_in_no_arg_lambda(
+    Compiler::ASTNodeHandle root,
+    PortableMemPool::HostAccessor_t &mem_pool_acc) {
+  const auto outer_lambda =
+      mem_pool_acc[0].Alloc<Compiler::LambdaNode>(0, root);
+  const auto call_expr =
+      mem_pool_acc[0].Alloc<Compiler::CallNode>(0, outer_lambda, mem_pool_acc);
+  return call_expr;
+}
+
 Compiler::ASTNodeHandle BlockPrep::PrepareForBlockGeneration(
     Compiler::ASTNodeHandle root, PortableMemPool::HostAccessor_t memPoolAcc) {
-  return RewriteAsPrimOps(root, memPoolAcc);
+  const auto wrapped_in_no_arg_lambda = wrap_in_no_arg_lambda(root, memPoolAcc);
+  const auto rewritten_as_prim_ops =
+      RewriteAsPrimOps(wrapped_in_no_arg_lambda, memPoolAcc);
+  return rewritten_as_prim_ops;
 }
 } // namespace FunGPU
