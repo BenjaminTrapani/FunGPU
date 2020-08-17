@@ -220,7 +220,7 @@ public:
       auto bindNode = static_cast<Compiler::BindNode *>(astNode);
       auto garbageCollector =
           m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
-      if (m_numBound == 0) {
+      if (m_numBound == 0 && bindNode->m_bindings.GetCount() > 0) {
         auto bindingsData =
             m_memPoolDeviceAcc[0].derefHandle(bindNode->m_bindings);
         const auto tempStorageHandle =
@@ -261,24 +261,29 @@ public:
       auto garbageCollector =
           m_memPoolDeviceAcc[0].derefHandle(m_garbageCollectorHandle);
       if (m_numBound == 0) {
-        auto argsData = m_memPoolDeviceAcc[0].derefHandle(callNode->m_args);
-        const auto handleToTempStorage =
-            m_memPoolDeviceAcc[0].AllocArray<SharedRuntimeBlockHandle_t>(
-                callNode->m_args.GetCount());
-        if (handleToTempStorage ==
-            PortableMemPool::ArrayHandle<SharedRuntimeBlockHandle_t>()) {
-          return Error(Error::Type::MemPoolAllocFailure);
-        }
-        DeallocTempStorageOnExit deallocOnExit(m_memPoolDeviceAcc,
-                                               handleToTempStorage);
-        auto tempStorageData =
-            m_memPoolDeviceAcc[0].derefHandle(handleToTempStorage);
-        for (Index_t i = 0; i < callNode->m_args.GetCount(); ++i) {
-          RETURN_IF_FAILURE(garbageCollector->AllocManaged(
-              m_memPoolDeviceAcc, tempStorageData[i], argsData[i],
-              m_bindingParent, m_handle, m_depTracker,
-              m_runtimeValues.ElementHandle(i), m_memPoolDeviceAcc,
-              m_garbageCollectorHandle));
+        if (callNode->m_args.GetCount() > 0) {
+          auto argsData = m_memPoolDeviceAcc[0].derefHandle(callNode->m_args);
+          const auto handleToTempStorage =
+              m_memPoolDeviceAcc[0].AllocArray<SharedRuntimeBlockHandle_t>(
+                  callNode->m_args.GetCount());
+          if (handleToTempStorage ==
+              PortableMemPool::ArrayHandle<SharedRuntimeBlockHandle_t>()) {
+            return Error(Error::Type::MemPoolAllocFailure);
+          }
+          DeallocTempStorageOnExit deallocOnExit(m_memPoolDeviceAcc,
+                                                 handleToTempStorage);
+          auto tempStorageData =
+              m_memPoolDeviceAcc[0].derefHandle(handleToTempStorage);
+          for (Index_t i = 0; i < callNode->m_args.GetCount(); ++i) {
+            RETURN_IF_FAILURE(garbageCollector->AllocManaged(
+                m_memPoolDeviceAcc, tempStorageData[i], argsData[i],
+                m_bindingParent, m_handle, m_depTracker,
+                m_runtimeValues.ElementHandle(i), m_memPoolDeviceAcc,
+                m_garbageCollectorHandle));
+          }
+          for (Index_t i = 0; i < handleToTempStorage.GetCount(); ++i) {
+            RETURN_IF_FAILURE(AddDependentActiveBlock(tempStorageData[i]));
+          }
         }
         SharedRuntimeBlockHandle_t dependencyOnLambda;
         RETURN_IF_FAILURE(garbageCollector->AllocManaged(
@@ -286,9 +291,6 @@ public:
             m_bindingParent, m_handle, m_depTracker,
             m_runtimeValues.ElementHandle(callNode->m_args.GetCount()),
             m_memPoolDeviceAcc, m_garbageCollectorHandle));
-        for (Index_t i = 0; i < handleToTempStorage.GetCount(); ++i) {
-          RETURN_IF_FAILURE(AddDependentActiveBlock(tempStorageData[i]));
-        }
         RETURN_IF_FAILURE(AddDependentActiveBlock(dependencyOnLambda));
         m_numBound = callNode->m_args.GetCount() + 1;
       } else {
