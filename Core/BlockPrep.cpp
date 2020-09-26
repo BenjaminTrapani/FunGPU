@@ -348,6 +348,62 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
       if (primOpsUnderPred.size() == 1 && primOpsUnderPred[0] == &m_root) {
         ifNode.m_then = RewriteAsPrimOps(ifNode.m_then, m_memPoolAcc);
         ifNode.m_else = RewriteAsPrimOps(ifNode.m_else, m_memPoolAcc);
+        const auto original_root = m_root;
+        const auto maybe_rewrite_branch_as_call =
+            [&](Compiler::ASTNodeHandle &branch) -> Compiler::ASTNodeHandle {
+          // Pred and then can be anything except structures influencing control
+          // flow / block layout.
+          const auto &branch_node = *m_memPoolAcc[0].derefHandle(branch);
+          switch (branch_node.m_type) {
+          case Compiler::ASTNode::Type::Bind:
+          case Compiler::ASTNode::Type::BindRec:
+          case Compiler::ASTNode::Type::If: {
+            // Create no arg lambda containing this block. Pull it above, and
+            // generate call to it here.
+            auto bind_node_for_lambda =
+                m_memPoolAcc[0].template Alloc<Compiler::BindNode>(
+                    1, false, m_memPoolAcc);
+            auto &derefd_bind_node =
+                *m_memPoolAcc[0].derefHandle(bind_node_for_lambda);
+            // Only increase references to binding ops if the reference
+            // references something above root, otherwise should not increment.
+            std::set<Compiler::ASTNodeHandle *> identsToExclude;
+            CollectAll(branch, m_memPoolAcc,
+                       {Compiler::ASTNode::Type::Identifier}, identsToExclude);
+            IncreaseBindingRefIndices(original_root, 1, m_memPoolAcc, 0,
+                                      toConcrete(identsToExclude));
+            auto no_arg_lambda = static_cast<Compiler::ASTNodeHandle>(
+                m_memPoolAcc[0].Alloc<Compiler::LambdaNode>(0, branch));
+            auto *bindingsData =
+                m_memPoolAcc[0].derefHandle(derefd_bind_node.m_bindings);
+            bindingsData[0] = no_arg_lambda;
+            auto &derefd_root = *m_memPoolAcc[0].derefHandle(m_root);
+            Compiler::ASTNodeHandle result;
+            if (derefd_root.m_type == Compiler::ASTNode::Type::Bind) {
+              auto &root_as_bind_node =
+                  static_cast<Compiler::BindNode &>(derefd_root);
+              const auto prev_child = root_as_bind_node.m_childExpr;
+              root_as_bind_node.m_childExpr = bind_node_for_lambda;
+              derefd_bind_node.m_childExpr = prev_child;
+              result = m_root;
+            } else {
+              derefd_bind_node.m_childExpr = m_root;
+              result = bind_node_for_lambda;
+            }
+            const auto ident_0 =
+                m_memPoolAcc[0].Alloc<Compiler::IdentifierNode>(0);
+            const auto call_to_new_lambda =
+                m_memPoolAcc[0].Alloc<Compiler::CallNode>(0, ident_0,
+                                                          m_memPoolAcc);
+            branch = call_to_new_lambda;
+            return result;
+          }
+          default:
+            return m_root;
+          }
+        };
+        m_root = maybe_rewrite_branch_as_call(ifNode.m_then);
+        m_root = maybe_rewrite_branch_as_call(ifNode.m_else);
         return m_root;
       }
 
