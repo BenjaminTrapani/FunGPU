@@ -1,8 +1,6 @@
-#include "BlockPrep.hpp"
-#include "Compiler.hpp"
-#include "PortableMemPool.hpp"
-#include "Types.hpp"
-#include "Visitor.hpp"
+#include "Core/BlockPrep.hpp"
+#include "Core/Visitor.hpp"
+#include "Core/CollectAllASTNodes.hpp"
 #include <map>
 
 namespace FunGPU {
@@ -169,26 +167,6 @@ BlockPrep::PrepareForBlockGeneration(Compiler::ASTNodeHandle root) {
   return PrepareForBlockGeneration(root, memPoolAcc);
 }
 
-void BlockPrep::CollectAll(Compiler::ASTNodeHandle &root,
-                           PortableMemPool::HostAccessor_t memPoolAcc,
-                           const std::set<Compiler::ASTNode::Type> &types,
-                           std::set<Compiler::ASTNodeHandle *> &result) {
-  visit(
-      *memPoolAcc[0].derefHandle(root),
-      [&](auto &node) {
-        if (types.find(node.m_type) != types.end()) {
-          result.emplace(&root);
-          return;
-        }
-        node.for_each_sub_expr(memPoolAcc, [&](auto &child_expr) {
-          BlockPrep::CollectAll(child_expr, memPoolAcc, types, result);
-        });
-      },
-      [](const auto &unexpected) {
-        throw std::invalid_argument("Unexpected node");
-      });
-}
-
 Compiler::ASTNodeHandle
 BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
                             PortableMemPool::HostAccessor_t memPoolAcc) {
@@ -219,7 +197,7 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
       // something above root, otherwise should not increment.
       std::set<Compiler::ASTNodeHandle *> identsToExclude;
       for (auto primOpHandle : primOps) {
-        CollectAll(*primOpHandle, m_memPoolAcc,
+        CollectAllASTNodes(*primOpHandle, m_memPoolAcc,
                    {Compiler::ASTNode::Type::Identifier}, identsToExclude);
       }
       IncreaseBindingRefIndices(root, primOps.size(), m_memPoolAcc, 0,
@@ -265,7 +243,7 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
       auto *bindingsData = m_memPoolAcc[0].derefHandle(node.m_bindings);
       for (size_t i = 0; i < node.m_bindings.GetCount(); ++i) {
         std::set<Compiler::ASTNodeHandle *> curBindings;
-        CollectAll(bindingsData[i], m_memPoolAcc,
+        CollectAllASTNodes(bindingsData[i], m_memPoolAcc,
                    {Compiler::ASTNode::Type::Bind,
                     Compiler::ASTNode::Type::BindRec,
                     Compiler::ASTNode::Type::Lambda},
@@ -296,7 +274,7 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
         const auto outermostGeneratedLet = **allNestedBindings.begin();
         for (auto nestedBindHandle : allNestedBindings) {
           std::set<Compiler::ASTNodeHandle *> identsToExclude;
-          CollectAll(*nestedBindHandle, m_memPoolAcc,
+          CollectAllASTNodes(*nestedBindHandle, m_memPoolAcc,
                      {Compiler::ASTNode::Type::Identifier}, identsToExclude);
           auto &nestedBindExpr = static_cast<Compiler::BindNode &>(
               *m_memPoolAcc[0].derefHandle(*nestedBindHandle));
@@ -368,7 +346,7 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
             // Only increase references to binding ops if the reference
             // references something above root, otherwise should not increment.
             std::set<Compiler::ASTNodeHandle *> identsToExclude;
-            CollectAll(branch, m_memPoolAcc,
+            CollectAllASTNodes(branch, m_memPoolAcc,
                        {Compiler::ASTNode::Type::Identifier}, identsToExclude);
             IncreaseBindingRefIndices(original_root, 1, m_memPoolAcc, 0,
                                       toConcrete(identsToExclude));

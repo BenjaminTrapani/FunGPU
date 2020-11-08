@@ -1,6 +1,6 @@
-#include "Compiler.hpp"
-#include "PortableMemPool.hpp"
-#include "Types.hpp"
+#include "Core/Compiler.hpp"
+#include "Core/PortableMemPool.hpp"
+#include "Core/Types.hpp"
 #include <set>
 #include <vector>
 
@@ -29,10 +29,6 @@ private:
       PortableMemPool::HostAccessor_t memPoolAcc,
       std::size_t minRefForIncrement,
       const std::set<Compiler::ASTNodeHandle> &identsToExclude);
-  static void CollectAll(Compiler::ASTNodeHandle &root,
-                         PortableMemPool::HostAccessor_t memPoolAcc,
-                         const std::set<Compiler::ASTNode::Type> &types,
-                         std::set<Compiler::ASTNodeHandle *> &result);
   static Compiler::ASTNodeHandle
   wrap_in_no_arg_lambda(Compiler::ASTNodeHandle root,
                         PortableMemPool::HostAccessor_t &);

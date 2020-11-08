@@ -1,8 +1,8 @@
-#include "Compiler.hpp"
-#include "Error.hpp"
-#include "GarbageCollector.hpp"
-#include "PortableMemPool.hpp"
-#include "RuntimeBlock.hpp"
+#include "Core/Compiler.hpp"
+#include "Core/Error.hpp"
+#include "Core/GarbageCollector.hpp"
+#include "Core/PortableMemPool.hpp"
+#include "Core/RuntimeBlock.hpp"
 #include <CL/sycl.hpp>
 #include <array>
 #include <memory>

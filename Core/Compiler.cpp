@@ -1,5 +1,5 @@
-#include "Compiler.hpp"
-#include "Types.hpp"
+#include "Core/Compiler.hpp"
+#include "Core/Types.hpp"
 #include <iostream>
 #include <sstream>
 

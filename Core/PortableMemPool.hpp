@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Types.hpp"
+#include "Core/Types.hpp"
 #include <CL/sycl.hpp>
 #include <CL/sycl/multi_ptr.hpp>
 #include <limits>
@@ -55,6 +55,24 @@ public:
     Index_t m_distFromMemPoolBase;
   };
 
+  template <class T> class TrivialHandle {
+    public:
+      TrivialHandle() = default;
+      TrivialHandle(const Handle<T> other) : m_distFromMemPoolBase(other.GetDistFromMemPoolBase()) {}
+
+      operator Handle<T>() const {
+        return Handle<T>(m_distFromMemPoolBase);
+      }
+
+      TrivialHandle& operator=(const Handle<T> other) {
+        m_distFromMemPoolBase = other.GetDistFromMemPoolBase();
+        return *this;
+      }
+
+    private:
+      Index_t m_distFromMemPoolBase;
+  };
+
   template <class T> class ArrayHandle {
     friend class PortableMemPool;
 
@@ -82,6 +100,26 @@ public:
   private:
     Handle<T> m_handle;
     Index_t m_count;
+  };
+
+  template <class T> class TrivialArrayHandle {
+    public:
+      TrivialArrayHandle() = default;
+      TrivialArrayHandle(const ArrayHandle<T>& handle) : m_handle(handle), m_count(handle.GetCount()) {}
+
+      operator ArrayHandle<T>() const {
+        return ArrayHandle(m_handle, m_count);
+      }
+
+      TrivialArrayHandle& operator=(const ArrayHandle<T>& other) {
+        m_handle = other.m_handle;
+        m_count = other.m_count;
+        return *this;
+      }
+
+    private:
+      TrivialHandle<T> m_handle;
+      Index_t m_count;
   };
 
   // Implementers must define a public m_handle member.
