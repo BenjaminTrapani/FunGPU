@@ -9,11 +9,11 @@
 #undef max
 #undef min
 
-#include "CPUEvaluator.hpp"
-#include "Compiler.hpp"
-#include "Parser.hpp"
-#include "PortableMemPool.hpp"
-#include "BlockPrep.hpp"
+#include "Core/CPUEvaluator.hpp"
+#include "Core/Compiler.hpp"
+#include "Core/Parser.hpp"
+#include "Core/PortableMemPool.hpp"
+#include "Core/BlockPrep.hpp"
 
 using namespace FunGPU;
 

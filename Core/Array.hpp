@@ -1,5 +1,5 @@
-#include "PortableMemPool.hpp"
-#include "Types.hpp"
+#include "Core/PortableMemPool.hpp"
+#include "Core/Types.hpp"
 
 namespace FunGPU {
 template <class T> class Array {

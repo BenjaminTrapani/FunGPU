@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Array.hpp"
-#include "PortableMemPool.hpp"
-#include "SExpr.hpp"
-#include "Types.hpp"
+#include "Core/Array.hpp"
+#include "Core/PortableMemPool.hpp"
+#include "Core/SExpr.hpp"
+#include "Core/Types.hpp"
 #include <CL/sycl.hpp>
 
 #include <list>

@@ -1,9 +1,9 @@
-#include "Compiler.hpp"
-#include "Error.hpp"
-#include "GarbageCollector.hpp"
-#include "List.hpp"
-#include "PortableMemPool.hpp"
-#include "Types.hpp"
+#include "Core/Compiler.hpp"
+#include "Core/Error.hpp"
+#include "Core/GarbageCollector.hpp"
+#include "Core/List.hpp"
+#include "Core/PortableMemPool.hpp"
+#include "Core/Types.hpp"
 #include <CL/sycl.hpp>
 #include <atomic>
 
