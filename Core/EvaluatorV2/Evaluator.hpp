@@ -6,12 +6,12 @@
 #include <CL/sycl.hpp>
 
 namespace FunGPU::EvaluatorV2 {
-  class Evaluator {
-    public:
-      Evaluator(cl::sycl::buffer<PortableMemPool>);
-      RuntimeValue compute(const Program&);
+class Evaluator {
+public:
+  Evaluator(cl::sycl::buffer<PortableMemPool>);
+  RuntimeValue compute(const Program &);
 
-    private:
-      cl::sycl::buffer<PortableMemPool> mem_pool_buffer_;
-  };
-}
+private:
+  cl::sycl::buffer<PortableMemPool> mem_pool_buffer_;
+};
+} // namespace FunGPU::EvaluatorV2

@@ -56,21 +56,20 @@ public:
   };
 
   template <class T> class TrivialHandle {
-    public:
-      TrivialHandle() = default;
-      TrivialHandle(const Handle<T> other) : m_distFromMemPoolBase(other.GetDistFromMemPoolBase()) {}
+  public:
+    TrivialHandle() = default;
+    TrivialHandle(const Handle<T> other)
+        : m_distFromMemPoolBase(other.GetDistFromMemPoolBase()) {}
 
-      TrivialHandle& operator=(const Handle<T> other) {
-        m_distFromMemPoolBase = other.GetDistFromMemPoolBase();
-        return *this;
-      }
+    TrivialHandle &operator=(const Handle<T> other) {
+      m_distFromMemPoolBase = other.GetDistFromMemPoolBase();
+      return *this;
+    }
 
-      Handle<T> unpack() const {
-        return Handle<T>(m_distFromMemPoolBase);
-      }
+    Handle<T> unpack() const { return Handle<T>(m_distFromMemPoolBase); }
 
-    private:
-      Index_t m_distFromMemPoolBase;
+  private:
+    Index_t m_distFromMemPoolBase;
   };
 
   template <class T> class ArrayHandle {
@@ -103,23 +102,25 @@ public:
   };
 
   template <class T> class TrivialArrayHandle {
-    public:
-      TrivialArrayHandle() = default;
-      TrivialArrayHandle(const ArrayHandle<T>& handle) : m_handle(handle.ElementHandle(0)), m_count(handle.GetCount()) {}
+  public:
+    TrivialArrayHandle() = default;
+    TrivialArrayHandle(const ArrayHandle<T> &handle)
+        : m_handle(handle.ElementHandle(0)), m_count(handle.GetCount()) {}
 
-      TrivialArrayHandle& operator=(const ArrayHandle<T>& other) {
-        m_handle = other.m_handle;
-        m_count = other.m_count;
-        return *this;
-      }
+    TrivialArrayHandle &operator=(const ArrayHandle<T> &other) {
+      m_handle = other.m_handle;
+      m_count = other.m_count;
+      return *this;
+    }
 
-      ArrayHandle<T> unpack() const {
-        return ArrayHandle<T>(m_handle.unpack().GetDistFromMemPoolBase(), m_count);
-      }
+    ArrayHandle<T> unpack() const {
+      return ArrayHandle<T>(m_handle.unpack().GetDistFromMemPoolBase(),
+                            m_count);
+    }
 
-    private:
-      TrivialHandle<T> m_handle;
-      Index_t m_count;
+  private:
+    TrivialHandle<T> m_handle;
+    Index_t m_count;
   };
 
   // Implementers must define a public m_handle member.
