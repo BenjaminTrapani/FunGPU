@@ -81,7 +81,7 @@ Instruction create_instruction(const InstructionType &value) {
 
 BOOST_FIXTURE_TEST_CASE(NoBindingsBasicTest, Fixture) {
   check_program_generates_instructions(
-      "../TestPrograms/NoBindings.fgpu",
+      "./TestPrograms/NoBindings.fgpu",
       {{create_instruction(AssignConstant{0, 4}),
         create_instruction(AssignConstant{1, 2}),
         create_instruction(AssignConstant{2, 3}),
