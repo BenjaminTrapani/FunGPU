@@ -1,0 +1,4 @@
+add_executable(BlockGeneratorTestExe BlockGenerator.cpp)
+target_compile_definitions(BlockGeneratorTestExe PRIVATE "BOOST_TEST_DYN_LINK=1")
+target_link_libraries(BlockGeneratorTestExe EvaluatorV2 ${Boost_UNIT_TEST_FRAMEWORK_LIBRARY})
+add_test(NAME BlockGeneratorTest WORKING_DIRECTORY ${CMAKE_BINARY_DIR} COMMAND BlockGeneratorTestExe)

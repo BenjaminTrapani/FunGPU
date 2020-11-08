@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include "Error.hpp"
-#include "PortableMemPool.hpp"
+#include "Core/Error.hpp"
+#include "Core/PortableMemPool.hpp"
 #include <CL/sycl.hpp>
 
 namespace FunGPU {
