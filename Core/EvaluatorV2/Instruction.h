@@ -4,6 +4,7 @@
 #include "Core/EvaluatorV2/RuntimeValue.h"
 #include "Core/Types.hpp"
 #include <type_traits>
+#include <string>
 
 namespace FunGPU::EvaluatorV2 {
 enum class InstructionType {
@@ -24,6 +25,8 @@ enum class InstructionType {
 
 struct CreateLambda {
   static constexpr InstructionType TYPE = InstructionType::CREATE_LAMBDA;
+  bool equals(const CreateLambda&, PortableMemPool::HostAccessor_t&) const;
+
   Index_t target_register;
   Index_t block_idx;
   PortableMemPool::TrivialArrayHandle<Index_t> captured_indices;
@@ -31,12 +34,16 @@ struct CreateLambda {
 
 struct AssignConstant {
   static constexpr InstructionType TYPE = InstructionType::ASSIGN_CONSTANT;
+  bool equals(const AssignConstant&, PortableMemPool::HostAccessor_t&) const;
+
   Index_t target_register;
   Float_t constant;
 };
 
 struct CallIndirect {
   static constexpr InstructionType TYPE = InstructionType::CALL_INDIRECT;
+  bool equals(const CallIndirect&, PortableMemPool::HostAccessor_t&) const;
+
   Index_t target_register;
   Index_t lambda_idx;
   PortableMemPool::TrivialArrayHandle<Index_t> arg_indices;
@@ -44,6 +51,8 @@ struct CallIndirect {
 
 struct If {
   static constexpr InstructionType TYPE = InstructionType::IF;
+  bool equals(const If&, PortableMemPool::HostAccessor_t&) const;
+
   Index_t predicate;
   Index_t goto_true;
   Index_t goto_false;
@@ -51,15 +60,22 @@ struct If {
 
 struct Floor {
   static constexpr InstructionType TYPE = InstructionType::FLOOR;
-  Index_t arg;
+  bool equals(const Floor&, PortableMemPool::HostAccessor_t&) const;
+
   Index_t target_register;
+  Index_t arg;
 };
 
 template <InstructionType TheType> struct BinaryOp {
   static constexpr InstructionType TYPE = TheType;
+
+  bool equals(const BinaryOp& other, PortableMemPool::HostAccessor_t&) const {
+    return target_register == other.target_register && lhs == other.lhs && rhs == other.rhs;
+  }
+
+  Index_t target_register;
   Index_t lhs;
   Index_t rhs;
-  Index_t target_register;
 };
 
 using Add = BinaryOp<InstructionType::ADD>;
@@ -72,6 +88,10 @@ using Remainder = BinaryOp<InstructionType::REMAINDER>;
 using Expt = BinaryOp<InstructionType::EXPT>;
 
 struct Instruction {
+  std::string print(PortableMemPool::HostAccessor_t mem_pool_acc) const;
+
+  bool equals(const Instruction&, PortableMemPool::HostAccessor_t&) const;
+
   union Data {
     CreateLambda create_lambda;
     AssignConstant assign_constant;
@@ -120,9 +140,9 @@ decltype(auto) visit(const Instruction &instruction, CB &&cb, UnexpectedCB&& une
 template <typename CB, typename UnexpectedCB>
 decltype(auto) visit(Instruction &instruction, CB &&cb, UnexpectedCB&& unexpected_cb) {
   return visit(std::as_const(instruction), [&](const auto& elem) {
-    cb(const_cast<std::remove_const_t<decltype(elem)>>(elem));
+    cb(const_cast<std::remove_cvref_t<decltype(elem)>&>(elem));
   }, [&](const auto& elem) {
-    unexpected_cb(const_cast<std::remove_const_t<decltype(elem)>>(elem));
+    unexpected_cb(const_cast<std::remove_cvref_t<decltype(elem)>&>(elem));
   });
 }
 } // namespace FunGPU::EvaluatorV2

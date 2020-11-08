@@ -5,4 +5,6 @@
 
 namespace FunGPU::EvaluatorV2 {
   using Program = PortableMemPool::ArrayHandle<Lambda>;
+
+  std::string print(const Program&, PortableMemPool::HostAccessor_t);
 }

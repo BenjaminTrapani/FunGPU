@@ -26,7 +26,7 @@ void CollectAllASTNodes(const Compiler::ASTNodeHandle &root,
                           const std::set<Compiler::ASTNode::Type> &types,
                           std::set<const Compiler::ASTNodeHandle *> &result) {
   std::set<Compiler::ASTNodeHandle*> mutable_result;
-  CollectAllASTNodes(const_cast<Compiler::ASTNodeHandle&>(root), memPoolAcc, types, result);
+  CollectAllASTNodes(const_cast<Compiler::ASTNodeHandle&>(root), memPoolAcc, types, mutable_result);
   for (const auto handle : mutable_result) {
     result.emplace(handle);
   }

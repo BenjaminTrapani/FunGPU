@@ -15,7 +15,7 @@ add_subdirectory(Core)
 add_subdirectory(TestPrograms)
 add_subdirectory(IntegrationTests)
 
-target_link_libraries(FunGPU FunGPUCore)
+target_link_libraries(FunGPU FunGPUEvaluator)
 
 file(GLOB_RECURSE ALL_SOURCE_FILES Core/*.cpp Core/*.h Core/*.hpp main.cpp)
 find_program (CLANGFORMAT_CMD clang-format "/usr/lib/llvm-9/bin/")

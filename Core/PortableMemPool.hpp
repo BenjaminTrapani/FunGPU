@@ -60,13 +60,13 @@ public:
       TrivialHandle() = default;
       TrivialHandle(const Handle<T> other) : m_distFromMemPoolBase(other.GetDistFromMemPoolBase()) {}
 
-      operator Handle<T>() const {
-        return Handle<T>(m_distFromMemPoolBase);
-      }
-
       TrivialHandle& operator=(const Handle<T> other) {
         m_distFromMemPoolBase = other.GetDistFromMemPoolBase();
         return *this;
+      }
+
+      Handle<T> unpack() const {
+        return Handle<T>(m_distFromMemPoolBase);
       }
 
     private:
@@ -105,16 +105,16 @@ public:
   template <class T> class TrivialArrayHandle {
     public:
       TrivialArrayHandle() = default;
-      TrivialArrayHandle(const ArrayHandle<T>& handle) : m_handle(handle), m_count(handle.GetCount()) {}
-
-      operator ArrayHandle<T>() const {
-        return ArrayHandle(m_handle, m_count);
-      }
+      TrivialArrayHandle(const ArrayHandle<T>& handle) : m_handle(handle.ElementHandle(0)), m_count(handle.GetCount()) {}
 
       TrivialArrayHandle& operator=(const ArrayHandle<T>& other) {
         m_handle = other.m_handle;
         m_count = other.m_count;
         return *this;
+      }
+
+      ArrayHandle<T> unpack() const {
+        return ArrayHandle<T>(m_handle.unpack().GetDistFromMemPoolBase(), m_count);
       }
 
     private:

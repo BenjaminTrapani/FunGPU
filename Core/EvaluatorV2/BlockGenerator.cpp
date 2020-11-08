@@ -3,7 +3,6 @@
 #include "Core/Visitor.hpp"
 #include "Core/CollectAllASTNodes.hpp"
 #include <stdexcept>
-#include <stack>
 
 namespace FunGPU::EvaluatorV2 {
 BlockGenerator::BlockGenerator(cl::sycl::buffer<PortableMemPool> pool, const Index_t registers_per_block)
@@ -55,7 +54,7 @@ void BlockGenerator::compute_lambda_space_ident_to_use_count(
       });
     },
     [&](const Compiler::IdentifierNode& ident) {
-      const auto lambda_space_ident = num_bound_so_far - ident.m_index;
+      const auto lambda_space_ident = num_bound_so_far - ident.m_index - 1;
       auto iter = lambda_space_ident_to_remaining_count.find(lambda_space_ident);
       if (iter != lambda_space_ident_to_remaining_count.end()) {
         ++iter->second;
@@ -144,7 +143,7 @@ Lambda BlockGenerator::construct_block(
   Index_t num_bound_so_far = 0;
 
   const auto convert_to_lambda_space_index = [&](const auto original_index) {
-    return num_bound_so_far - original_index;
+    return num_bound_so_far - original_index - 1;
   };
 
   const auto lookup_register_for_ident = [&](const auto &maybe_ident) {
@@ -165,13 +164,19 @@ Lambda BlockGenerator::construct_block(
     return register_idx_iter->second;
   };
 
+  Index_t idents_mapped_so_far = lambda_node.m_argCount;
   const auto allocate_register = [&] {
     const auto allocated_idx = free_indices.front();
     free_indices.pop_front();
+    const auto lambda_space_ident = idents_mapped_so_far++;
+    if (lambda_space_ident_to_register.find(lambda_space_ident) != lambda_space_ident_to_register.end()) {
+      throw std::invalid_argument("Attempted to bind identifier multiple times");
+    }
+    lambda_space_ident_to_register[lambda_space_ident] = allocated_idx;
     return allocated_idx;
   };
 
-  Index_t cur_cycle = 0;
+  std::vector<Instruction> result_instructions;
   const auto primitive_expression_to_instruction = [&](const Compiler::ASTNodeHandle ast_node) {
     Instruction result;
     visit(*mem_pool_acc[0].derefHandle(ast_node), Visitor {
@@ -230,8 +235,8 @@ Lambda BlockGenerator::construct_block(
         const auto &predicate_node =
             *mem_pool_acc[0].derefHandle(if_node.m_pred);
         result.data.if_val.predicate = lookup_register_for_ident(predicate_node);
-        result.data.if_val.goto_true = cur_cycle + 1;
-        result.data.if_val.goto_false = cur_cycle + 2;
+        result.data.if_val.goto_true = result_instructions.size() + 1;
+        result.data.if_val.goto_false = result_instructions.size() + 2;
       },
       [&](const Compiler::NumberNode& number_node) {
         result.type = InstructionType::ASSIGN_CONSTANT;
@@ -274,10 +279,11 @@ Lambda BlockGenerator::construct_block(
             instruction.rhs = lookup_register_for_ident(*mem_pool_acc[0].derefHandle(binary_op_node.m_arg1));
             instruction.target_register = allocate_register();
           }, 
-        [](const auto&) {
+        [&](auto& elem) {
+          std::cout << "Mapped result type: " << static_cast<uint64_t>(result.type) << std::endl;
           throw std::invalid_argument("Unexpected binary op");
         }}, 
-        [](const auto&){
+        [](auto&){
           throw std::invalid_argument("Unexpected instruction type");
         });
       },
@@ -342,13 +348,9 @@ Lambda BlockGenerator::construct_block(
     return result;
   };
 
-  std::vector<Instruction> result;
-  std::stack<Compiler::ASTNode *> pending_generation;
-
-  pending_generation.emplace(mem_pool_acc[0].derefHandle(lambda_node.m_childExpr));
-  while (!pending_generation.empty()) {
-    const auto *child_expr = pending_generation.top();
-    pending_generation.pop();
+  Compiler::ASTNodeHandle pending_generation = lambda_node.m_childExpr;
+  while (pending_generation != Compiler::ASTNodeHandle()) {
+    const auto *child_expr = mem_pool_acc[0].derefHandle(pending_generation);
     switch (child_expr->m_type) {
     case Compiler::ASTNode::Type::Bind:
     case Compiler::ASTNode::Type::BindRec: {
@@ -362,12 +364,10 @@ Lambda BlockGenerator::construct_block(
         num_bound_so_far += bind_node.m_bindings.GetCount();
       }
       for (Index_t i = 0; i < bind_node.m_bindings.GetCount(); ++i) {
-        result.emplace_back(primitive_expression_to_instruction(
+        result_instructions.emplace_back(primitive_expression_to_instruction(
            bound_expr_data[i]));
       }
-      ++cur_cycle;
-      pending_generation.emplace(
-          mem_pool_acc[0].derefHandle(bind_node.m_childExpr));
+      pending_generation = bind_node.m_childExpr;
       if (!is_rec) {
         num_bound_so_far += bind_node.m_bindings.GetCount();
       }
@@ -375,21 +375,25 @@ Lambda BlockGenerator::construct_block(
     }
     case Compiler::ASTNode::Type::If: {
       const auto &if_node = static_cast<const Compiler::IfNode &>(*child_expr);
-      result.emplace_back(primitive_expression_to_instruction(
+      result_instructions.emplace_back(primitive_expression_to_instruction(
           if_node.m_pred));
-      ++cur_cycle;
-      pending_generation.emplace(mem_pool_acc[0].derefHandle(if_node.m_then));
-      pending_generation.emplace(mem_pool_acc[0].derefHandle(if_node.m_else));
+      result_instructions.emplace_back(primitive_expression_to_instruction(if_node.m_then));
+      result_instructions.emplace_back(primitive_expression_to_instruction(if_node.m_else));
+      // If exprs are always in tail position
+      pending_generation = Compiler::ASTNodeHandle();
       break;
     }
     default:
+      // Tail instruction
+      result_instructions.emplace_back(primitive_expression_to_instruction(pending_generation));
+      pending_generation = Compiler::ASTNodeHandle();
       break;
     }
   }
-  const auto instructions_handle = mem_pool_acc[0].AllocArray<Instruction>(result.size());
+  const auto instructions_handle = mem_pool_acc[0].AllocArray<Instruction>(result_instructions.size());
   auto* instructions_data = mem_pool_acc[0].derefHandle(instructions_handle);
   for (Index_t i = 0; i < instructions_handle.GetCount(); ++i) {
-    instructions_data[i] = result[i];
+    instructions_data[i] = result_instructions[i];
   }
   return Lambda(instructions_handle);
 }
