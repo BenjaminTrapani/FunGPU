@@ -5,7 +5,6 @@
 #include "Core/Types.hpp"
 #include "Core/Visitor.hpp"
 #include <cstdint>
-#include <string>
 
 namespace FunGPU::EvaluatorV2 {
 template <Index_t InstructionsPerBlock, Index_t RegistersPerThread,
@@ -21,7 +20,6 @@ public:
   };
 
   template <typename OnIndirectCall> bool step(Index_t thread);
-  std::string debug_print();
 
 private:
   Index_t next_cycle[ThreadsPerBlock]{0};
@@ -132,59 +130,6 @@ void RuntimeBlock<InstructionsPerBlock, RegistersPerThread, ThreadsPerBlock>::
           num_outstanding_dependencies)));
   if (atomic_dep_count.fetch_add(-1) == 1) {
     on_activate_block(m_handle);
-  }
-}
-
-template <Index_t InstructionsPerBlock, Index_t RegistersPerThread,
-          Index_t ThreadsPerBlock>
-std::string
-RuntimeBlock<InstructionsPerBlock, RegistersPerThread, ThreadsPerBlock>::
-    debug_print(PortableMemPool::HostAccessor_t mem_pool_acc) {
-  struct PrintVisitor {
-    PrintVisitor(std::stringstream &result,
-                 PortableMemPool::HostAccessor_t mem_pool_acc)
-        : result(result), mem_pool_acc(mem_pool_acc) {}
-
-    void operator()(const CallIndirect &call_ind) {
-      std::cout << "CallIndirect: lambda: " << call_ind.lambda_idx
-                << ", arg_indices: [";
-      const auto *call_index_data =
-          mem_pool_acc.derefHandle(call_ind.arg_indices);
-      for (Index_t i = 0; i < call_ind.arg_indices.count(); ++i) {
-        std::cout << call_index_data[i] << ", ";
-      }
-      std::cout << "]";
-    }
-
-    void operator()(const If &if_inst) {
-      std::cout << "if " << if_inst.predicate << " goto " << if_inst.goto_true
-                << " else goto " if_inst.goto_false;
-    }
-
-    void operator()(const Floor &floor_inst) {
-      std::cout << floor_inst.result << " = floor(" << floor_inst.arg << ")";
-    }
-
-    template <InstructionType TheType>
-    void operator()(const BinaryOp<TheType> &bin_op) {
-      std::cout << bin_op.result << " = bin_op(" << TheType << ", "
-                << bin_op.lhs << ", " << bin_op.rhs << ")";
-    }
-
-    std::stringstream &result;
-    PortableMemPool::HostAccessor_t mem_pool_acc;
-  };
-
-  std::stringstream result;
-  for (Index_t cycle_idx = 0; cycle_idx < NumCycles; ++cycle_idx) {
-    result << "Cycle " << cycle_idx << ":" << std::endl;
-    for (Index_t instruction_idx = 0; instruction_idx < InstructionsPerCycle;
-         ++instruction_idx) {
-      const auto &cur_instruction = instructions[cycle_idx][instruction_idx];
-      PrintVisitor visitor(result);
-      visit(cur_instruction, visitor);
-      result << std::endl;
-    }
   }
 }
 } // namespace FunGPU::EvaluatorV2
