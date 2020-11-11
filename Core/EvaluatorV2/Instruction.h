@@ -10,6 +10,7 @@ namespace FunGPU::EvaluatorV2 {
 enum class InstructionType {
   CREATE_LAMBDA,
   ASSIGN_CONSTANT,
+  ASSIGN,
   CALL_INDIRECT,
   IF,
   ADD,
@@ -38,6 +39,14 @@ struct AssignConstant {
 
   Index_t target_register;
   Float_t constant;
+};
+
+struct Assign {
+  static constexpr InstructionType TYPE = InstructionType::ASSIGN;
+  bool equals(const Assign&, PortableMemPool::HostAccessor_t &) const;
+
+  Index_t target_register;
+  Index_t source_register;
 };
 
 struct CallIndirect {
@@ -96,6 +105,7 @@ struct Instruction {
   union Data {
     CreateLambda create_lambda;
     AssignConstant assign_constant;
+    Assign assign;
     CallIndirect call_indirect;
     If if_val;
     Add add;
@@ -122,6 +132,7 @@ decltype(auto) visit(const Instruction &instruction, CB &&cb,
   switch (instruction.type) {
     _(CreateLambda)
     _(AssignConstant)
+    _(Assign)
     _(CallIndirect)
     _(If)
     _(Add)

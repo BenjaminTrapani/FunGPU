@@ -31,7 +31,7 @@ struct Fixture {
     compiled_result = block_prep.PrepareForBlockGeneration(compiled_result);
     std::cout << "Program after prep for block generation: " << std::endl;
     compiler.DebugPrintAST(compiled_result);
-    std::cout << std::endl;
+    std::cout << std::endl << std::endl;
 
     const auto program = block_generator.construct_blocks(compiled_result);
     auto mem_pool_acc =
@@ -88,6 +88,64 @@ BOOST_FIXTURE_TEST_CASE(NoBindingsBasicTest, Fixture) {
         create_instruction(AssignConstant{3, 4}),
         create_instruction(Div{4, 0, 1}), create_instruction(Mul{5, 2, 3}),
         create_instruction(Add{6, 4, 5})}});
+}
+
+BOOST_FIXTURE_TEST_CASE(MultiLetTest, Fixture) {
+  check_program_generates_instructions(
+      "./TestPrograms/MultiLet.fgpu",
+      {{create_instruction(AssignConstant{0, 1}),
+        create_instruction(AssignConstant{1, 2}),
+        create_instruction(AssignConstant{2, 3}),
+        create_instruction(Add{3, 0, 1}), 
+        create_instruction(Div{4, 2, 3})}});
+}
+
+BOOST_FIXTURE_TEST_CASE(SimpleCallTest, Fixture) {
+  const auto expected_instructions = [&] () -> std::vector<std::vector<Instruction>> {
+    auto mem_pool_acc = mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
+    auto call_args = mem_pool_acc[0].AllocArray<Index_t>(1);
+    auto* call_args_data = mem_pool_acc[0].derefHandle(call_args);
+    call_args_data[0] = 1;
+    return {{
+      create_instruction(CreateLambda{0, 1, PortableMemPool::ArrayHandle<Index_t>()}),
+      create_instruction(AssignConstant{1, 42}),
+      create_instruction(CallIndirect{2, 0, call_args})
+    },
+    {
+      create_instruction(Assign{1, 0})
+    }};
+  }();
+  check_program_generates_instructions(
+      "./TestPrograms/SimpleCall.fgpu",
+      expected_instructions);
+}
+
+BOOST_FIXTURE_TEST_CASE(SimpleClosureTest, Fixture) {
+  check_program_generates_instructions("./TestPrograms/SimpleLambda.fgpu", 
+    [&] () -> std::vector<std::vector<Instruction>> {
+      auto mem_pool_acc = mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
+      auto capture_registers = mem_pool_acc[0].AllocArray<Index_t>(1);
+      auto* captured_registers_data = mem_pool_acc[0].derefHandle(capture_registers);
+      captured_registers_data[0] = 0;
+
+      auto call_args = mem_pool_acc[0].AllocArray<Index_t>(1);
+      auto* call_args_data = mem_pool_acc[0].derefHandle(call_args);
+      call_args_data[0] = 2;
+
+      return {{
+        create_instruction(AssignConstant{0, 2}),
+        create_instruction(CreateLambda{1, 1, capture_registers}),
+        create_instruction(AssignConstant{2, 3}),
+        create_instruction(CallIndirect{3, 1, call_args})
+      },
+      {
+        create_instruction(Add{2, 0, 1})
+      }};
+    }());
+}
+
+BOOST_FIXTURE_TEST_CASE(MultiLetRec, Fixture) {
+  check_program_generates_instructions("./TestPrograms/MultiLetRec.fgpu", {});
 }
 } // namespace
 } // namespace FunGPU::EvaluatorV2
