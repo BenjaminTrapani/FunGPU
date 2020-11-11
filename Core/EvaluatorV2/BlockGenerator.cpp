@@ -128,15 +128,11 @@ Lambda BlockGenerator::construct_block(
     return static_cast<const Compiler::LambdaNode &>(derefd_node);
   }();
 
-  std::unordered_map<Index_t, Index_t> lambda_space_ident_to_remaining_count;
-  for (Index_t i = 0; i < lambda_node.m_argCount; ++i) {
-    lambda_space_ident_to_remaining_count[i] = 0;
-  }
-
   std::unordered_map<Index_t, Index_t> lambda_space_ident_to_register;
   std::set<Index_t> lambda_captured_indices;
     extract_lambda_space_captured_indices(lambda, 0, mem_pool_acc,
                                           lambda_captured_indices);
+  std::unordered_map<Index_t, Index_t> lambda_space_ident_to_remaining_count;
   {
     // Captured values copied into beginning of registers, followed by args.
     for (const auto captured_index : lambda_captured_indices) {
@@ -145,15 +141,15 @@ Lambda BlockGenerator::construct_block(
       free_indices.pop_front();
     }
   }
-
-  compute_lambda_space_ident_to_use_count(
-      lambda_node.m_childExpr, lambda_node.m_argCount, mem_pool_acc, lambda_space_ident_to_remaining_count);
-
   for (Index_t i = 0; i < lambda_node.m_argCount; ++i) {
+    lambda_space_ident_to_remaining_count[i] = 0;
     lambda_space_ident_to_register[lambda_node.m_argCount - i - 1] =
         free_indices.front();
     free_indices.pop_front();
   }
+
+  compute_lambda_space_ident_to_use_count(
+      lambda_node.m_childExpr, lambda_node.m_argCount, mem_pool_acc, lambda_space_ident_to_remaining_count);
 
   Index_t num_bound_so_far = lambda_node.m_argCount;
 
