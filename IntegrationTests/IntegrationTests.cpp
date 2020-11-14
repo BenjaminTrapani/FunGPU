@@ -159,6 +159,14 @@ BOOST_AUTO_TEST_CASE(ComplexBindings) {
   const auto programResult = RunProgram("../TestPrograms/ComplexBindings.fgpu", evaluator, *memPoolBuff, 13);
 }
 
+BOOST_AUTO_TEST_CASE(SimpleLambda) {
+  RunProgram("../TestPrograms/SimpleLambda.fgpu", evaluator, *memPoolBuff, 5);
+}
+
+BOOST_AUTO_TEST_CASE(SimpleLetRec) {
+  RunProgram("../TestPrograms/SimpleLetRec.fgpu", evaluator, *memPoolBuff, 5);
+}
+
 BOOST_AUTO_TEST_CASE(CleanUpFixture) {
   evaluator = nullptr;
   memPoolBuff = nullptr;

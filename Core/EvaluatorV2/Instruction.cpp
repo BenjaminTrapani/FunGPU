@@ -30,6 +30,10 @@ Instruction::print(PortableMemPool::HostAccessor_t mem_pool_acc) const {
             result << "AssignConstant: reg " << assign_constant.target_register
                    << " = " << assign_constant.constant;
           },
+          [&](const Assign &assign) {
+            result << "Assign: reg " << assign.target_register << " = "
+                   << assign.source_register;
+          },
           [&](const CallIndirect &call_indirect) {
             result << "CallIndirect: reg " << call_indirect.target_register
                    << " = call reg " << call_indirect.lambda_idx
@@ -93,6 +97,12 @@ bool AssignConstant::equals(
     const AssignConstant &other,
     PortableMemPool::HostAccessor_t &mem_pool_acc) const {
   return target_register == other.target_register && constant == other.constant;
+}
+
+bool Assign::equals(const Assign &other,
+                    PortableMemPool::HostAccessor_t &mem_pool_acc) const {
+  return target_register == other.target_register &&
+         source_register == other.source_register;
 }
 
 bool CallIndirect::equals(const CallIndirect &other,
