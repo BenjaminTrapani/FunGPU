@@ -43,7 +43,7 @@ struct AssignConstant {
 
 struct Assign {
   static constexpr InstructionType TYPE = InstructionType::ASSIGN;
-  bool equals(const Assign&, PortableMemPool::HostAccessor_t &) const;
+  bool equals(const Assign &, PortableMemPool::HostAccessor_t &) const;
 
   Index_t target_register;
   Index_t source_register;

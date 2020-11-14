@@ -1,0 +1,5 @@
+(letrec ((count-to (lambda (cur target)
+                      (if (= cur target)
+                        target
+                        (count-to (+ 1 cur) target)))))
+  (count-to 0 5))

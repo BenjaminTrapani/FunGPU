@@ -1,0 +1,5 @@
+(let ((a-value 2)) 
+  (let ((my-lambda (lambda (val-to-add) 
+    (+ a-value val-to-add))))
+    (my-lambda 3)))
+    

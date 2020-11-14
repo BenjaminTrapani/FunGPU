@@ -55,6 +55,16 @@ struct Fixture {
     }
   }
 
+  PortableMemPool::ArrayHandle<Index_t>
+  portable_index_array_from_vector(const std::vector<Index_t> &vec) {
+    auto mem_pool_acc =
+        mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
+    auto array_handle = mem_pool_acc[0].AllocArray<Index_t>(vec.size());
+    auto *captured_registers_data = mem_pool_acc[0].derefHandle(array_handle);
+    std::copy(vec.begin(), vec.end(), captured_registers_data);
+    return array_handle;
+  }
+
   std::shared_ptr<PortableMemPool> mem_pool_data =
       std::make_shared<PortableMemPool>();
   cl::sycl::buffer<PortableMemPool> mem_pool_buffer{mem_pool_data,
@@ -96,56 +106,69 @@ BOOST_FIXTURE_TEST_CASE(MultiLetTest, Fixture) {
       {{create_instruction(AssignConstant{0, 1}),
         create_instruction(AssignConstant{1, 2}),
         create_instruction(AssignConstant{2, 3}),
-        create_instruction(Add{3, 0, 1}), 
-        create_instruction(Div{4, 2, 3})}});
+        create_instruction(Add{3, 0, 1}), create_instruction(Div{4, 2, 3})}});
 }
 
 BOOST_FIXTURE_TEST_CASE(SimpleCallTest, Fixture) {
-  const auto expected_instructions = [&] () -> std::vector<std::vector<Instruction>> {
-    auto mem_pool_acc = mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
-    auto call_args = mem_pool_acc[0].AllocArray<Index_t>(1);
-    auto* call_args_data = mem_pool_acc[0].derefHandle(call_args);
-    call_args_data[0] = 1;
-    return {{
-      create_instruction(CreateLambda{0, 1, PortableMemPool::ArrayHandle<Index_t>()}),
-      create_instruction(AssignConstant{1, 42}),
-      create_instruction(CallIndirect{2, 0, call_args})
-    },
-    {
-      create_instruction(Assign{1, 0})
-    }};
-  }();
   check_program_generates_instructions(
       "./TestPrograms/SimpleCall.fgpu",
-      expected_instructions);
+      {{create_instruction(
+            CreateLambda{0, 1, PortableMemPool::ArrayHandle<Index_t>()}),
+        create_instruction(AssignConstant{1, 42}),
+        create_instruction(
+            CallIndirect{2, 0, portable_index_array_from_vector({1})})},
+       {create_instruction(Assign{1, 0})}});
 }
 
 BOOST_FIXTURE_TEST_CASE(SimpleClosureTest, Fixture) {
-  check_program_generates_instructions("./TestPrograms/SimpleLambda.fgpu", 
-    [&] () -> std::vector<std::vector<Instruction>> {
-      auto mem_pool_acc = mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
-      auto capture_registers = mem_pool_acc[0].AllocArray<Index_t>(1);
-      auto* captured_registers_data = mem_pool_acc[0].derefHandle(capture_registers);
-      captured_registers_data[0] = 0;
-
-      auto call_args = mem_pool_acc[0].AllocArray<Index_t>(1);
-      auto* call_args_data = mem_pool_acc[0].derefHandle(call_args);
-      call_args_data[0] = 2;
-
-      return {{
-        create_instruction(AssignConstant{0, 2}),
-        create_instruction(CreateLambda{1, 1, capture_registers}),
+  check_program_generates_instructions(
+      "./TestPrograms/SimpleLambda.fgpu",
+      {{create_instruction(AssignConstant{0, 2}),
+        create_instruction(
+            CreateLambda{1, 1, portable_index_array_from_vector({0})}),
         create_instruction(AssignConstant{2, 3}),
-        create_instruction(CallIndirect{3, 1, call_args})
-      },
-      {
-        create_instruction(Add{2, 0, 1})
-      }};
-    }());
+        create_instruction(
+            CallIndirect{3, 1, portable_index_array_from_vector({2})})},
+       {create_instruction(Add{2, 0, 1})}});
 }
 
+BOOST_FIXTURE_TEST_CASE(CallMultiBinding, Fixture) {
+  check_program_generates_instructions(
+      "./TestPrograms/CallMultiBindings.fgpu",
+      {{create_instruction(AssignConstant{0, 4}),
+        create_instruction(
+            CreateLambda{1, 1, portable_index_array_from_vector({0})}),
+        create_instruction(AssignConstant{2, 10}),
+        create_instruction(AssignConstant{3, 9}),
+        create_instruction(
+            CallIndirect{4, 1, portable_index_array_from_vector({3})})},
+       {create_instruction(Add{2, 0, 1})}});
+}
+
+BOOST_FIXTURE_TEST_CASE(SimpleLetRec, Fixture) {
+  check_program_generates_instructions(
+      "./TestPrograms/SimpleLetRec.fgpu",
+      {{create_instruction(
+            CreateLambda{0, 1, portable_index_array_from_vector({0})}),
+        create_instruction(AssignConstant{1, 0}),
+        create_instruction(AssignConstant{2, 5}),
+        create_instruction(
+            CallIndirect{3, 0, portable_index_array_from_vector({1, 2})})},
+       {create_instruction(Equal{3, 2, 1}),
+        create_instruction(
+            CreateLambda{4, 2, portable_index_array_from_vector({0, 2, 1})}),
+        create_instruction(If{3, 3, 4}), create_instruction(Assign{5, 1}),
+        create_instruction(
+            CallIndirect{6, 4, PortableMemPool::ArrayHandle<Index_t>()})},
+       {create_instruction(AssignConstant{3, 1}),
+        create_instruction(Add{4, 3, 1}),
+        create_instruction(
+            CallIndirect{5, 0, portable_index_array_from_vector({4, 2})})}});
+}
+
+/*
 BOOST_FIXTURE_TEST_CASE(MultiLetRec, Fixture) {
   check_program_generates_instructions("./TestPrograms/MultiLetRec.fgpu", {});
-}
+}*/
 } // namespace
 } // namespace FunGPU::EvaluatorV2
