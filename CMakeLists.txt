@@ -7,7 +7,7 @@ include_directories("./")
 project(FunGPU)
 enable_testing()
 
-set(ENABLE_COMPUTE_CPP ON)
+set(ENABLE_COMPUTE_CPP OFF)
 
 if(ENABLE_COMPUTE_CPP)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/Modules)
