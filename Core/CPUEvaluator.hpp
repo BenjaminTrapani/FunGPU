@@ -3,7 +3,7 @@
 #include "Core/GarbageCollector.hpp"
 #include "Core/PortableMemPool.hpp"
 #include "Core/RuntimeBlock.hpp"
-#include <CL/sycl.hpp>
+#include "Core/sycl.hpp"
 #include <array>
 #include <memory>
 

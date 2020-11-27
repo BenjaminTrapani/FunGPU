@@ -7,8 +7,12 @@ namespace FunGPU::EvaluatorV2 {
 struct RuntimeValue;
 
 struct FunctionValue {
+  FunctionValue() = default;
+  FunctionValue(const Index_t block_idx, const PortableMemPool::TrivialArrayHandle<RuntimeValue> captures) :
+    block_idx(block_idx), captures(captures) {}
+
   Index_t block_idx;
-  PortableMemPool::ArrayHandle<RuntimeValue> captures;
+  PortableMemPool::TrivialArrayHandle<RuntimeValue> captures;
 };
 
 struct RuntimeValue {

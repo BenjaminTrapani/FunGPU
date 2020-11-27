@@ -65,11 +65,13 @@ endif()
 
 find_program(ComputeCpp_DEVICE_COMPILER_EXECUTABLE compute++
   HINTS ${computecpp_host_find_hint}
-  PATH_SUFFIXES bin)
+  PATH_SUFFIXES bin
+  NO_SYSTEM_ENVIRONMENT_PATH)
 
 find_program(ComputeCpp_INFO_EXECUTABLE computecpp_info
   HINTS ${computecpp_host_find_hint}
-  PATH_SUFFIXES bin)
+  PATH_SUFFIXES bin
+  NO_SYSTEM_ENVIRONMENT_PATH)
 
 find_library(COMPUTECPP_RUNTIME_LIBRARY
   NAMES ComputeCpp ComputeCpp_vs2015
@@ -78,7 +80,7 @@ find_library(COMPUTECPP_RUNTIME_LIBRARY
   DOC "ComputeCpp Runtime Library")
 
 find_library(COMPUTECPP_RUNTIME_LIBRARY_DEBUG
-  NAMES ComputeCpp ComputeCpp_vs2015_d
+  NAMES ComputeCpp_d ComputeCpp ComputeCpp_vs2015_d
   HINTS ${computecpp_find_hint}
   PATH_SUFFIXES lib
   DOC "ComputeCpp Debug Runtime Library")
@@ -113,7 +115,7 @@ else()
     if (COMPUTECPP_PLATFORM_IS_SUPPORTED)
       message(STATUS "platform - your system can support ComputeCpp")
     else()
-      message(WARNING "platform - your system CANNOT support ComputeCpp")
+      message(STATUS "platform - your system is not officially supported")
     endif()
   endif()
 endif()
@@ -152,6 +154,8 @@ endif()
 list(APPEND COMPUTECPP_DEVICE_COMPILER_FLAGS -sycl-target ${COMPUTECPP_BITCODE})
 message(STATUS "compute++ flags - ${COMPUTECPP_DEVICE_COMPILER_FLAGS}")
 
+include(ComputeCppCompilerChecks)
+
 if(NOT TARGET OpenCL::OpenCL)
   add_library(OpenCL::OpenCL UNKNOWN IMPORTED)
   set_target_properties(OpenCL::OpenCL PROPERTIES
@@ -164,7 +168,7 @@ if(NOT TARGET ComputeCpp::ComputeCpp)
   add_library(ComputeCpp::ComputeCpp UNKNOWN IMPORTED)
   set_target_properties(ComputeCpp::ComputeCpp PROPERTIES
     IMPORTED_LOCATION_DEBUG          "${COMPUTECPP_RUNTIME_LIBRARY_DEBUG}"
-    IMPORTED_LOCATION_RELWITHDEBINFO "${COMPUTECPP_RUNTIME_LIBRARY_DEBUG}"
+    IMPORTED_LOCATION_RELWITHDEBINFO "${COMPUTECPP_RUNTIME_LIBRARY}"
     IMPORTED_LOCATION                "${COMPUTECPP_RUNTIME_LIBRARY}"
     INTERFACE_INCLUDE_DIRECTORIES    "${ComputeCpp_INCLUDE_DIRS}"
     INTERFACE_LINK_LIBRARIES         "OpenCL::OpenCL"
@@ -396,6 +400,8 @@ function(add_sycl_to_target)
     "${multi_value_args}"
     ${ARGN}
   )
+
+  set_target_properties(${SDK_ADD_SYCL_TARGET} PROPERTIES LINKER_LANGUAGE CXX)
 
   # If the CXX compiler is set to compute++ enable the driver.
   get_filename_component(cmakeCxxCompilerFileName "${CMAKE_CXX_COMPILER}" NAME)

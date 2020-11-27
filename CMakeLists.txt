@@ -7,6 +7,15 @@ include_directories("./")
 project(FunGPU)
 enable_testing()
 
+set(ENABLE_COMPUTE_CPP ON)
+
+if(ENABLE_COMPUTE_CPP)
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/Modules)
+include(FindComputeCpp)
+include_directories(SYSTEM "${ComputeCpp_INCLUDE_DIRS}")
+include_directories(SYSTEM "${OpenCL_INCLUDE_DIR}")
+endif()
+
 find_package(Boost 1.58 REQUIRED COMPONENTS unit_test_framework)
 
 add_executable(FunGPU main.cpp)

@@ -3,6 +3,8 @@
 #include "Core/EvaluatorV2/Instruction.h"
 #include "Core/Visitor.hpp"
 #include <stdexcept>
+#include <deque>
+#include <iostream>
 
 namespace FunGPU::EvaluatorV2 {
 BlockGenerator::BlockGenerator(cl::sycl::buffer<PortableMemPool> pool,

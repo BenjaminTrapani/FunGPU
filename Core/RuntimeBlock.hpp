@@ -4,7 +4,7 @@
 #include "Core/List.hpp"
 #include "Core/PortableMemPool.hpp"
 #include "Core/Types.hpp"
-#include <CL/sycl.hpp>
+#include "Core/sycl.hpp"
 #include <atomic>
 
 namespace FunGPU {
