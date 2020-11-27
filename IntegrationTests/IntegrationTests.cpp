@@ -167,6 +167,10 @@ BOOST_AUTO_TEST_CASE(SimpleLetRec) {
   RunProgram("../TestPrograms/SimpleLetRec.fgpu", evaluator, *memPoolBuff, 5);
 }
 
+BOOST_AUTO_TEST_CASE(MapExample) {
+  RunProgram("../TestPrograms/MapExample.fgpu", evaluator, *memPoolBuff, 1);
+}
+
 BOOST_AUTO_TEST_CASE(CleanUpFixture) {
   evaluator = nullptr;
   memPoolBuff = nullptr;
