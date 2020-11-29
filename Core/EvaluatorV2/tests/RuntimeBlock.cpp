@@ -72,11 +72,16 @@ struct Fixture {
              local_instructions[idx] = instructions_global_data[idx];
            }
            itm.barrier();
-           for (Index_t idx = 0; local_block[0].step(thread_idx, mem_pool_write, idx, local_instructions, 
+           Index_t idx = 0;
+           RuntimeBlockType::Status status = RuntimeBlockType::Status::READY;
+           for (;
+            (status = local_block[0].step(thread_idx, mem_pool_write, idx, local_instructions, 
             [] (auto&&...) {},
             [] (const auto) {}
-           ); ++idx){}
-           results_acc[thread_idx] = local_block[0].result(thread_idx, local_instructions);
+           )) == RuntimeBlockType::Status::READY; ++idx){}
+           if (status == RuntimeBlockType::Status::COMPLETE) {
+            results_acc[thread_idx] = local_block[0].result(thread_idx, local_instructions);
+           }
          });
       });
 

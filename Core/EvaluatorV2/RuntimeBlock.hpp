@@ -28,9 +28,15 @@ public:
     const PortableMemPool::ArrayHandle<Instruction> instructions;
   };
 
+  enum class Status {
+    READY,
+    STALLED,
+    COMPLETE
+  };
+
   using InstructionLocalMemAccessor = cl::sycl::accessor<Instruction, 1, cl::sycl::access::mode::read_write, cl::sycl::access::target::local>;
 
-  template <typename OnIndirectCall, typename OnActivateBlock> bool step(
+  template <typename OnIndirectCall, typename OnActivateBlock> Status step(
           const Index_t thread, PortableMemPool::DeviceAccessor_t mem_pool,
           const Index_t cur_cycle,
          const InstructionLocalMemAccessor instructions,
@@ -55,12 +61,13 @@ template<Index_t RegistersPerThread,
   Index_t ThreadsPerBlock>
 Index_t RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::last_write_location(const Index_t thread,
   const InstructionLocalMemAccessor instructions) const {
-  const auto extract_target_register = [](const auto& instr) {
-    if constexpr (std::is_same_v<If, std::remove_cvref_t<decltype(instr)>>) {
-      // TODO error, should not happen
-      return Index_t(-1);
-    } else {
+  const auto extract_target_register = Visitor {
+    []<typename DerivedInstruction>(const DerivedInstruction& instr) requires HasTargetRegister<DerivedInstruction> {
       return instr.target_register;
+    },
+    [](const auto&) {
+       // TODO error, should not happen
+      return Index_t(-1);
     }
   };
 
@@ -86,28 +93,28 @@ RuntimeValue RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::result(const Ind
 template <Index_t RegistersPerThread,
           Index_t ThreadsPerBlock>
 template <typename OnIndirectCall, typename OnActivateBlock>
-bool RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
+auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
     step(const Index_t thread, PortableMemPool::DeviceAccessor_t mem_pool,
          const Index_t cur_cycle,
          const InstructionLocalMemAccessor instructions,
          OnIndirectCall &&on_indirect_call,
-         OnActivateBlock &&on_activate_block) {
+         OnActivateBlock &&on_activate_block) -> Status {
   const auto num_instructions = instructions.get_count();
   auto &register_set = registers[thread];
 
   if (cur_cycle > num_instructions) {
-    return false;
+    return Status::COMPLETE;
   } else if (cur_cycle == num_instructions || 
     (instructions[instructions.get_count() - 3].type == InstructionType::IF && cur_cycle > instructions.get_count() - 3)) {
     const auto &target = target_data[thread];
     if (target.block == PortableMemPool::Handle<RuntimeBlock>()) {
-      return false;
+      return Status::COMPLETE;
     }
     auto &target_block = *mem_pool[0].derefHandle(target.block);
     target_block.fill_dependency(target.thread, target.register_idx,
                                  register_set[last_write_location(thread, instructions)],
                                  on_activate_block);
-    return false;
+    return Status::COMPLETE;
   }
 
   const auto &instruction = instructions[cur_cycle];
@@ -118,6 +125,7 @@ bool RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
     target_register.type = RuntimeValue::Type::FLOAT;                          \
     target_register.data.float_val =                                                    \
         register_set[type.lhs].data.float_val OP register_set[type.rhs].data.float_val; \
+    return Status::READY; \
   }
 
   const auto non_control_flow_handlers = Visitor{HANDLE_BINARY_OP(Add, +), HANDLE_BINARY_OP(Sub, -),
@@ -127,27 +135,32 @@ bool RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
                   auto& target_register = register_set[floor.target_register];
                   target_register.type = RuntimeValue::Type::FLOAT;
                   target_register.data.float_val = cl::sycl::floor(register_set[floor.arg].data.float_val);
+                  return Status::READY;
                 },
                 [&](const Remainder& remainder) {
                   auto& target_register = register_set[remainder.target_register];
                   target_register.type = RuntimeValue::Type::FLOAT;
                   target_register.data.float_val = cl::sycl::fmod(register_set[remainder.lhs].data.float_val, 
                     register_set[remainder.rhs].data.float_val);
+                  return Status::READY;
                 },
                 [&](const Expt& expr) {
                   auto& target_register = register_set[expr.target_register];
                   target_register.type = RuntimeValue::Type::FLOAT;
                   target_register.data.float_val = cl::sycl::pow(register_set[expr.lhs].data.float_val,
                     register_set[expr.rhs].data.float_val);
+                  return Status::READY;
                 },
                 [&](const AssignConstant &assign_constant) {
                   auto &target_register =
                       register_set[assign_constant.target_register];
                   target_register.type = RuntimeValue::Type::FLOAT;
                   target_register.data.float_val = assign_constant.constant;
+                  return Status::READY;
                 },
                 [&](const Assign& assign) {
                   register_set[assign.target_register] = register_set[assign.source_register];
+                  return Status::READY;
                 },
                 [&](const CreateLambda &create_lambda) {
                   const auto captured_indices_handle = create_lambda.captured_indices.unpack();
@@ -166,6 +179,7 @@ bool RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
                   target_register.type = RuntimeValue::Type::LAMBDA;
                   target_register.data.function_val =
                       FunctionValue(create_lambda.block_idx, captured_values);
+                  return Status::READY;
                 },
                 [&](const CallIndirect &call_indirect) {
                   const auto arg_indices_handle = call_indirect.arg_indices.unpack();
@@ -186,25 +200,28 @@ bool RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
                   const auto function_val = register_set[call_indirect.lambda_idx].data.function_val;
                   on_indirect_call(m_handle, function_val,
                                    thread,  call_indirect.target_register, arg_values);
+                  return Status::READY;
+                },
+                [&](const InstructionBarrier&) {
+                  return Status::STALLED;
                 }};
 
-  visit(instruction, [&](const auto& instr) {
+  return visit(instruction, [&](const auto& instr) {
     if constexpr (std::is_same_v<If, std::remove_cvref_t<decltype(instr)>>) {
       const auto& next_instr = static_cast<bool>(register_set[instr.predicate].data.float_val) ? instructions[instr.goto_true] : instructions[instr.goto_false];
-      visit(next_instr, [&](const auto& next_instr) {
+      return visit(next_instr, [&](const auto& next_instr) {
         if constexpr (std::is_same_v<If, std::remove_cvref_t<decltype(next_instr)>>) {
           // TODO error, this should never happen
+          return Status::READY;
         } else {
-          non_control_flow_handlers(next_instr);
+          return non_control_flow_handlers(next_instr);
         }
       }, [](const auto&){});
     } else {
-      non_control_flow_handlers(instr);
+      return non_control_flow_handlers(instr);
     }
   }, [](const auto&) {});
 #undef HANDLE_BINARY_OP
-
-  return true;
 }
 
 template <Index_t RegistersPerThread,

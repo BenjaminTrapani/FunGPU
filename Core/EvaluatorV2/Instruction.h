@@ -22,6 +22,7 @@ enum class InstructionType {
   REMAINDER,
   EXPT,
   FLOOR,
+  INSTRUCTION_BARRIER
 };
 
 struct CreateLambda {
@@ -75,6 +76,11 @@ struct Floor {
   Index_t arg;
 };
 
+struct InstructionBarrier {
+  static constexpr InstructionType TYPE = InstructionType::INSTRUCTION_BARRIER;
+  bool equals(const InstructionBarrier&, PortableMemPool::HostAccessor_t&) const { return true; }
+};
+
 template <InstructionType TheType> struct BinaryOp {
   static constexpr InstructionType TYPE = TheType;
 
@@ -97,10 +103,18 @@ using GreaterThan = BinaryOp<InstructionType::GREATER_THAN>;
 using Remainder = BinaryOp<InstructionType::REMAINDER>;
 using Expt = BinaryOp<InstructionType::EXPT>;
 
+template<typename T>
+concept HasTargetRegister = requires(T x) {
+  x.target_register;
+};
+
 struct Instruction {
   std::string print(PortableMemPool::HostAccessor_t mem_pool_acc) const;
 
   bool equals(const Instruction &, PortableMemPool::HostAccessor_t &) const;
+
+  Instruction() = default;
+  Instruction(const InstructionType type) : type(type) {}
 
   union Data {
     CreateLambda create_lambda;
@@ -144,6 +158,7 @@ decltype(auto) visit(const Instruction &instruction, CB &&cb,
     _(Remainder)
     _(Expt)
     _(Floor)
+    _(InstructionBarrier)
   }
 
   unexpected_cb(instruction);

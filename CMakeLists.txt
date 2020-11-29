@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.4.3)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++2a")
 
-include_directories("./")
+include_directories(${CMAKE_SOURCE_DIR})
 
 project(FunGPU)
 enable_testing()
@@ -14,6 +14,8 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/Modules)
 include(FindComputeCpp)
 include_directories(SYSTEM "${ComputeCpp_INCLUDE_DIRS}")
 include_directories(SYSTEM "${OpenCL_INCLUDE_DIR}")
+else()
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -I /usr/local/include/hipSYCL/")
 endif()
 
 find_package(Boost 1.58 REQUIRED COMPONENTS unit_test_framework)

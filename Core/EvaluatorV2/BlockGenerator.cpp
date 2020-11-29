@@ -7,6 +7,7 @@
 #include <iostream>
 
 namespace FunGPU::EvaluatorV2 {
+
 BlockGenerator::BlockGenerator(cl::sycl::buffer<PortableMemPool> pool,
                                const Index_t registers_per_block)
     : pool_(pool), registers_per_block_(registers_per_block) {}
@@ -506,13 +507,18 @@ Lambda BlockGenerator::construct_block(
         }
         num_bound_so_far += pre_allocated_registers.size();
       }
+      auto bindingRequiresIndirectCall = false;
       for (Index_t i = 0; i < bind_node.m_bindings.GetCount(); ++i) {
         std::optional<Index_t> pre_allocated_register;
         if (is_rec) {
           pre_allocated_register = pre_allocated_registers[i];
         }
-        result_instructions.emplace_back(primitive_expression_to_instruction(
+        const auto& instruction = result_instructions.emplace_back(primitive_expression_to_instruction(
             bound_expr_data[i], pre_allocated_register));
+        bindingRequiresIndirectCall = bindingRequiresIndirectCall || instruction.type == InstructionType::CALL_INDIRECT;
+      }
+      if (bindingRequiresIndirectCall) {
+        result_instructions.emplace_back(Instruction(InstructionType::INSTRUCTION_BARRIER));
       }
       pending_generation = bind_node.m_childExpr;
       if (!is_rec) {
