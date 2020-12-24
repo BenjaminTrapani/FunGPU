@@ -78,7 +78,10 @@ struct Floor {
 
 struct InstructionBarrier {
   static constexpr InstructionType TYPE = InstructionType::INSTRUCTION_BARRIER;
-  bool equals(const InstructionBarrier&, PortableMemPool::HostAccessor_t&) const { return true; }
+  bool equals(const InstructionBarrier &,
+              PortableMemPool::HostAccessor_t &) const {
+    return true;
+  }
 };
 
 template <InstructionType TheType> struct BinaryOp {
@@ -103,8 +106,7 @@ using GreaterThan = BinaryOp<InstructionType::GREATER_THAN>;
 using Remainder = BinaryOp<InstructionType::REMAINDER>;
 using Expt = BinaryOp<InstructionType::EXPT>;
 
-template<typename T>
-concept HasTargetRegister = requires(T x) {
+template <typename T> concept HasTargetRegister = requires(T x) {
   x.target_register;
 };
 

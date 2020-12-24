@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Core/PortableMemPool.hpp"
 #include "Core/EvaluatorV2/Program.hpp"
-#include "Core/EvaluatorV2/RuntimeValue.h"
 #include "Core/EvaluatorV2/RuntimeBlock.hpp"
+#include "Core/EvaluatorV2/RuntimeValue.h"
+#include "Core/PortableMemPool.hpp"
 #include "Core/sycl.hpp"
 
 namespace FunGPU::EvaluatorV2 {
@@ -16,10 +16,10 @@ public:
 
   Evaluator(cl::sycl::buffer<PortableMemPool>);
   RuntimeValue compute(const Program &);
-  RuntimeBlockHandle construct_initial_block(const Program&);
+  RuntimeBlockHandle construct_initial_block(const Program &);
 
 private:
-   struct IndirectCallRequest {
+  struct IndirectCallRequest {
     FunctionValue function_val;
     PortableMemPool::Handle<RuntimeBlock_t> dest_block;
     PortableMemPool::ArrayHandle<RuntimeValue> args;
@@ -28,16 +28,16 @@ private:
   };
 
   class DependencyAggregator {
-    public:
-      RuntimeBlockHandle runtime_block(Index_t);
-      void add_block(RuntimeBlockHandle);
-      Index_t flip();
-      Index_t num_active_blocks() const { return num_active_blocks_; }
+  public:
+    RuntimeBlockHandle runtime_block(Index_t);
+    void add_block(RuntimeBlockHandle);
+    Index_t flip();
+    Index_t num_active_blocks() const { return num_active_blocks_; }
 
-    private:
-      std::array<std::array<RuntimeBlockHandle, 4096>, 2> buffers_;
-      Index_t cur_buffer_idx_ = 0;
-      Index_t num_active_blocks_ = 0;
+  private:
+    std::array<std::array<RuntimeBlockHandle, 4096>, 2> buffers_;
+    Index_t cur_buffer_idx_ = 0;
+    Index_t num_active_blocks_ = 0;
   };
 
   cl::sycl::buffer<PortableMemPool> mem_pool_buffer_;

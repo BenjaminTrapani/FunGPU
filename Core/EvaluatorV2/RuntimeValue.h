@@ -8,8 +8,10 @@ struct RuntimeValue;
 
 struct FunctionValue {
   FunctionValue() = default;
-  FunctionValue(const Index_t block_idx, const PortableMemPool::TrivialArrayHandle<RuntimeValue> captures) :
-    block_idx(block_idx), captures(captures) {}
+  FunctionValue(
+      const Index_t block_idx,
+      const PortableMemPool::TrivialArrayHandle<RuntimeValue> captures)
+      : block_idx(block_idx), captures(captures) {}
 
   Index_t block_idx;
   PortableMemPool::TrivialArrayHandle<RuntimeValue> captures;

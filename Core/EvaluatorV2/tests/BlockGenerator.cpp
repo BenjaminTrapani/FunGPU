@@ -168,21 +168,19 @@ BOOST_FIXTURE_TEST_CASE(SimpleLetRec, Fixture) {
 
 BOOST_FIXTURE_TEST_CASE(CheckBarrierInstructionGenerated, Fixture) {
   check_program_generates_instructions(
-      "./TestPrograms/CallResultBoundInLet.fgpu", {
-        {
-          create_instruction(CreateLambda{0, 1, PortableMemPool::ArrayHandle<Index_t>()}),
-          create_instruction(AssignConstant{1, 1}),
-          create_instruction(AssignConstant{2, 2}),
-          create_instruction(CallIndirect{3, 0, portable_index_array_from_vector({1})}),
-          create_instruction(CallIndirect{4, 0, portable_index_array_from_vector({2})}),
-          create_instruction(InstructionBarrier()),
-          create_instruction(Add{5, 3, 4})
-        },
-        {
-          create_instruction(AssignConstant{1, 1}),
-          create_instruction(Add{2, 0, 1})
-        }
-      });
+      "./TestPrograms/CallResultBoundInLet.fgpu",
+      {{create_instruction(
+            CreateLambda{0, 1, PortableMemPool::ArrayHandle<Index_t>()}),
+        create_instruction(AssignConstant{1, 1}),
+        create_instruction(AssignConstant{2, 2}),
+        create_instruction(
+            CallIndirect{3, 0, portable_index_array_from_vector({1})}),
+        create_instruction(
+            CallIndirect{4, 0, portable_index_array_from_vector({2})}),
+        create_instruction(InstructionBarrier()),
+        create_instruction(Add{5, 3, 4})},
+       {create_instruction(AssignConstant{1, 1}),
+        create_instruction(Add{2, 0, 1})}});
 }
 
 /*

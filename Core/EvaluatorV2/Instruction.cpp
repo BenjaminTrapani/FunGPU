@@ -53,9 +53,7 @@ Instruction::print(PortableMemPool::HostAccessor_t mem_pool_acc) const {
             result << "Floor: reg " << floor_inst.target_register << " = foor("
                    << floor_inst.arg << ")";
           },
-          [&](const InstructionBarrier&) {
-            result << "InstructionBarrier";
-          },
+          [&](const InstructionBarrier &) { result << "InstructionBarrier"; },
           HANDLE_BINARY_OP(Add, +),
           HANDLE_BINARY_OP(Sub, -),
           HANDLE_BINARY_OP(Mul, *),

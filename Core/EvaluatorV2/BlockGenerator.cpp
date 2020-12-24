@@ -2,9 +2,9 @@
 #include "Core/CollectAllASTNodes.hpp"
 #include "Core/EvaluatorV2/Instruction.h"
 #include "Core/Visitor.hpp"
-#include <stdexcept>
 #include <deque>
 #include <iostream>
+#include <stdexcept>
 
 namespace FunGPU::EvaluatorV2 {
 
@@ -513,12 +513,16 @@ Lambda BlockGenerator::construct_block(
         if (is_rec) {
           pre_allocated_register = pre_allocated_registers[i];
         }
-        const auto& instruction = result_instructions.emplace_back(primitive_expression_to_instruction(
-            bound_expr_data[i], pre_allocated_register));
-        bindingRequiresIndirectCall = bindingRequiresIndirectCall || instruction.type == InstructionType::CALL_INDIRECT;
+        const auto &instruction = result_instructions.emplace_back(
+            primitive_expression_to_instruction(bound_expr_data[i],
+                                                pre_allocated_register));
+        bindingRequiresIndirectCall =
+            bindingRequiresIndirectCall ||
+            instruction.type == InstructionType::CALL_INDIRECT;
       }
       if (bindingRequiresIndirectCall) {
-        result_instructions.emplace_back(Instruction(InstructionType::INSTRUCTION_BARRIER));
+        result_instructions.emplace_back(
+            Instruction(InstructionType::INSTRUCTION_BARRIER));
       }
       pending_generation = bind_node.m_childExpr;
       if (!is_rec) {
