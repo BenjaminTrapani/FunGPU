@@ -441,7 +441,7 @@ private:
         (cl::sycl::multi_ptr<Index_t,
                              cl::sycl::access::address_space::global_space>(
             &arena.m_totalAllocations)));
-    totalAllocCount += totalAllocations.load();
+    totalAllocCount += totalAllocations.fetch_add(0);
     totalAllocCount += GetTotalAllocationCountImpl(arenas...);
 
     return totalAllocCount;
@@ -453,7 +453,7 @@ private:
         (cl::sycl::multi_ptr<Index_t,
                              cl::sycl::access::address_space::global_space>(
             &arena.m_totalAllocations)));
-    return totalAllocations.load();
+    return totalAllocations.fetch_add(0);
   }
 
   template <class T, Index_t allocSize, Index_t totalSize,
@@ -465,7 +465,7 @@ private:
           (cl::sycl::multi_ptr<Index_t,
                                cl::sycl::access::address_space::global_space>(
               &arena.m_totalAllocations)));
-      return (totalSize / allocSize) - totalAllocations.load();
+      return (totalSize / allocSize) - totalAllocations.fetch_add(0);
     } else {
       return GetNumFreeImpl<T>(arenas...);
     }
@@ -478,7 +478,7 @@ private:
           (cl::sycl::multi_ptr<Index_t,
                                cl::sycl::access::address_space::global_space>(
               &arena.m_totalAllocations)));
-      return (totalSize / allocSize) - totalAllocations.load();
+      return (totalSize / allocSize) - totalAllocations.fetch_add(0);
     }
     return 0;
   }
@@ -486,7 +486,7 @@ private:
 #define BIN_SIZE 16777216
   Arena<sizeof(int) * 8, BIN_SIZE * 16> m_smallBin;
   Arena<sizeof(int) * 64, BIN_SIZE * 16> m_mediumBin;
-  Arena<sizeof(int) * 128, BIN_SIZE * 16> m_largeBin;
+  Arena<sizeof(int) * 16384, BIN_SIZE * 16> m_largeBin;
   Arena<sizeof(int) * 2097152, BIN_SIZE> m_extraLargeBin;
 #undef BIN_SIZE
 };

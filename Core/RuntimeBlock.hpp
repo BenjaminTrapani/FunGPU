@@ -162,16 +162,10 @@ public:
         (cl::sycl::multi_ptr<unsigned int,
                              cl::sycl::access::address_space::global_space>(
             &m_isMarkedData)));
-    return isMarkedAtomic.load();
+    return isMarkedAtomic.fetch_add(0);
   }
 
-  void ClearMarking() {
-    cl::sycl::atomic<unsigned int> isMarkedAtomic(
-        (cl::sycl::multi_ptr<unsigned int,
-                             cl::sycl::access::address_space::global_space>(
-            &m_isMarkedData)));
-    isMarkedAtomic.store(false);
-  }
+  void ClearMarking() { m_isMarkedData = false; }
 
   void
   SetResources(const PortableMemPool::DeviceAccessor_t &memPool,

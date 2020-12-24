@@ -46,7 +46,7 @@ public:
         (cl::sycl::multi_ptr<Index_t,
                              cl::sycl::access::address_space::global_space>(
             &m_managedAllocationsCountData)));
-    return std::min(allocCount.load(), maxManagedAllocationsCount);
+    return std::min(allocCount.fetch_add(0), maxManagedAllocationsCount);
   }
 
   bool RunMarkPass(const Index_t idx,
@@ -69,11 +69,7 @@ public:
   }
 
   void ResetAllocationCount() {
-    cl::sycl::atomic<Index_t> allocCount(
-        (cl::sycl::multi_ptr<Index_t,
-                             cl::sycl::access::address_space::global_space>(
-            &m_managedAllocationsCountData)));
-    allocCount.store(0);
+    m_managedAllocationsCountData = 0;
     m_prevManagedHandlesIdx = m_managedHandlesIdx;
     m_managedHandlesIdx = (m_managedHandlesIdx + 1) % m_managedHandles.size();
   }
