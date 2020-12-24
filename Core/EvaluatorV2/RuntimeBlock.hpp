@@ -22,27 +22,42 @@ public:
     BlockMetadata(const PortableMemPool::Handle<RuntimeBlock> block,
                   const PortableMemPool::ArrayHandle<Instruction> instructions)
         : block(block), instructions(instructions) {}
+    BlockMetadata() = default;
 
-    const PortableMemPool::Handle<RuntimeBlock> block;
-    const PortableMemPool::ArrayHandle<Instruction> instructions;
+    PortableMemPool::Handle<RuntimeBlock> block;
+    PortableMemPool::ArrayHandle<Instruction> instructions;
+  };
+
+  struct BlockExecGroup {
+    BlockExecGroup(const PortableMemPool::ArrayHandle<BlockMetadata>& block_descs,
+      const Index_t max_num_instructions) : block_descs(block_descs), max_num_instructions(max_num_instructions) {}
+    BlockExecGroup() = default;
+
+    PortableMemPool::ArrayHandle<BlockMetadata> block_descs;
+    Index_t max_num_instructions;
   };
 
   enum class Status { READY, STALLED, COMPLETE };
 
   using InstructionLocalMemAccessor =
-      cl::sycl::accessor<Instruction, 1, cl::sycl::access::mode::read_write,
+      cl::sycl::accessor<Instruction, 2, cl::sycl::access::mode::read_write,
                          cl::sycl::access::target::local>;
 
   template <typename OnIndirectCall, typename OnActivateBlock>
-  Status evaluate(const Index_t thread,
+  Status evaluate(const Index_t block_idx,
+                  const Index_t thread,
                   PortableMemPool::DeviceAccessor_t mem_pool,
                   const InstructionLocalMemAccessor instructions,
+                  const Index_t instruction_count,
                   OnIndirectCall &&on_indirect_call,
                   OnActivateBlock &&on_activate_block);
-  RuntimeValue result(Index_t thread, InstructionLocalMemAccessor) const;
+  RuntimeValue result(Index_t block_idx, Index_t thread, InstructionLocalMemAccessor, 
+    Index_t num_instructions) const;
 
-  Index_t last_write_location(Index_t thread,
-                              InstructionLocalMemAccessor) const;
+  Index_t last_write_location(Index_t block_idx,
+                              Index_t thread,
+                              InstructionLocalMemAccessor,
+                              Index_t num_instructions) const;
 
   template <typename OnActivateBlock>
   void fill_dependency(const Index_t thread, const Index_t register_idx,
@@ -58,8 +73,10 @@ public:
 
 template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
 Index_t RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::last_write_location(
+    const Index_t block_idx,
     const Index_t thread,
-    const InstructionLocalMemAccessor instructions) const {
+    const InstructionLocalMemAccessor all_instructions,
+    const Index_t instruction_count) const {
   const auto extract_target_register = Visitor{[]<typename DerivedInstruction>(
       const DerivedInstruction
           &instr) requires HasTargetRegister<DerivedInstruction>{
@@ -72,12 +89,13 @@ Index_t RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::last_write_location(
 }; // namespace FunGPU::EvaluatorV2
 
 const auto &register_set = registers[thread];
-if (instructions.get_count() < 3 ||
-    instructions[instructions.get_count() - 3].type != InstructionType::IF) {
-  const auto prev_instruction = instructions[instructions.get_count() - 1];
+const auto& instructions = all_instructions[block_idx];
+if (instruction_count < 3 ||
+    instructions[instruction_count - 3].type != InstructionType::IF) {
+  const auto prev_instruction = instructions[instruction_count - 1];
   return visit(prev_instruction, extract_target_register, [](const auto &) {});
 }
-const auto &if_instr = instructions[instructions.get_count() - 3].data.if_val;
+const auto &if_instr = instructions[instruction_count - 3].data.if_val;
 const auto last_instr =
     static_cast<bool>(register_set[if_instr.predicate].data.float_val)
         ? instructions[if_instr.goto_true]
@@ -87,21 +105,24 @@ return visit(last_instr, extract_target_register, [](const auto &) {});
 
 template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
 RuntimeValue RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::result(
+    const Index_t block_idx,
     const Index_t thread,
-    const InstructionLocalMemAccessor instructions) const {
+    const InstructionLocalMemAccessor instructions,
+    const Index_t num_instructions) const {
   const auto &register_set = registers[thread];
-  return register_set[last_write_location(thread, instructions)];
+  return register_set[last_write_location(block_idx, thread, instructions, num_instructions)];
 }
 
 template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
 template <typename OnIndirectCall, typename OnActivateBlock>
 auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
-    const Index_t thread, PortableMemPool::DeviceAccessor_t mem_pool,
-    const InstructionLocalMemAccessor instructions,
+    const Index_t block_idx, const Index_t thread, PortableMemPool::DeviceAccessor_t mem_pool,
+    const InstructionLocalMemAccessor all_instructions,
+    const Index_t num_instructions,
     OnIndirectCall &&on_indirect_call, OnActivateBlock &&on_activate_block)
     -> Status {
   auto register_set = registers[thread];
-
+  const auto& instructions = all_instructions[block_idx];
 #define HANDLE_BINARY_OP(TYPE, OP)                                             \
   [&](const TYPE &type) {                                                      \
     auto &target_register = register_set[type.target_register];                \
@@ -196,16 +217,15 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
 
 #undef HANDLE_BINARY_OP
 
-  const auto num_instructions = instructions.get_count();
   auto status = Status::READY;
   for (Index_t cur_cycle = 0; status == Status::READY; ++cur_cycle) {
     if (cur_cycle > num_instructions) {
       status = Status::COMPLETE;
       continue;
     } else if (cur_cycle == num_instructions ||
-               (instructions[instructions.get_count() - 3].type ==
+               (instructions[num_instructions - 3].type ==
                     InstructionType::IF &&
-                cur_cycle > instructions.get_count() - 3)) {
+                cur_cycle > num_instructions - 3)) {
       const auto &target = target_data[thread];
       if (target.block == PortableMemPool::Handle<RuntimeBlock>()) {
         status = Status::COMPLETE;
@@ -214,7 +234,7 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
       auto &target_block = *mem_pool[0].derefHandle(target.block);
       target_block.fill_dependency(
           target.thread, target.register_idx,
-          register_set[last_write_location(thread, instructions)],
+          register_set[last_write_location(block_idx, thread, all_instructions, num_instructions)],
           on_activate_block);
       status = Status::COMPLETE;
       continue;
