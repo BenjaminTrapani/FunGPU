@@ -29,15 +29,11 @@ public:
           (cl::sycl::multi_ptr<Index_t,
                                cl::sycl::access::address_space::global_space>(
               &m_activeBlockCountData)));
-      return activeBlockCount.load();
+      return activeBlockCount.fetch_add(0);
     }
 
     void FlipActiveBlocksBuffer(const Index_t newActiveBlockCount = 0) {
-      cl::sycl::atomic<Index_t> activeBlockCount(
-          (cl::sycl::multi_ptr<Index_t,
-                               cl::sycl::access::address_space::global_space>(
-              &m_activeBlockCountData)));
-      activeBlockCount.store(newActiveBlockCount);
+      m_activeBlockCountData = newActiveBlockCount;
       m_activeBlocksBufferIdx =
           (m_activeBlocksBufferIdx + 1) % m_activeBlocks.size();
       m_prevActiveBlocksBufferIdx =

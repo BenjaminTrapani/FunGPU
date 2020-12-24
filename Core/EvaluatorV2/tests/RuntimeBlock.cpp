@@ -1,14 +1,14 @@
 #define BOOST_TEST_MODULE RuntimeBlockTestsModule
+#include "Core/EvaluatorV2/RuntimeBlock.hpp"
 #include "Core/BlockPrep.hpp"
 #include "Core/Compiler.hpp"
 #include "Core/EvaluatorV2/BlockGenerator.h"
-#include "Core/EvaluatorV2/RuntimeBlock.hpp"
 #include "Core/Parser.hpp"
 #include "Core/Visitor.hpp"
-#include <stdexcept>
+#include <boost/test/included/unit_test.hpp>
 #include <boost/test/tools/old/interface.hpp>
 #include <cmath>
-#include <boost/test/included/unit_test.hpp>
+#include <stdexcept>
 
 namespace FunGPU::EvaluatorV2 {
 namespace {
@@ -23,7 +23,7 @@ struct Fixture {
     std::cout
         << "Running on "
         << work_queue.get_device().get_info<cl::sycl::info::device::name>()
-        << std::endl;
+        << ", block size: " << sizeof(RuntimeBlockType) << std::endl;
   }
 
   Program generate_program(const std::string &program_path) {
@@ -53,8 +53,10 @@ struct Fixture {
   }
 
   void check_block_evaluates_to_value(
-      const std::vector<float_t> vals, const RuntimeBlockType::BlockExecGroup block_group) {
-    cl::sycl::buffer<RuntimeValue, 2> results(cl::sycl::range<2>(block_group.block_descs.GetCount(), THREADS_PER_BLOCK));
+      const std::vector<float_t> vals,
+      const RuntimeBlockType::BlockExecGroup block_group) {
+    cl::sycl::buffer<RuntimeValue, 2> results(cl::sycl::range<2>(
+        block_group.block_descs.GetCount(), THREADS_PER_BLOCK));
     work_queue.submit([&](cl::sycl::handler &cgh) {
       auto mem_pool_write =
           mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
@@ -63,16 +65,21 @@ struct Fixture {
                          cl::sycl::access::target::local>
           local_block(cl::sycl::range<1>(1), cgh);
       RuntimeBlockType::InstructionLocalMemAccessor local_instructions(
-          cl::sycl::range<2>(block_group.block_descs.GetCount(), block_group.max_num_instructions), cgh);
+          cl::sycl::range<2>(block_group.block_descs.GetCount(),
+                             block_group.max_num_instructions),
+          cgh);
       auto results_acc =
           results.get_access<cl::sycl::access::mode::discard_write>(cgh);
       cgh.parallel_for<class TestEvalLoop>(
-          cl::sycl::nd_range<1>(THREADS_PER_BLOCK * block_group.block_descs.GetCount(), THREADS_PER_BLOCK),
+          cl::sycl::nd_range<1>(THREADS_PER_BLOCK *
+                                    block_group.block_descs.GetCount(),
+                                THREADS_PER_BLOCK),
           [mem_pool_write, block_group, local_block, local_instructions,
            results_acc](cl::sycl::nd_item<1> itm) {
-            const auto thread_idx = itm.get_local_linear_id() %  block_group.block_descs.GetCount();
-            const auto block_idx = itm.get_local_linear_id() / block_group.block_descs.GetCount();
-            const auto block_meta = mem_pool_write[0].derefHandle(block_group.block_descs)[block_idx];
+            const auto thread_idx = itm.get_local_linear_id();
+            const auto block_idx = itm.get_group_linear_id();
+            const auto block_meta = mem_pool_write[0].derefHandle(
+                block_group.block_descs)[block_idx];
             if (thread_idx == 0) {
               local_block[0] = *mem_pool_write[0].derefHandle(block_meta.block);
             }
@@ -86,11 +93,14 @@ struct Fixture {
             }
             itm.barrier();
             RuntimeBlockType::Status status = local_block[0].evaluate(
-                block_idx, thread_idx, mem_pool_write, local_instructions, block_meta.instructions.GetCount(),
-                [](auto &&...) {}, [](const auto) {});
+                block_idx, thread_idx, mem_pool_write, local_instructions,
+                block_meta.instructions.GetCount(), [](auto &&...) {},
+                [](const auto) {});
             if (status == RuntimeBlockType::Status::COMPLETE) {
               results_acc[cl::sycl::id<2>(block_idx, thread_idx)] =
-                  local_block[0].result(block_idx, thread_idx, local_instructions, block_meta.instructions.GetCount());
+                  local_block[0].result(block_idx, thread_idx,
+                                        local_instructions,
+                                        block_meta.instructions.GetCount());
             }
           });
     });
@@ -98,11 +108,14 @@ struct Fixture {
     {
       const auto result_acc =
           results.get_access<cl::sycl::access::mode::read>();
-      for (Index_t block_idx = 0; block_idx < block_group.block_descs.GetCount(); ++block_idx) {
+      for (Index_t block_idx = 0;
+           block_idx < block_group.block_descs.GetCount(); ++block_idx) {
         for (Index_t i = 0; i < THREADS_PER_BLOCK; ++i) {
           const auto result_idx = cl::sycl::id<2>(block_idx, i);
-          BOOST_REQUIRE(RuntimeValue::Type::FLOAT == result_acc[result_idx].type);
-          BOOST_CHECK_EQUAL(vals[block_idx], result_acc[result_idx].data.float_val);
+          BOOST_REQUIRE(RuntimeValue::Type::FLOAT ==
+                        result_acc[result_idx].type);
+          BOOST_CHECK_EQUAL(vals[block_idx],
+                            result_acc[result_idx].data.float_val);
         }
       }
     }
@@ -117,35 +130,49 @@ struct Fixture {
           mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
       const auto *lambdas = mem_pool_acc[0].derefHandle(no_bindings_program);
       const auto block_handle = mem_pool_acc[0].Alloc<RuntimeBlockType>();
-      const auto block_metadata_array = mem_pool_acc[0].AllocArray<RuntimeBlockType::BlockMetadata>(1);
-      auto* block_meta_array_data = mem_pool_acc[0].derefHandle(block_metadata_array);
-      block_meta_array_data[0] = RuntimeBlockType::BlockMetadata(block_handle, lambdas[0].instructions);
-      return RuntimeBlockType::BlockExecGroup(block_metadata_array, lambdas[0].instructions.GetCount());
+      const auto block_metadata_array =
+          mem_pool_acc[0].AllocArray<RuntimeBlockType::BlockMetadata>(1);
+      auto *block_meta_array_data =
+          mem_pool_acc[0].derefHandle(block_metadata_array);
+      block_meta_array_data[0] = RuntimeBlockType::BlockMetadata(
+          block_handle, lambdas[0].instructions);
+      return RuntimeBlockType::BlockExecGroup(
+          block_metadata_array, lambdas[0].instructions.GetCount());
     }();
-    
+
     check_block_evaluates_to_value({expected_val}, block_exec_group);
   }
 
-  void check_coscheduled_blocks_work(const std::vector<std::pair<float_t, std::string>>& expected_value_per_program) {
+  void check_coscheduled_blocks_work(
+      const std::vector<std::pair<float_t, std::string>>
+          &expected_value_per_program) {
     const auto block_exec_group = [&] {
       auto mem_pool_acc =
           mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
-      const auto block_metadata_array = mem_pool_acc[0].AllocArray<RuntimeBlockType::BlockMetadata>(expected_value_per_program.size());
+      const auto block_metadata_array =
+          mem_pool_acc[0].AllocArray<RuntimeBlockType::BlockMetadata>(
+              expected_value_per_program.size());
       Index_t max_instructions_per_block = 0;
       Index_t i = 0;
-      auto* block_metadata_array_data = mem_pool_acc[0].derefHandle(block_metadata_array);
-      for (const auto& [val, prog] : expected_value_per_program) {
+      auto *block_metadata_array_data =
+          mem_pool_acc[0].derefHandle(block_metadata_array);
+      for (const auto &[val, prog] : expected_value_per_program) {
         const auto no_bindings_program = generate_program(prog);
         BOOST_REQUIRE_EQUAL(1, no_bindings_program.GetCount());
         const auto *lambdas = mem_pool_acc[0].derefHandle(no_bindings_program);
         const auto block_handle = mem_pool_acc[0].Alloc<RuntimeBlockType>();
-        block_metadata_array_data[i++] = RuntimeBlockType::BlockMetadata(block_handle, lambdas[0].instructions);
-        max_instructions_per_block = std::max(max_instructions_per_block, lambdas[0].instructions.GetCount());
+        BOOST_REQUIRE(block_handle !=
+                      PortableMemPool::Handle<RuntimeBlockType>());
+        block_metadata_array_data[i++] = RuntimeBlockType::BlockMetadata(
+            block_handle, lambdas[0].instructions);
+        max_instructions_per_block = std::max(
+            max_instructions_per_block, lambdas[0].instructions.GetCount());
       }
-      return RuntimeBlockType::BlockExecGroup(block_metadata_array, max_instructions_per_block);
+      return RuntimeBlockType::BlockExecGroup(block_metadata_array,
+                                              max_instructions_per_block);
     }();
     std::vector<float_t> expected_values;
-    for (const auto& [val, prog] : expected_value_per_program) {
+    for (const auto &[val, prog] : expected_value_per_program) {
       expected_values.emplace_back(val);
     }
     check_block_evaluates_to_value(expected_values, block_exec_group);
@@ -181,10 +208,17 @@ BOOST_FIXTURE_TEST_CASE(EvaluateTrueBranchInTailPos, Fixture) {
   check_first_lambda_evaluates_to(4, "./TestPrograms/TrueBranchInTailPos.fgpu");
 }
 
-BOOST_FIXTURE_TEST_CASE(EvaluateBranchBlocksInParallel, Fixture) {
-  check_coscheduled_blocks_work({{5,
-                                  "./TestPrograms/FalseBranchInTailPos.fgpu"},
-                                  {4, "./TestPrograms/TrueBranchInTailPos.fgpu"}});
+BOOST_FIXTURE_TEST_CASE(EvaluateBranchBlocksInParallelBasic, Fixture) {
+  check_coscheduled_blocks_work(
+      {{5, "./TestPrograms/FalseBranchInTailPos.fgpu"},
+       {4, "./TestPrograms/TrueBranchInTailPos.fgpu"}});
+}
+
+BOOST_FIXTURE_TEST_CASE(EvaluateBranchBlocksInParallelAdvanced, Fixture) {
+  check_coscheduled_blocks_work(
+      {{5, "./TestPrograms/FalseBranchInTailPos.fgpu"},
+       {4, "./TestPrograms/TrueBranchInTailPos.fgpu"},
+       {13, "./TestPrograms/ComplexBindings.fgpu"}});
 }
 } // namespace
 } // namespace FunGPU::EvaluatorV2
