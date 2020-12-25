@@ -12,6 +12,9 @@ template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
 class RuntimeBlock : public PortableMemPool::EnableHandleFromThis<
                          RuntimeBlock<RegistersPerThread, ThreadsPerBlock>> {
 public:
+  static constexpr Index_t NumRegistersPerThread = RegistersPerThread;
+  static constexpr Index_t NumThreadsPerBlock = ThreadsPerBlock;
+
   struct TargetAddress {
     PortableMemPool::Handle<RuntimeBlock> block;
     Index_t thread;
@@ -37,7 +40,7 @@ public:
     BlockExecGroup() = default;
 
     PortableMemPool::ArrayHandle<BlockMetadata> block_descs;
-    Index_t max_num_instructions;
+    Index_t max_num_instructions = 0;
   };
 
   enum class Status { READY, STALLED, COMPLETE };
@@ -45,6 +48,8 @@ public:
   using InstructionLocalMemAccessor =
       cl::sycl::accessor<Instruction, 2, cl::sycl::access::mode::read_write,
                          cl::sycl::access::target::local>;
+
+  explicit RuntimeBlock(const PortableMemPool::ArrayHandle<Instruction> instructions) : instruction_ref(instructions) {}
 
   template <typename OnIndirectCall, typename OnActivateBlock>
   Status evaluate(const Index_t block_idx, const Index_t thread,
@@ -66,9 +71,12 @@ public:
                        const RuntimeValue value,
                        OnActivateBlock &&on_activate_block);
 
+  BlockMetadata block_metadata() const { return BlockMetadata(m_handle, instruction_ref); }
+
   std::array<std::array<RuntimeValue, RegistersPerThread>, ThreadsPerBlock>
       registers;
   PortableMemPool::Handle<RuntimeBlock> m_handle;
+  PortableMemPool::ArrayHandle<Instruction> instruction_ref;
   TargetAddress target_data[ThreadsPerBlock];
   int num_outstanding_dependencies = 0;
 };
@@ -82,26 +90,26 @@ Index_t RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::last_write_location(
       const DerivedInstruction
           &instr) requires HasTargetRegister<DerivedInstruction>{
       return instr.target_register;
-}
-, [](const auto &) {
-  // TODO error, should not happen
-  return Index_t(-1);
-}
-}; // namespace FunGPU::EvaluatorV2
+      }
+      , [](const auto &) {
+        // TODO error, should not happen
+        return Index_t(-1);
+      }
+    };
 
-const auto &register_set = registers[thread];
-const auto &instructions = all_instructions[block_idx];
-if (instruction_count < 3 ||
-    instructions[instruction_count - 3].type != InstructionType::IF) {
-  const auto prev_instruction = instructions[instruction_count - 1];
-  return visit(prev_instruction, extract_target_register, [](const auto &) {});
-}
-const auto &if_instr = instructions[instruction_count - 3].data.if_val;
-const auto last_instr =
-    static_cast<bool>(register_set[if_instr.predicate].data.float_val)
-        ? instructions[if_instr.goto_true]
-        : instructions[if_instr.goto_false];
-return visit(last_instr, extract_target_register, [](const auto &) {});
+    const auto &register_set = registers[thread];
+    const auto &instructions = all_instructions[block_idx];
+    if (instruction_count < 3 ||
+        instructions[instruction_count - 3].type != InstructionType::IF) {
+      const auto prev_instruction = instructions[instruction_count - 1];
+      return visit(prev_instruction, extract_target_register, [](const auto &) {});
+    }
+    const auto &if_instr = instructions[instruction_count - 3].data.if_val;
+    const auto last_instr =
+        static_cast<bool>(register_set[if_instr.predicate].data.float_val)
+            ? instructions[if_instr.goto_true]
+            : instructions[if_instr.goto_false];
+    return visit(last_instr, extract_target_register, [](const auto &) {});
 }
 
 template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
