@@ -16,6 +16,7 @@ namespace FunGPU::EvaluatorV2 {
         IndirectCallRequest(const PortableMemPool::Handle<RuntimeBlockType> caller, const PortableMemPool::ArrayHandle<RuntimeValue> captures,
           const Index_t calling_thread, const Index_t target_register, const PortableMemPool::ArrayHandle<RuntimeValue> args) :
             caller(caller), captures(captures), calling_thread(calling_thread), target_register(target_register), args(args) {}
+        IndirectCallRequest() = default;
 
         PortableMemPool::Handle<RuntimeBlockType> caller;
         PortableMemPool::ArrayHandle<RuntimeValue> captures;
@@ -40,7 +41,8 @@ namespace FunGPU::EvaluatorV2 {
         Index_t num_runtime_blocks_reactivated = 0;
       };
 
-      IndirectCallHandler(PortableMemPool::DeviceAccessor_t mem_pool_acc, const Index_t num_lambdas);
+      IndirectCallHandler(PortableMemPool::HostAccessor_t mem_pool_acc, const Index_t num_lambdas) : indirect_call_requests_by_block(mem_pool_acc[0].AllocArray<IndirectCallRequestBuffer>(num_lambdas)) {}
+
       static typename RuntimeBlockType::BlockExecGroup create_block_exec_group(cl::sycl::queue&,
         cl::sycl::buffer<PortableMemPool>&,
         cl::sycl::buffer<IndirectCallHandler>&, 
@@ -58,7 +60,7 @@ namespace FunGPU::EvaluatorV2 {
       PortableMemPool::ArrayHandle<IndirectCallRequestBuffer> indirect_call_requests_by_block;
       BlockReactivationRequestBuffer block_reactivation_requests_by_block;
   };
-  
+
   template<typename RuntimeBlockType, Index_t MaxNumIndirectCalls, Index_t MaxNumReactivations>
   typename RuntimeBlockType::BlockExecGroup IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls, MaxNumReactivations>::setup_block_for_lambda(PortableMemPool::DeviceAccessor_t mem_pool_acc, 
     const Index_t lambda_idx, const Program program) const {
@@ -70,7 +72,7 @@ namespace FunGPU::EvaluatorV2 {
     Index_t max_num_instructions = 0;
     for (Index_t i = 0; i < num_blocks_required; ++i) {
       const auto runtime_block_handle = mem_pool_acc[0].Alloc<RuntimeBlockType>(instructions_data.instructions);
-      block_metadata[lambda_idx] = BlockMetadata(runtime_block_handle, instructions_data.instructions);
+      block_metadata[lambda_idx] = typename RuntimeBlockType::BlockMetadata(runtime_block_handle, instructions_data.instructions);
       max_num_instructions = std::max(max_num_instructions, instructions_data.instructions.GetCount());
     }
     return typename RuntimeBlockType::BlockExecGroup(block_meta_handle, max_num_instructions);
@@ -82,9 +84,8 @@ namespace FunGPU::EvaluatorV2 {
     Index_t max_num_instructions = 0;
     auto* block_meta_data = mem_pool_acc[0].derefHandle(block_meta_handle);
     for (Index_t i = 0; i < block_meta_handle.GetCount(); ++i) {
-      const auto& source_block = mem_pool_acc[0].derefHandle(block_reactivation_requests_by_block.runtime_blocks_reactivated);
-      block_meta_handle[i] = BlockMetadata(source_block.m_handle, source_block.instruction_ref);
-      max_num_instructions = std::max(max_num_instructions, source_block.instruction_ref.GetCount());
+      block_meta_data[i] = block_reactivation_requests_by_block.runtime_blocks_reactivated[i];
+      max_num_instructions = std::max(max_num_instructions, block_meta_data[i].instructions.GetCount());
     }
     return typename RuntimeBlockType::BlockExecGroup(block_meta_handle, max_num_instructions);
   }
@@ -99,7 +100,7 @@ namespace FunGPU::EvaluatorV2 {
     }
     const auto& indirect_call_req = indirect_call_reqs.indirect_call_requests[thread_idx];
     const auto block_idx = thread_idx / RuntimeBlockType::NumThreadsPerBlock;
-    auto& target_block = mem_pool_acc[0].derefHandle(block_exec_acc[lambda_idx].block_descs)[block_idx];
+    auto& target_block = *mem_pool_acc[0].derefHandle(mem_pool_acc[0].derefHandle(block_exec_acc[lambda_idx].block_descs)[block_idx].block);
     // captures first, then args.
     auto& register_set = target_block.registers[block_idx];
     const auto* capture_data = mem_pool_acc[0].derefHandle(indirect_call_req.captures);
@@ -142,7 +143,7 @@ namespace FunGPU::EvaluatorV2 {
     const Index_t target_register, 
     const PortableMemPool::ArrayHandle<RuntimeValue> args) {
     const auto target_block_idx = funv.block_idx;
-    const IndirectCallRequest ind_call_req(caller, funv.captures, thread, target_register, args);
+    const IndirectCallRequest ind_call_req(caller, funv.captures.unpack(), thread, target_register, args);
     auto& indirect_call_req_buffer_for_block = mem_pool_acc[0].derefHandle(indirect_call_requests_by_block)[target_block_idx];
     indirect_call_req_buffer_for_block.append(ind_call_req);
   }
@@ -168,8 +169,8 @@ namespace FunGPU::EvaluatorV2 {
 
      work_queue.submit([&](cl::sycl::handler &cgh) {
       auto mem_pool_write = mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
-      auto block_exec_group_per_lambda_acc = block_exec_group_per_lambda.get_access<cl::sycl::access::mode::discard_write>(cgh);
-      auto indirect_call_handler_acc = indirect_call_handler.get_access<cl::sycl::access::mode::read_write>(cgh);
+      auto block_exec_group_per_lambda_acc = block_exec_group_per_lambda.template get_access<cl::sycl::access::mode::discard_write>(cgh);
+      auto indirect_call_handler_acc = indirect_call_handler.template get_access<cl::sycl::access::mode::read_write>(cgh);
       auto atomic_max_threads_per_lambda = max_num_threads_per_lambda.get_access<cl::sycl::access::mode::atomic>(cgh);
       auto total_num_blocks_acc = total_num_blocks.get_access<cl::sycl::access::mode::atomic>(cgh);
       cgh.parallel_for<class BlockGroupsPerLambda>(cl::sycl::range<1>(program.GetCount() + 1), [mem_pool_write, block_exec_group_per_lambda_acc, indirect_call_handler_acc, 
@@ -178,7 +179,7 @@ namespace FunGPU::EvaluatorV2 {
         if (lambda_idx < program.GetCount()) {
           block_exec_group_per_lambda_acc[lambda_idx] = indirect_call_handler_acc[0].setup_block_for_lambda(mem_pool_write, lambda_idx, program);
         } else {
-          block_exec_group_per_lambda_acc[lambda_idx] = indirect_call_handler_acc[0].setup_block_for_reactivations(mem_pool_write);
+          block_exec_group_per_lambda_acc[lambda_idx] = indirect_call_handler_acc[0].setup_block_for_reactivation(mem_pool_write);
         }
         cl::sycl::atomic<Index_t> max_num_threads_per_lambda(
                   atomic_max_threads_per_lambda[0]);
@@ -192,8 +193,8 @@ namespace FunGPU::EvaluatorV2 {
      // Fill indirect call request blocks
      work_queue.submit([&](cl::sycl::handler &cgh) {
         auto mem_pool_write = mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
-        auto block_exec_group_per_lambda_acc = block_exec_group_per_lambda.get_access<cl::sycl::access::mode::read_write>(cgh);
-        auto indirect_call_handler_acc = indirect_call_handler.get_access<cl::sycl::access::mode::read_write>(cgh);
+        auto block_exec_group_per_lambda_acc = block_exec_group_per_lambda.template get_access<cl::sycl::access::mode::read_write>(cgh);
+        auto indirect_call_handler_acc = indirect_call_handler.template get_access<cl::sycl::access::mode::read_write>(cgh);
         cgh.parallel_for<class InitBlocksPerThread>(cl::sycl::range<2>(program.GetCount(), max_num_threads_per_lambda.get_access<cl::sycl::access::mode::read>()[0]), [mem_pool_write, block_exec_group_per_lambda_acc, indirect_call_handler_acc] (const cl::sycl::item<2> itm) {
           indirect_call_handler_acc[0].setup_block(mem_pool_write, block_exec_group_per_lambda_acc, itm.get_id(0), itm.get_id(1));
         });
@@ -203,7 +204,7 @@ namespace FunGPU::EvaluatorV2 {
     work_queue.submit([&](cl::sycl::handler& cgh) {
       auto mem_pool_write = mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
       auto total_num_blocks_acc = total_num_blocks.get_access<cl::sycl::access::mode::read>(cgh);
-      auto result_acc = result.get_access<cl::sycl::access::mode::discard_write>(cgh);
+      auto result_acc = result.template get_access<cl::sycl::access::mode::discard_write>(cgh);
       cgh.single_task<class InitResult>([mem_pool_write, total_num_blocks_acc, result_acc] {
         const auto all_block_descs = mem_pool_write[0].template AllocArray<typename RuntimeBlockType::BlockMetadata>(total_num_blocks_acc[0]);
         result_acc[0] = typename RuntimeBlockType::BlockExecGroup(all_block_descs, 0);
@@ -215,18 +216,17 @@ namespace FunGPU::EvaluatorV2 {
      // Merge block exec groups into one.
      work_queue.submit([&](cl::sycl::handler &cgh) {
        auto mem_pool_write = mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
-       auto result_acc = result.get_access<cl::sycl::access::mode::read_write>(cgh);
-       auto block_exec_group_per_lambda_acc = block_exec_group_per_lambda.get_access<cl::sycl::access::mode::read>(cgh);
-       auto copy_begin_atomic_acc = copy_begin_idx.get_access<cl::sycl::access::mode::atomic>(cgh);
+       auto result_acc = result.template get_access<cl::sycl::access::mode::read_write>(cgh);
+       auto block_exec_group_per_lambda_acc = block_exec_group_per_lambda.template get_access<cl::sycl::access::mode::read>(cgh);
+       auto copy_begin_atomic_acc = copy_begin_idx.template get_access<cl::sycl::access::mode::atomic>(cgh);
        cgh.parallel_for<class MergeIntoResult>(cl::sycl::range<2>(block_exec_group_per_lambda.get_size(), max_num_threads_per_lambda.get_access<cl::sycl::access::mode::read>()[0] / RuntimeBlockType::NumThreadsPerBlock), 
         [mem_pool_write, result_acc, block_exec_group_per_lambda_acc, copy_begin_atomic_acc](cl::sycl::item<2> itm) {
         auto* target_block_descs = mem_pool_write[0].derefHandle(result_acc[0].block_descs);
         cl::sycl::atomic<Index_t> copy_begin_atomic(copy_begin_atomic_acc[0]);
         const auto source_block_descs = block_exec_group_per_lambda_acc[itm.get_id(0)].block_descs;
-        const auto copy_begin = copy_begin_atomic.fetch_add(1);
         const auto source_data = mem_pool_write[0].derefHandle(source_block_descs);
         if (itm.get_id(1) < source_block_descs.GetCount()) {
-          target_block_descs[copy_begin] = source_data[itm.get_id(1)];
+          target_block_descs[copy_begin_atomic.fetch_add(1)] = source_data[itm.get_id(1)];
         }
         if (itm.get_id(1) == 0) {
           cl::sycl::atomic<Index_t, cl::sycl::access::address_space::global_space>

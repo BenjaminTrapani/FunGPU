@@ -20,9 +20,17 @@ struct FunctionValue {
 struct RuntimeValue {
   enum class Type { FLOAT, LAMBDA };
   union Data {
+    explicit Data(const Float_t float_val) : float_val(float_val) {}
+    explicit Data(const FunctionValue function_val) : function_val(function_val) {}
+    Data() = default;
+
     Float_t float_val;
     FunctionValue function_val;
   };
+
+  explicit RuntimeValue(const Float_t float_val) : type(Type::FLOAT), data(float_val) {}
+  explicit RuntimeValue(const FunctionValue function_val) : type(Type::LAMBDA), data(function_val) {}
+  RuntimeValue() = default;
 
   Type type;
   Data data;
