@@ -23,12 +23,14 @@ public:
 
   struct BlockMetadata {
     BlockMetadata(const PortableMemPool::Handle<RuntimeBlock> block,
-                  const PortableMemPool::ArrayHandle<Instruction> instructions)
-        : block(block), instructions(instructions) {}
+                  const PortableMemPool::ArrayHandle<Instruction> instructions,
+                  const Index_t num_threads)
+        : block(block), instructions(instructions), num_threads(num_threads) {}
     BlockMetadata() = default;
 
     PortableMemPool::Handle<RuntimeBlock> block;
     PortableMemPool::ArrayHandle<Instruction> instructions;
+    Index_t num_threads;
   };
 
   struct BlockExecGroup {
@@ -50,8 +52,9 @@ public:
                          cl::sycl::access::target::local>;
 
   explicit RuntimeBlock(
-      const PortableMemPool::ArrayHandle<Instruction> instructions)
-      : instruction_ref(instructions) {}
+      const PortableMemPool::ArrayHandle<Instruction> instructions,
+      const Index_t num_threads)
+      : instruction_ref(instructions), num_threads(num_threads) {}
 
   template <typename OnIndirectCall, typename OnActivateBlock>
   Status evaluate(const Index_t block_idx, const Index_t thread,
@@ -74,7 +77,7 @@ public:
                        OnActivateBlock &&on_activate_block);
 
   BlockMetadata block_metadata() const {
-    return BlockMetadata(m_handle, instruction_ref);
+    return BlockMetadata(m_handle, instruction_ref, num_threads);
   }
 
   std::array<std::array<RuntimeValue, RegistersPerThread>, ThreadsPerBlock>
@@ -82,6 +85,7 @@ public:
   PortableMemPool::Handle<RuntimeBlock> m_handle;
   PortableMemPool::ArrayHandle<Instruction> instruction_ref;
   TargetAddress target_data[ThreadsPerBlock];
+  Index_t num_threads;
   int num_outstanding_dependencies = 0;
 };
 

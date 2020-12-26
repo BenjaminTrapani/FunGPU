@@ -66,6 +66,8 @@ public:
                         PortableMemPool::ArrayHandle<RuntimeValue> args);
   void on_activate_block(PortableMemPool::DeviceAccessor_t,
                          PortableMemPool::Handle<RuntimeBlockType>);
+  void reset_indirect_call_buffers(PortableMemPool::DeviceAccessor_t, Index_t lambda_idx);
+  void reset_reactivations_buffer();
 
   typename RuntimeBlockType::BlockExecGroup
   setup_block_for_lambda(PortableMemPool::DeviceAccessor_t, Index_t lambda_idx,
@@ -97,9 +99,10 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
             typename RuntimeBlockType::BlockMetadata>(),
         0);
   }
+  const auto num_threads_per_block = RuntimeBlockType::NumThreadsPerBlock;
   const auto num_blocks_required = (indirect_call_reqs.num_indirect_call_reqs +
-                                    RuntimeBlockType::NumThreadsPerBlock - 1) /
-                                   RuntimeBlockType::NumThreadsPerBlock;
+                                    num_threads_per_block - 1) /
+                                   num_threads_per_block;
   const auto block_meta_handle =
       mem_pool_acc[0].AllocArray<typename RuntimeBlockType::BlockMetadata>(
           num_blocks_required);
@@ -107,13 +110,16 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
       mem_pool_acc[0].derefHandle(program)[lambda_idx];
   auto *block_metadata = mem_pool_acc[0].derefHandle(block_meta_handle);
   Index_t max_num_instructions = 0;
+  Index_t num_calls_remaining = indirect_call_reqs.num_indirect_call_reqs;
   for (Index_t i = 0; i < num_blocks_required; ++i) {
+    const auto num_threads = std::min(num_threads_per_block, num_calls_remaining);
     const auto runtime_block_handle =
-        mem_pool_acc[0].Alloc<RuntimeBlockType>(instructions_data.instructions);
+        mem_pool_acc[0].Alloc<RuntimeBlockType>(instructions_data.instructions, num_threads);
     block_metadata[i] = typename RuntimeBlockType::BlockMetadata(
-        runtime_block_handle, instructions_data.instructions);
+        runtime_block_handle, instructions_data.instructions, num_threads);
     max_num_instructions = std::max(max_num_instructions,
                                     instructions_data.instructions.GetCount());
+    num_calls_remaining -= num_threads;
   }
   return typename RuntimeBlockType::BlockExecGroup(block_meta_handle,
                                                    max_num_instructions);
@@ -204,6 +210,20 @@ void IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
   const auto target_idx = count.fetch_add(1);
   runtime_blocks_reactivated[target_idx] =
       mem_pool_acc[0].derefHandle(block)->block_metadata();
+}
+
+template <typename RuntimeBlockType, Index_t MaxNumIndirectCalls,
+          Index_t MaxNumReactivations>
+void IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls, MaxNumReactivations>::reset_indirect_call_buffers(PortableMemPool::DeviceAccessor_t mem_pool_acc, const Index_t lambda_idx) {
+  auto &indirect_call_req_buffer_for_block = mem_pool_acc[0].derefHandle(
+      indirect_call_requests_by_block)[lambda_idx];
+  indirect_call_req_buffer_for_block.num_indirect_call_reqs = 0;
+}
+
+template <typename RuntimeBlockType, Index_t MaxNumIndirectCalls,
+          Index_t MaxNumReactivations>
+void IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls, MaxNumReactivations>::reset_reactivations_buffer() {
+  block_reactivation_requests_by_block.num_runtime_blocks_reactivated = 0;
 }
 
 template <typename RuntimeBlockType, Index_t MaxNumIndirectCalls,
@@ -379,6 +399,19 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
                     .max_num_instructions);
           }
         });
+  });
+
+  work_queue.submit([&](cl::sycl::handler &cgh) {
+    auto indirect_call_handler_acc = indirect_call_handler.template get_access<cl::sycl::access::mode::read_write>(cgh);
+    auto mem_pool_acc = mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
+    cgh.parallel_for<class ResetBuffersAfterIndirectCallSchedule>(cl::sycl::range<1>(program.GetCount() + 1), [indirect_call_handler_acc, mem_pool_acc, program] (cl::sycl::item<1> itm) {
+      const auto tid = static_cast<Index_t>(itm.get_linear_id());
+      if (tid >= program.GetCount()) {
+        indirect_call_handler_acc[0].reset_reactivations_buffer();
+      } else {
+        indirect_call_handler_acc[0].reset_indirect_call_buffers(mem_pool_acc, tid);
+      }
+    });
   });
 
   return result.template get_access<cl::sycl::access::mode::read>()[0];
