@@ -39,12 +39,14 @@ namespace {
 
   BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
     cl::sycl::buffer<PortableMemPool::Handle<RuntimeBlockType>> caller_buf(cl::sycl::range<1>(1));
+    cl::sycl::buffer<PortableMemPool::Handle<RuntimeBlockType>> reactivated_block_buf(cl::sycl::range<1>(1));
     work_queue.submit([&](cl::sycl::handler& cgh) {
       auto indirect_call_acc = indirect_call_handler_buff.get_access<cl::sycl::access::mode::read_write>(cgh);
       auto mem_pool_acc = mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
       auto caller_acc = caller_buf.get_access<cl::sycl::access::mode::discard_write>(cgh);
+      auto reactivated_acc = reactivated_block_buf.get_access<cl::sycl::access::mode::discard_write>(cgh);
       const auto tmp_program = program;
-      cgh.single_task<class RequestIndirectCall>([indirect_call_acc, mem_pool_acc, tmp_program, caller_acc] {
+      cgh.single_task<class RequestIndirectCall>([indirect_call_acc, mem_pool_acc, tmp_program, caller_acc, reactivated_acc] {
         const auto lambda_0 = mem_pool_acc[0].derefHandle(tmp_program)[0];
         const auto mock_caller = mem_pool_acc[0].Alloc<RuntimeBlockType>(lambda_0.instructions);
         caller_acc[0] = mock_caller;
@@ -58,12 +60,17 @@ namespace {
         arg_val.type = RuntimeValue::Type::FLOAT;
         arg_val.data.float_val = 42;
         indirect_call_acc[0].on_indirect_call(mem_pool_acc, mock_caller, function_value, 1, 2, test_args);
+
+        const auto lambda_1 = mem_pool_acc[0].derefHandle(tmp_program)[1];
+        const auto reactivated_block = mem_pool_acc[0].Alloc<RuntimeBlockType>(lambda_1.instructions);
+        reactivated_acc[0] = reactivated_block;
+        indirect_call_acc[0].on_activate_block(mem_pool_acc, reactivated_block);
       });
     });
 
     const auto exec_group = IndirectCallHandlerType::create_block_exec_group(work_queue, mem_pool_buffer, 
       indirect_call_handler_buff, program);
-    BOOST_CHECK_EQUAL(1, exec_group.block_descs.GetCount());
+    BOOST_CHECK_EQUAL(2, exec_group.block_descs.GetCount());
     BOOST_CHECK_EQUAL(3, exec_group.max_num_instructions);
     auto mem_pool_acc = mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
     const auto& block_meta = mem_pool_acc[0].derefHandle(exec_group.block_descs)[0];
@@ -82,6 +89,12 @@ namespace {
     BOOST_CHECK_EQUAL(1, target_data.thread);
     BOOST_CHECK_EQUAL(2, target_data.register_idx);
     BOOST_CHECK(caller_buf.get_access<cl::sycl::access::mode::read>()[0] == target_data.block);
+
+    const auto& block_meta_for_reactivation = mem_pool_acc[0].derefHandle(exec_group.block_descs)[1];
+    BOOST_REQUIRE(block_meta_for_reactivation.instructions != PortableMemPool::ArrayHandle<Instruction>());
+    BOOST_REQUIRE(block_meta_for_reactivation.block != PortableMemPool::Handle<RuntimeBlockType>());
+    BOOST_CHECK(reactivated_block_buf.get_access<cl::sycl::access::mode::read>()[0] == block_meta_for_reactivation.block);
+    BOOST_CHECK(mem_pool_acc[0].derefHandle(program)[1].instructions == block_meta_for_reactivation.instructions);
   }
 
 struct AdvancedFixture : public Fixture {

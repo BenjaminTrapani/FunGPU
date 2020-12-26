@@ -35,7 +35,7 @@ namespace FunGPU::EvaluatorV2 {
 
       class BlockReactivationRequestBuffer {
         public:
-        void append(PortableMemPool::Handle<RuntimeBlockType>); 
+        void append(PortableMemPool::DeviceAccessor_t, PortableMemPool::Handle<RuntimeBlockType>); 
 
         std::array<typename RuntimeBlockType::BlockMetadata, MaxNumReactivations> runtime_blocks_reactivated;
         Index_t num_runtime_blocks_reactivated = 0;
@@ -50,7 +50,7 @@ namespace FunGPU::EvaluatorV2 {
 
       void on_indirect_call(PortableMemPool::DeviceAccessor_t, PortableMemPool::Handle<RuntimeBlockType> caller, FunctionValue, Index_t thread, Index_t target_register, 
         PortableMemPool::ArrayHandle<RuntimeValue> args);
-      void on_activate_block(PortableMemPool::Handle<RuntimeBlockType>);
+      void on_activate_block(PortableMemPool::DeviceAccessor_t, PortableMemPool::Handle<RuntimeBlockType>);
 
       typename RuntimeBlockType::BlockExecGroup setup_block_for_lambda(PortableMemPool::DeviceAccessor_t, Index_t lambda_idx, Program) const;
       typename RuntimeBlockType::BlockExecGroup setup_block_for_reactivation(PortableMemPool::DeviceAccessor_t) const;
@@ -129,13 +129,14 @@ namespace FunGPU::EvaluatorV2 {
   }
 
   template<typename RuntimeBlockType, Index_t MaxNumIndirectCalls, Index_t MaxNumReactivations>
-  void IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls, MaxNumReactivations>::BlockReactivationRequestBuffer::append(const PortableMemPool::Handle<RuntimeBlockType> block) {
+  void IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls, MaxNumReactivations>::BlockReactivationRequestBuffer::append(PortableMemPool::DeviceAccessor_t mem_pool_acc, 
+    const PortableMemPool::Handle<RuntimeBlockType> block) {
     cl::sycl::atomic<Index_t> count(
         (cl::sycl::multi_ptr<Index_t,
                              cl::sycl::access::address_space::global_space>(
             &num_runtime_blocks_reactivated)));
     const auto target_idx = count.fetch_add(1);
-    runtime_blocks_reactivated[target_idx] = block.block_metadata();
+    runtime_blocks_reactivated[target_idx] = mem_pool_acc[0].derefHandle(block)->block_metadata();
   }
 
   template<typename RuntimeBlockType, Index_t MaxNumIndirectCalls, Index_t MaxNumReactivations>
@@ -153,8 +154,8 @@ namespace FunGPU::EvaluatorV2 {
   }
 
   template<typename RuntimeBlockType, Index_t MaxNumIndirectCalls, Index_t MaxNumReactivations>
-  void IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls, MaxNumReactivations>::on_activate_block(const PortableMemPool::Handle<RuntimeBlockType> block) {
-    block_reactivation_requests_by_block.append(block); 
+  void IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls, MaxNumReactivations>::on_activate_block(PortableMemPool::DeviceAccessor_t mem_pool_acc, const PortableMemPool::Handle<RuntimeBlockType> block) {
+    block_reactivation_requests_by_block.append(mem_pool_acc, block); 
   }
 
   template<typename RuntimeBlockType, Index_t MaxNumIndirectCalls, Index_t MaxNumReactivations>
