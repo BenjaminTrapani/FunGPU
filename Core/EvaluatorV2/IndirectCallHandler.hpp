@@ -65,6 +65,9 @@ namespace FunGPU::EvaluatorV2 {
   typename RuntimeBlockType::BlockExecGroup IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls, MaxNumReactivations>::setup_block_for_lambda(PortableMemPool::DeviceAccessor_t mem_pool_acc, 
     const Index_t lambda_idx, const Program program) const {
     const auto& indirect_call_reqs = mem_pool_acc[0].derefHandle(indirect_call_requests_by_block)[lambda_idx];
+    if (indirect_call_reqs.num_indirect_call_reqs == 0) {
+      return typename RuntimeBlockType::BlockExecGroup(PortableMemPool::ArrayHandle<typename RuntimeBlockType::BlockMetadata>(), 0);
+    }
     const auto num_blocks_required = (indirect_call_reqs.num_indirect_call_reqs + RuntimeBlockType::NumThreadsPerBlock - 1) / RuntimeBlockType::NumThreadsPerBlock;
     const auto block_meta_handle = mem_pool_acc[0].AllocArray<typename RuntimeBlockType::BlockMetadata>(num_blocks_required);
     const auto instructions_data = mem_pool_acc[0].derefHandle(program)[lambda_idx];
@@ -72,7 +75,7 @@ namespace FunGPU::EvaluatorV2 {
     Index_t max_num_instructions = 0;
     for (Index_t i = 0; i < num_blocks_required; ++i) {
       const auto runtime_block_handle = mem_pool_acc[0].Alloc<RuntimeBlockType>(instructions_data.instructions);
-      block_metadata[lambda_idx] = typename RuntimeBlockType::BlockMetadata(runtime_block_handle, instructions_data.instructions);
+      block_metadata[i] = typename RuntimeBlockType::BlockMetadata(runtime_block_handle, instructions_data.instructions);
       max_num_instructions = std::max(max_num_instructions, instructions_data.instructions.GetCount());
     }
     return typename RuntimeBlockType::BlockExecGroup(block_meta_handle, max_num_instructions);
@@ -100,15 +103,16 @@ namespace FunGPU::EvaluatorV2 {
     }
     const auto& indirect_call_req = indirect_call_reqs.indirect_call_requests[thread_idx];
     const auto block_idx = thread_idx / RuntimeBlockType::NumThreadsPerBlock;
+    const auto thread_idx_in_block = thread_idx % RuntimeBlockType::NumThreadsPerBlock;
     auto& target_block = *mem_pool_acc[0].derefHandle(mem_pool_acc[0].derefHandle(block_exec_acc[lambda_idx].block_descs)[block_idx].block);
     // captures first, then args.
-    auto& register_set = target_block.registers[block_idx];
+    auto& register_set = target_block.registers[thread_idx_in_block];
     const auto* capture_data = mem_pool_acc[0].derefHandle(indirect_call_req.captures);
     auto it = std::copy(capture_data, capture_data + indirect_call_req.captures.GetCount(), register_set.begin());
     const auto* arg_data = mem_pool_acc[0].derefHandle(indirect_call_req.args);
     std::copy(arg_data, arg_data + indirect_call_req.args.GetCount(), it);
 
-    auto& target_address_data = target_block.target_data[block_idx];
+    auto& target_address_data = target_block.target_data[thread_idx_in_block];
     target_address_data.block = indirect_call_req.caller;
     target_address_data.thread = indirect_call_req.calling_thread;
     target_address_data.register_idx = indirect_call_req.target_register;
@@ -219,7 +223,7 @@ namespace FunGPU::EvaluatorV2 {
        auto result_acc = result.template get_access<cl::sycl::access::mode::read_write>(cgh);
        auto block_exec_group_per_lambda_acc = block_exec_group_per_lambda.template get_access<cl::sycl::access::mode::read>(cgh);
        auto copy_begin_atomic_acc = copy_begin_idx.template get_access<cl::sycl::access::mode::atomic>(cgh);
-       cgh.parallel_for<class MergeIntoResult>(cl::sycl::range<2>(block_exec_group_per_lambda.get_size(), max_num_threads_per_lambda.get_access<cl::sycl::access::mode::read>()[0] / RuntimeBlockType::NumThreadsPerBlock), 
+       cgh.parallel_for<class MergeIntoResult>(cl::sycl::range<2>(program.GetCount() + 1, max_num_threads_per_lambda.get_access<cl::sycl::access::mode::read>()[0] / RuntimeBlockType::NumThreadsPerBlock), 
         [mem_pool_write, result_acc, block_exec_group_per_lambda_acc, copy_begin_atomic_acc](cl::sycl::item<2> itm) {
         auto* target_block_descs = mem_pool_write[0].derefHandle(result_acc[0].block_descs);
         cl::sycl::atomic<Index_t> copy_begin_atomic(copy_begin_atomic_acc[0]);
