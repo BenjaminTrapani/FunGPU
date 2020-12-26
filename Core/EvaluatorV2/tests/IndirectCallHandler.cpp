@@ -24,13 +24,18 @@ struct Fixture {
         << "Running on "
         << work_queue.get_device().get_info<cl::sycl::info::device::name>()
         << ", block size: " << sizeof(RuntimeBlockType) << std::endl;
-    work_queue.submit([&](cl::sycl::handler& cgh) {
+    work_queue.submit([&](cl::sycl::handler &cgh) {
       const auto tmp_program = program;
-      auto mem_pool_acc = mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
-      auto indirect_call_handler_acc = indirect_call_handler_buff.get_access<cl::sycl::access::mode::read_write>(cgh);
-      cgh.single_task<class InitForProgramSize>([tmp_program, mem_pool_acc, indirect_call_handler_acc] {
-              indirect_call_handler_acc[0].update_for_num_lambdas(mem_pool_acc, tmp_program.GetCount());
-      });
+      auto mem_pool_acc =
+          mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
+      auto indirect_call_handler_acc =
+          indirect_call_handler_buff
+              .get_access<cl::sycl::access::mode::read_write>(cgh);
+      cgh.single_task<class InitForProgramSize>(
+          [tmp_program, mem_pool_acc, indirect_call_handler_acc] {
+            indirect_call_handler_acc[0].update_for_num_lambdas(
+                mem_pool_acc, tmp_program.GetCount());
+          });
     });
   }
 
@@ -100,10 +105,10 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
   BOOST_CHECK_EQUAL(3, exec_group.max_num_instructions);
   auto mem_pool_acc =
       mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
-  
+
   const auto validate_reactivation = [&](const auto block_idx) {
     const auto &block_meta_for_reactivation =
-      mem_pool_acc[0].derefHandle(exec_group.block_descs)[block_idx];
+        mem_pool_acc[0].derefHandle(exec_group.block_descs)[block_idx];
     BOOST_REQUIRE(block_meta_for_reactivation.instructions !=
                   PortableMemPool::ArrayHandle<Instruction>());
     BOOST_REQUIRE(block_meta_for_reactivation.block !=
@@ -117,10 +122,10 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
   };
 
   const auto validate_call = [&](const auto block_idx) {
-      const auto &block_meta =
-      mem_pool_acc[0].derefHandle(exec_group.block_descs)[block_idx];
+    const auto &block_meta =
+        mem_pool_acc[0].derefHandle(exec_group.block_descs)[block_idx];
     BOOST_REQUIRE(block_meta.instructions !=
-                PortableMemPool::ArrayHandle<Instruction>());
+                  PortableMemPool::ArrayHandle<Instruction>());
     BOOST_REQUIRE(block_meta.block !=
                   PortableMemPool::Handle<RuntimeBlockType>());
     const auto &first_block = *mem_pool_acc[0].derefHandle(block_meta.block);
@@ -140,11 +145,13 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
     const auto &target_data = first_block.target_data[block_idx];
     BOOST_CHECK_EQUAL(1, target_data.thread);
     BOOST_CHECK_EQUAL(2, target_data.register_idx);
-    BOOST_CHECK(caller_buf.get_access<cl::sycl::access::mode::read>()[block_idx] ==
-                target_data.block);
+    BOOST_CHECK(
+        caller_buf.get_access<cl::sycl::access::mode::read>()[block_idx] ==
+        target_data.block);
   };
 
-  if (mem_pool_acc[0].derefHandle(exec_group.block_descs)[0].instructions == mem_pool_acc[0].derefHandle(program)[0].instructions) {
+  if (mem_pool_acc[0].derefHandle(exec_group.block_descs)[0].instructions ==
+      mem_pool_acc[0].derefHandle(program)[0].instructions) {
     validate_call(0);
     validate_reactivation(1);
   } else {

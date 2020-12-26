@@ -109,8 +109,8 @@ struct Fixture {
       auto mem_pool_acc =
           mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
       const auto *lambdas = mem_pool_acc[0].derefHandle(no_bindings_program);
-      const auto block_handle =
-          mem_pool_acc[0].Alloc<RuntimeBlockType>(lambdas[0].instructions, THREADS_PER_BLOCK);
+      const auto block_handle = mem_pool_acc[0].Alloc<RuntimeBlockType>(
+          lambdas[0].instructions, THREADS_PER_BLOCK);
       const auto block_metadata_array =
           mem_pool_acc[0].AllocArray<RuntimeBlockType::BlockMetadata>(1);
       auto *block_meta_array_data =
@@ -141,8 +141,8 @@ struct Fixture {
         const auto no_bindings_program = generate_program(prog);
         BOOST_REQUIRE_EQUAL(1, no_bindings_program.GetCount());
         const auto *lambdas = mem_pool_acc[0].derefHandle(no_bindings_program);
-        const auto block_handle =
-            mem_pool_acc[0].Alloc<RuntimeBlockType>(lambdas[0].instructions, THREADS_PER_BLOCK);
+        const auto block_handle = mem_pool_acc[0].Alloc<RuntimeBlockType>(
+            lambdas[0].instructions, THREADS_PER_BLOCK);
         BOOST_REQUIRE(block_handle !=
                       PortableMemPool::Handle<RuntimeBlockType>());
         block_metadata_array_data[i++] = RuntimeBlockType::BlockMetadata(
