@@ -1,13 +1,13 @@
 #define BOOST_TEST_MODULE BlockGeneratorTestsModule
 
+#include "Core/EvaluatorV2/BlockGenerator.h"
 #include "Core/BlockPrep.hpp"
 #include "Core/Compiler.hpp"
-#include "Core/EvaluatorV2/BlockGenerator.h"
+#include "Core/EvaluatorV2/CompileProgram.hpp"
 #include "Core/Parser.hpp"
 #include "Core/Visitor.hpp"
-#include "Core/EvaluatorV2/CompileProgram.hpp"
-#include <stdexcept>
 #include <boost/test/included/unit_test.hpp>
+#include <stdexcept>
 
 namespace FunGPU::EvaluatorV2 {
 namespace {
@@ -17,7 +17,8 @@ struct Fixture {
   void check_program_generates_instructions(
       const std::string &program_path,
       const std::vector<std::vector<Instruction>> &instructions) {
-    const auto program = compile_program(program_path, REGISTERS_PER_BLOCK, 32, mem_pool_buffer);
+    const auto program =
+        compile_program(program_path, REGISTERS_PER_BLOCK, 32, mem_pool_buffer);
     auto mem_pool_acc =
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
 
