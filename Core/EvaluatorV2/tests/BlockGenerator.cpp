@@ -1,12 +1,13 @@
 #define BOOST_TEST_MODULE BlockGeneratorTestsModule
-#include <boost/test/included/unit_test.hpp>
 
 #include "Core/BlockPrep.hpp"
 #include "Core/Compiler.hpp"
 #include "Core/EvaluatorV2/BlockGenerator.h"
 #include "Core/Parser.hpp"
 #include "Core/Visitor.hpp"
+#include "Core/EvaluatorV2/CompileProgram.hpp"
 #include <stdexcept>
+#include <boost/test/included/unit_test.hpp>
 
 namespace FunGPU::EvaluatorV2 {
 namespace {
@@ -16,28 +17,9 @@ struct Fixture {
   void check_program_generates_instructions(
       const std::string &program_path,
       const std::vector<std::vector<Instruction>> &instructions) {
-    Parser parser(program_path);
-    auto parsed_result = parser.ParseProgram();
-    std::cout << "Parsed program: " << std::endl;
-    parsed_result->DebugPrint(0);
-    std::cout << std::endl;
-
-    Compiler compiler(parsed_result, mem_pool_buffer);
-    auto compiled_result = compiler.Compile();
-    std::cout << "Compiled program: " << std::endl;
-    compiler.DebugPrintAST(compiled_result);
-    std::cout << std::endl;
-
-    compiled_result = block_prep.PrepareForBlockGeneration(compiled_result);
-    std::cout << "Program after prep for block generation: " << std::endl;
-    compiler.DebugPrintAST(compiled_result);
-    std::cout << std::endl << std::endl;
-
-    const auto program = block_generator.construct_blocks(compiled_result);
+    const auto program = compile_program(program_path, REGISTERS_PER_BLOCK, 32, mem_pool_buffer);
     auto mem_pool_acc =
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
-    std::cout << "Printed program: " << std::endl;
-    std::cout << print(program, mem_pool_acc);
 
     BOOST_REQUIRE_EQUAL(instructions.size(), program.GetCount());
     for (Index_t lambda_idx = 0; lambda_idx < program.GetCount();
