@@ -24,6 +24,14 @@ struct Fixture {
         << "Running on "
         << work_queue.get_device().get_info<cl::sycl::info::device::name>()
         << ", block size: " << sizeof(RuntimeBlockType) << std::endl;
+    work_queue.submit([&](cl::sycl::handler& cgh) {
+      const auto tmp_program = program;
+      auto mem_pool_acc = mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
+      auto indirect_call_handler_acc = indirect_call_handler_buff.get_access<cl::sycl::access::mode::read_write>(cgh);
+      cgh.single_task<class InitForProgramSize>([tmp_program, mem_pool_acc, indirect_call_handler_acc] {
+              indirect_call_handler_acc[0].update_for_num_lambdas(mem_pool_acc, tmp_program.GetCount());
+      });
+    });
   }
 
   std::shared_ptr<PortableMemPool> mem_pool_data =
@@ -32,9 +40,7 @@ struct Fixture {
                                                     cl::sycl::range<1>(1)};
   const Program program;
   std::shared_ptr<IndirectCallHandlerType> indirect_call_handler =
-      std::make_shared<IndirectCallHandlerType>(
-          mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(),
-          program.GetCount());
+      std::make_shared<IndirectCallHandlerType>();
   cl::sycl::buffer<IndirectCallHandlerType> indirect_call_handler_buff{
       indirect_call_handler, cl::sycl::range<1>(1)};
   cl::sycl::queue work_queue;

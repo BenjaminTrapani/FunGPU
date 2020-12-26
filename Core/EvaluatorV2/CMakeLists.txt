@@ -1,4 +1,4 @@
-add_library(EvaluatorV2 BlockGenerator.cpp Instruction.cpp Lambda.cpp Program.cpp CompileProgram.cpp)
+add_library(EvaluatorV2 BlockGenerator.cpp Instruction.cpp Lambda.cpp Program.cpp CompileProgram.cpp Evaluator.cpp)
 target_link_libraries(EvaluatorV2 FunGPUCore)
 
 add_subdirectory(tests)

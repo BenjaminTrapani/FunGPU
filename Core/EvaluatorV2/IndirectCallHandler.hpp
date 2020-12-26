@@ -49,11 +49,7 @@ public:
     Index_t num_runtime_blocks_reactivated = 0;
   };
 
-  IndirectCallHandler(PortableMemPool::HostAccessor_t mem_pool_acc,
-                      const Index_t num_lambdas)
-      : indirect_call_requests_by_block(
-            mem_pool_acc[0].AllocArray<IndirectCallRequestBuffer>(
-                num_lambdas)) {}
+  void update_for_num_lambdas(PortableMemPool::DeviceAccessor_t, Index_t num_lambdas);
 
   static typename RuntimeBlockType::BlockExecGroup
   create_block_exec_group(cl::sycl::queue &,
@@ -82,6 +78,18 @@ public:
       indirect_call_requests_by_block;
   BlockReactivationRequestBuffer block_reactivation_requests_by_block;
 };
+
+template <typename RuntimeBlockType, Index_t MaxNumIndirectCalls,
+          Index_t MaxNumReactivations>
+void IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
+                    MaxNumReactivations>::update_for_num_lambdas(PortableMemPool::DeviceAccessor_t mem_pool_acc, 
+                    const Index_t num_lambdas) {
+  if (num_lambdas != indirect_call_requests_by_block.GetCount()) {
+    mem_pool_acc[0].DeallocArray(indirect_call_requests_by_block);
+    indirect_call_requests_by_block = mem_pool_acc[0].AllocArray<IndirectCallRequestBuffer>(
+              num_lambdas);
+  }
+}
 
 template <typename RuntimeBlockType, Index_t MaxNumIndirectCalls,
           Index_t MaxNumReactivations>

@@ -5,43 +5,33 @@
 #include "Core/EvaluatorV2/RuntimeValue.h"
 #include "Core/PortableMemPool.hpp"
 #include "Core/sycl.hpp"
+#include "Core/EvaluatorV2/IndirectCallHandler.hpp"
+#include "sycl/queue.hpp"
+#include <optional>
 
 namespace FunGPU::EvaluatorV2 {
 class Evaluator {
 public:
   static constexpr Index_t REGISTERS_PER_THREAD = 64;
   static constexpr Index_t THREADS_PER_BLOCK = 32;
-  using RuntimeBlock_t = RuntimeBlock<REGISTERS_PER_THREAD, THREADS_PER_BLOCK>;
-  using RuntimeBlockHandle = PortableMemPool::Handle<RuntimeBlock_t>;
+  using RuntimeBlockType = RuntimeBlock<REGISTERS_PER_THREAD, THREADS_PER_BLOCK>;
+  using IndirectCallHandlerType = IndirectCallHandler<RuntimeBlockType, 4096, 4096>;
 
   Evaluator(cl::sycl::buffer<PortableMemPool>);
-  RuntimeValue compute(const Program &);
-  RuntimeBlockHandle construct_initial_block(const Program &);
+  RuntimeValue compute(Program);
 
 private:
-  struct IndirectCallRequest {
-    FunctionValue function_val;
-    PortableMemPool::Handle<RuntimeBlock_t> dest_block;
-    PortableMemPool::ArrayHandle<RuntimeValue> args;
-    Index_t thread_idx;
-    Index_t register_idx;
-  };
+  PortableMemPool::Handle<RuntimeBlockType> construct_initial_block(Program);
+  RuntimeValue read_result(PortableMemPool::Handle<RuntimeBlockType>);
 
-  class DependencyAggregator {
-  public:
-    RuntimeBlockHandle runtime_block(Index_t);
-    void add_block(RuntimeBlockHandle);
-    Index_t flip();
-    Index_t num_active_blocks() const { return num_active_blocks_; }
-
-  private:
-    std::array<std::array<RuntimeBlockHandle, 4096>, 2> buffers_;
-    Index_t cur_buffer_idx_ = 0;
-    Index_t num_active_blocks_ = 0;
-  };
+  void run_eval_step(RuntimeBlockType::BlockExecGroup);
+  std::optional<RuntimeBlockType::BlockExecGroup> schedule_next_batch(
+    Program);
 
   cl::sycl::buffer<PortableMemPool> mem_pool_buffer_;
-  cl::sycl::buffer<IndirectCallRequest> indirect_call_requests_;
-  cl::sycl::buffer<DependencyAggregator> dependency_aggregator_;
+  std::shared_ptr<IndirectCallHandlerType> indirect_call_handler_data_ = std::make_shared<IndirectCallHandlerType>();
+  cl::sycl::buffer<IndirectCallHandlerType> indirect_call_handler_buffer_{indirect_call_handler_data_, cl::sycl::range<1>(1)};
+  PortableMemPool::Handle<RuntimeBlockType> first_block_;
+  cl::sycl::queue work_queue_;
 };
 } // namespace FunGPU::EvaluatorV2
