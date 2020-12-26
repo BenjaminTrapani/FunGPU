@@ -5,6 +5,7 @@
 #include "Core/EvaluatorV2/BlockGenerator.h"
 #include "Core/Parser.hpp"
 #include "Core/Visitor.hpp"
+#include "Core/EvaluatorV2/CompileProgram.hpp"
 #include <boost/test/included/unit_test.hpp>
 #include <boost/test/tools/old/interface.hpp>
 #include <cmath>
@@ -27,29 +28,7 @@ struct Fixture {
   }
 
   Program generate_program(const std::string &program_path) {
-    Parser parser(program_path);
-    auto parsed_result = parser.ParseProgram();
-    std::cout << "Parsed program: " << std::endl;
-    parsed_result->DebugPrint(0);
-    std::cout << std::endl;
-
-    Compiler compiler(parsed_result, mem_pool_buffer);
-    auto compiled_result = compiler.Compile();
-    std::cout << "Compiled program: " << std::endl;
-    compiler.DebugPrintAST(compiled_result);
-    std::cout << std::endl;
-
-    compiled_result = block_prep.PrepareForBlockGeneration(compiled_result);
-    std::cout << "Program after prep for block generation: " << std::endl;
-    compiler.DebugPrintAST(compiled_result);
-    std::cout << std::endl << std::endl;
-
-    const auto program = block_generator.construct_blocks(compiled_result);
-    auto mem_pool_acc =
-        mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
-    std::cout << "Printed program: " << std::endl;
-    std::cout << print(program, mem_pool_acc);
-    return program;
+    return compile_program(program_path, REGISTERS_PER_THREAD, THREADS_PER_BLOCK, mem_pool_buffer);
   }
 
   void check_block_evaluates_to_value(
@@ -129,7 +108,7 @@ struct Fixture {
       auto mem_pool_acc =
           mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
       const auto *lambdas = mem_pool_acc[0].derefHandle(no_bindings_program);
-      const auto block_handle = mem_pool_acc[0].Alloc<RuntimeBlockType>();
+      const auto block_handle = mem_pool_acc[0].Alloc<RuntimeBlockType>(lambdas[0].instructions);
       const auto block_metadata_array =
           mem_pool_acc[0].AllocArray<RuntimeBlockType::BlockMetadata>(1);
       auto *block_meta_array_data =
@@ -160,7 +139,7 @@ struct Fixture {
         const auto no_bindings_program = generate_program(prog);
         BOOST_REQUIRE_EQUAL(1, no_bindings_program.GetCount());
         const auto *lambdas = mem_pool_acc[0].derefHandle(no_bindings_program);
-        const auto block_handle = mem_pool_acc[0].Alloc<RuntimeBlockType>();
+        const auto block_handle = mem_pool_acc[0].Alloc<RuntimeBlockType>(lambdas[0].instructions);
         BOOST_REQUIRE(block_handle !=
                       PortableMemPool::Handle<RuntimeBlockType>());
         block_metadata_array_data[i++] = RuntimeBlockType::BlockMetadata(

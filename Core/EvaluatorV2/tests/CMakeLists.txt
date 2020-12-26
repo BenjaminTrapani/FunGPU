@@ -12,3 +12,13 @@ endif()
 target_compile_definitions(RuntimeBlockTestExe PRIVATE "BOOST_TEST_DYN_LINK=1")
 target_link_libraries(RuntimeBlockTestExe EvaluatorV2 ${Boost_UNIT_TEST_FRAMEWORK_LIBRARY})
 add_test(NAME RuntimeBlockTest WORKING_DIRECTORY ${CMAKE_BINARY_DIR} COMMAND RuntimeBlockTestExe)
+
+add_executable(IndirectCallHandlerTestExe IndirectCallHandler.cpp)
+if (ENABLE_COMPUTE_CPP)
+  add_sycl_to_target(
+          TARGET "IndirectCallHandlerTestExe"
+          SOURCES IndirectCallHandler.cpp)
+endif()
+target_compile_definitions(IndirectCallHandlerTestExe PRIVATE "BOOST_TEST_DYN_LINK=1")
+target_link_libraries(IndirectCallHandlerTestExe EvaluatorV2 ${Boost_UNIT_TEST_FRAMEWORK_LIBRARY})
+add_test(NAME IndirectCallHandlerTest WORKING_DIRECTORY ${CMAKE_BINARY_DIR} COMMAND IndirectCallHandlerTestExe)
