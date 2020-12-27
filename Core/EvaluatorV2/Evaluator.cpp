@@ -13,6 +13,7 @@ Evaluator::Evaluator(cl::sycl::buffer<PortableMemPool> buffer)
 }
 
 RuntimeValue Evaluator::compute(const Program program) {
+  const auto begin_time = std::chrono::high_resolution_clock::now();
   first_block_ = construct_initial_block(program);
   work_queue_.submit([&](cl::sycl::handler &cgh) {
     auto indirect_call_acc =
@@ -34,16 +35,18 @@ RuntimeValue Evaluator::compute(const Program program) {
         });
   });
 
+  Index_t num_steps = 0;
   while (true) {
-    std::cout << "Scheduling next batch" << std::endl;
     const auto maybe_next_batch = schedule_next_batch(program);
     if (!maybe_next_batch.has_value()) {
       break;
     }
-    std::cout << "Running eval step" << std::endl;
+    ++num_steps;
     run_eval_step(*maybe_next_batch);
   }
-
+  const auto end_time = std::chrono::high_resolution_clock::now();
+  std::cout << "num_steps: " << num_steps << std::endl;
+  std::cout << "total time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - begin_time).count() << std::endl;
   return read_result(first_block_);
 }
 
@@ -184,6 +187,7 @@ void Evaluator::run_eval_step(
                 indirect_call_handler_acc[0].on_activate_block(mem_pool_write,
                                                                block);
               });
+          itm.barrier();
           // TODO deallocate block if all complete in thread.
           if (thread_idx == 0) {
             *mem_pool_write[0].derefHandle(block_meta.block) = local_block[0];

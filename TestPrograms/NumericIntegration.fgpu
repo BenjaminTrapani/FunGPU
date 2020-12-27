@@ -16,4 +16,4 @@
                                                                         (+ accum (integrate-between f a b max-width))
                                                                         (integrate-by-blocks f cur-upper-bound b max-width block-size
                                                                                              (+ accum  (integrate-between f a cur-upper-bound max-width))))))))
-                                     (integrate-by-blocks hard-function 2 2048 0.01 80 0)))
+                                     (integrate-by-blocks hard-function 2 2048 1 128 0)))
