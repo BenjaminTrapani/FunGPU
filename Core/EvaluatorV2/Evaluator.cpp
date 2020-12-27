@@ -98,22 +98,6 @@ auto Evaluator::schedule_next_batch(const Program program)
   const auto next_batch = IndirectCallHandlerType::create_block_exec_group(
       work_queue_, mem_pool_buffer_, indirect_call_handler_buffer_, program);
   if (next_batch.block_descs.GetCount() > 1) {
-    /*std::cout << "Multiple blocks returned" << std::endl;
-    auto mem_pool_acc =
-    mem_pool_buffer_.get_access<cl::sycl::access::mode::read_write>(); const
-    auto* block_metadata = mem_pool_acc[0].derefHandle(next_batch.block_descs);
-    for (Index_t i = 0; i < next_batch.block_descs.GetCount(); ++i) {
-      Index_t lambda_idx = std::numeric_limits<Index_t>::max();
-      const auto* program_data = mem_pool_acc[0].derefHandle(program);
-      for (Index_t j = 0; j < program.GetCount(); ++j) {
-        if (program_data[j].instructions == block_metadata[i].instructions) {
-          lambda_idx = j;
-          break;
-        }
-      }
-      std::cout << " block: num threads " << block_metadata[i].num_threads << "
-    for lambda " << lambda_idx << std::endl;
-    }*/
     return next_batch;
   }
   if (next_batch.block_descs.GetCount() != 1) {

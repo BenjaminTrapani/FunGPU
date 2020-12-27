@@ -135,18 +135,18 @@ BOOST_FIXTURE_TEST_CASE(SimpleLetRec, Fixture) {
             CreateLambda{0, 1, portable_index_array_from_vector({0})}),
         create_instruction(AssignConstant{1, 0}),
         create_instruction(AssignConstant{2, 5}),
-        create_instruction(
-            BlockingCallIndirect{3, 0, portable_index_array_from_vector({1, 2})})},
+        create_instruction(BlockingCallIndirect{
+            3, 0, portable_index_array_from_vector({1, 2})})},
        {create_instruction(Equal{3, 1, 2}),
         create_instruction(
             CreateLambda{4, 2, portable_index_array_from_vector({0, 1, 2})}),
         create_instruction(If{3, 3, 4}), create_instruction(Assign{5, 2}),
-        create_instruction(
-            BlockingCallIndirect{6, 4, PortableMemPool::ArrayHandle<Index_t>()})},
+        create_instruction(BlockingCallIndirect{
+            6, 4, PortableMemPool::ArrayHandle<Index_t>()})},
        {create_instruction(AssignConstant{3, 1}),
         create_instruction(Add{4, 3, 1}),
-        create_instruction(
-            BlockingCallIndirect{5, 0, portable_index_array_from_vector({4, 2})})}});
+        create_instruction(BlockingCallIndirect{
+            5, 0, portable_index_array_from_vector({4, 2})})}});
 }
 
 BOOST_FIXTURE_TEST_CASE(CheckBarrierInstructionGenerated, Fixture) {

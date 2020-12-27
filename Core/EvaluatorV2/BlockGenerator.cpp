@@ -170,11 +170,6 @@ Lambda BlockGenerator::construct_block(
 
   std::unordered_map<Index_t, Index_t> lambda_space_ident_to_register;
   std::set<Index_t> lambda_captured_indices;
-  if (const auto block_iter = lambdas_to_blocks.find(lambda);
-      block_iter != lambdas_to_blocks.end() && block_iter->second == 2) {
-    volatile int x = 1;
-    x = x + 1;
-  }
   extract_lambda_space_captured_indices(lambda, 0, mem_pool_acc,
                                         lambda_captured_indices);
   std::unordered_map<Index_t, Index_t> lambda_space_ident_to_remaining_count;
@@ -304,10 +299,6 @@ Lambda BlockGenerator::construct_block(
                   }
                   result.data.create_lambda.block_idx =
                       lambda_to_block_idx_iter->second;
-                  if (lambda_to_block_idx_iter->second == 2) {
-                    volatile int x = 1;
-                    x = x + 1;
-                  }
                   const auto captured_indices = [&] {
                     std::set<Index_t> captured_indices_set;
                     extract_lambda_space_captured_indices(
