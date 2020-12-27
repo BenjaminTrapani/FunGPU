@@ -12,60 +12,73 @@ Instruction::print(PortableMemPool::HostAccessor_t mem_pool_acc) const {
            << " " << #OP << " " << elem.rhs;                                   \
   }
 
-  visit(
-      *this,
-      Visitor{
-          [&](const CreateLambda &create_lambda) {
-            result << "CreateLambda: reg " << create_lambda.target_register
-                   << " = " << create_lambda.block_idx
-                   << ", capture registers ";
-            const auto *captured_indices = mem_pool_acc[0].derefHandle(
-                create_lambda.captured_indices.unpack());
-            for (Index_t i = 0;
-                 i < create_lambda.captured_indices.unpack().GetCount(); ++i) {
-              result << captured_indices[i] << ", ";
-            }
-          },
-          [&](const AssignConstant &assign_constant) {
-            result << "AssignConstant: reg " << assign_constant.target_register
-                   << " = " << assign_constant.constant;
-          },
-          [&](const Assign &assign) {
-            result << "Assign: reg " << assign.target_register << " = "
-                   << assign.source_register;
-          },
-          [&](const CallIndirect &call_indirect) {
-            result << "CallIndirect: reg " << call_indirect.target_register
-                   << " = call reg " << call_indirect.lambda_idx
-                   << ", arg registers ";
-            const auto *arg_regs =
-                mem_pool_acc[0].derefHandle(call_indirect.arg_indices.unpack());
-            for (Index_t i = 0;
-                 i < call_indirect.arg_indices.unpack().GetCount(); ++i) {
-              result << arg_regs[i] << ", ";
-            }
-          },
-          [&](const If &if_inst) {
-            result << "If reg " << if_inst.predicate << " goto "
-                   << if_inst.goto_true << " else " << if_inst.goto_false;
-          },
-          [&](const Floor &floor_inst) {
-            result << "Floor: reg " << floor_inst.target_register << " = foor("
-                   << floor_inst.arg << ")";
-          },
-          [&](const InstructionBarrier &) { result << "InstructionBarrier"; },
-          HANDLE_BINARY_OP(Add, +),
-          HANDLE_BINARY_OP(Sub, -),
-          HANDLE_BINARY_OP(Mul, *),
-          HANDLE_BINARY_OP(Div, /),
-          HANDLE_BINARY_OP(Equal, ==),
-          HANDLE_BINARY_OP(GreaterThan, >),
-          HANDLE_BINARY_OP(Remainder, remainder),
-          HANDLE_BINARY_OP(Expt, expt),
-      },
-      [](const auto &) {
-        throw std::invalid_argument("Unexpected instruction type");
-      });
+  const auto print_call_indirect_like = [&](const auto &call_indirect) {
+    const auto is_blocking =
+        std::is_same_v<std::remove_cvref_t<decltype(call_indirect)>,
+                       BlockingCallIndirect>;
+    if (is_blocking) {
+      result << "Blocking";
+    }
+    result << "CallIndirect: reg " << call_indirect.target_register
+           << " = call reg " << call_indirect.lambda_idx << ", arg registers ";
+    const auto *arg_regs =
+        mem_pool_acc[0].derefHandle(call_indirect.arg_indices.unpack());
+    for (Index_t i = 0; i < call_indirect.arg_indices.unpack().GetCount();
+         ++i) {
+      result << arg_regs[i] << ", ";
+    }
+  };
+
+  visit(*this,
+        Visitor{
+            [&](const CreateLambda &create_lambda) {
+              result << "CreateLambda: reg " << create_lambda.target_register
+                     << " = " << create_lambda.block_idx
+                     << ", capture registers ";
+              const auto *captured_indices = mem_pool_acc[0].derefHandle(
+                  create_lambda.captured_indices.unpack());
+              for (Index_t i = 0;
+                   i < create_lambda.captured_indices.unpack().GetCount();
+                   ++i) {
+                result << captured_indices[i] << ", ";
+              }
+            },
+            [&](const AssignConstant &assign_constant) {
+              result << "AssignConstant: reg "
+                     << assign_constant.target_register << " = "
+                     << assign_constant.constant;
+            },
+            [&](const Assign &assign) {
+              result << "Assign: reg " << assign.target_register << " = "
+                     << assign.source_register;
+            },
+            [&](const CallIndirect &call_indirect) {
+              print_call_indirect_like(call_indirect);
+            },
+            [&](const BlockingCallIndirect &call_indirect) {
+              print_call_indirect_like(call_indirect);
+            },
+            [&](const If &if_inst) {
+              result << "If reg " << if_inst.predicate << " goto "
+                     << if_inst.goto_true << " else " << if_inst.goto_false;
+            },
+            [&](const Floor &floor_inst) {
+              result << "Floor: reg " << floor_inst.target_register
+                     << " = foor(" << floor_inst.arg << ")";
+            },
+            [&](const InstructionBarrier &) { result << "InstructionBarrier"; },
+            HANDLE_BINARY_OP(Add, +),
+            HANDLE_BINARY_OP(Sub, -),
+            HANDLE_BINARY_OP(Mul, *),
+            HANDLE_BINARY_OP(Div, /),
+            HANDLE_BINARY_OP(Equal, ==),
+            HANDLE_BINARY_OP(GreaterThan, >),
+            HANDLE_BINARY_OP(Remainder, remainder),
+            HANDLE_BINARY_OP(Expt, expt),
+        },
+        [](const auto &) {
+          throw std::invalid_argument("Unexpected instruction type");
+        });
 
   return result.str();
 #undef HANDLE_BINARY_OP
@@ -83,6 +96,15 @@ bool array_handles_equal(const PortableMemPool::ArrayHandle<T> lhs,
   const auto *lhs_data = mem_pool_acc[0].derefHandle(lhs);
   const auto *rhs_data = mem_pool_acc[0].derefHandle(rhs);
   return std::equal(lhs_data, lhs_data + lhs.GetCount(), rhs_data);
+}
+
+bool call_indirect_common_equals(PortableMemPool::HostAccessor_t &mem_pool_acc,
+                                 const CallIndirectCommon &lhs,
+                                 const CallIndirectCommon &rhs) {
+  return lhs.target_register == rhs.target_register &&
+         lhs.lambda_idx == rhs.lambda_idx &&
+         array_handles_equal(lhs.arg_indices.unpack(), rhs.arg_indices.unpack(),
+                             mem_pool_acc);
 }
 } // namespace
 
@@ -108,10 +130,13 @@ bool Assign::equals(const Assign &other,
 
 bool CallIndirect::equals(const CallIndirect &other,
                           PortableMemPool::HostAccessor_t &mem_pool_acc) const {
-  return target_register == other.target_register &&
-         lambda_idx == other.lambda_idx &&
-         array_handles_equal(arg_indices.unpack(), other.arg_indices.unpack(),
-                             mem_pool_acc);
+  return call_indirect_common_equals(mem_pool_acc, *this, other);
+}
+
+bool BlockingCallIndirect::equals(
+    const BlockingCallIndirect &other,
+    PortableMemPool::HostAccessor_t &mem_pool_acc) const {
+  return call_indirect_common_equals(mem_pool_acc, *this, other);
 }
 
 bool If::equals(const If &other,

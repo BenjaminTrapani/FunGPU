@@ -275,6 +275,7 @@ void CPUEvaluator::PerformGarbageCollection(const Index_t numActiveBlocks) {
 CPUEvaluator::RuntimeBlock_t::RuntimeValue
 CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
                               Index_t &maxConcurrentBlocksDuringExec) {
+  const auto begin_time = std::chrono::high_resolution_clock::now();
   CreateFirstBlock(rootNode);
 
   maxConcurrentBlocksDuringExec = 0;
@@ -282,7 +283,9 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
   m_requiresGarbageCollection.get_access<access::mode::discard_write>()[0] =
       false;
   try {
+    Index_t num_steps = 0;
     while (true) {
+      ++num_steps;
       m_workQueue.submit([&](handler &cgh) {
         auto numActiveBlocksWrite =
             m_numActiveBlocksBuff.get_access<access::mode::discard_write>(cgh);
@@ -367,10 +370,16 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
             });
       });
     }
+    std::cout << "Num steps: " << num_steps << std::endl;
   } catch (cl::sycl::exception e) {
     std::cerr << "Sycl exception: " << e.what() << std::endl;
   }
-
+  const auto end_time = std::chrono::high_resolution_clock::now();
+  std::cout << "total time: "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(end_time -
+                                                                     begin_time)
+                   .count()
+            << std::endl;
   m_workQueue.submit([&](handler &cgh) {
     auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
     auto resultOnHostAcc =
