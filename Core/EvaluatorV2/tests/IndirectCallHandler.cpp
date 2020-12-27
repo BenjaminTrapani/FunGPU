@@ -133,7 +133,7 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
     const std::array<RuntimeValue, 3> expected_captures_and_arg{
         RuntimeValue(2), RuntimeValue(3), RuntimeValue(42)};
     for (Index_t i = 0; i < expected_captures_and_arg.size(); ++i) {
-      const auto actual_val = first_block.registers[block_idx][i];
+      const auto actual_val = first_block.registers[0][i];
       const auto expected_val = expected_captures_and_arg[i];
       BOOST_CHECK_EQUAL(static_cast<int>(expected_val.type),
                         static_cast<int>(actual_val.type));
@@ -142,11 +142,11 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
     BOOST_CHECK(block_meta.instructions ==
                 mem_pool_acc[0].derefHandle(program)[0].instructions);
     BOOST_CHECK_EQUAL(1, block_meta.num_threads);
-    const auto &target_data = first_block.target_data[block_idx];
+    const auto &target_data = first_block.target_data[0];
     BOOST_CHECK_EQUAL(1, target_data.thread);
     BOOST_CHECK_EQUAL(2, target_data.register_idx);
     BOOST_CHECK(
-        caller_buf.get_access<cl::sycl::access::mode::read>()[block_idx] ==
+        caller_buf.get_access<cl::sycl::access::mode::read>()[0] ==
         target_data.block);
   };
 

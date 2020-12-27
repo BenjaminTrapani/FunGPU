@@ -86,6 +86,7 @@ public:
   PortableMemPool::ArrayHandle<Instruction> instruction_ref;
   TargetAddress target_data[ThreadsPerBlock];
   Index_t num_threads;
+  Index_t cur_cycle = 0;
   int num_outstanding_dependencies = 0;
 };
 
@@ -113,8 +114,9 @@ if (instruction_count < 3 ||
   return visit(prev_instruction, extract_target_register, [](const auto &) {});
 }
 const auto &if_instr = instructions[instruction_count - 3].data.if_val;
+const auto is_pred_true = static_cast<bool>(register_set[if_instr.predicate].data.float_val);
 const auto last_instr =
-    static_cast<bool>(register_set[if_instr.predicate].data.float_val)
+    is_pred_true
         ? instructions[if_instr.goto_true]
         : instructions[if_instr.goto_false];
 return visit(last_instr, extract_target_register, [](const auto &) {});
@@ -138,7 +140,7 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
     const InstructionLocalMemAccessor all_instructions,
     const Index_t num_instructions, OnIndirectCall &&on_indirect_call,
     OnActivateBlock &&on_activate_block) -> Status {
-  auto register_set = registers[thread];
+  auto &register_set = registers[thread];
   const auto &instructions = all_instructions[block_idx];
 #define HANDLE_BINARY_OP(TYPE, OP)                                             \
   [&](const TYPE &type) {                                                      \
@@ -150,6 +152,27 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
             .data.float_val;                                                   \
     return Status::READY;                                                      \
   }
+
+  const auto handle_call_indirect = [&](const auto& call_indirect) {
+    const auto arg_indices_handle = call_indirect.arg_indices.unpack();
+    const auto *arg_indices = mem_pool[0].derefHandle(arg_indices_handle);
+    auto arg_values =
+        mem_pool[0].AllocArray<RuntimeValue>(arg_indices_handle.GetCount());
+    auto *arg_values_data = mem_pool[0].derefHandle(arg_values);
+    for (Index_t i = 0; i < arg_indices_handle.GetCount(); ++i) {
+      arg_values_data[i] = register_set[arg_indices[i]];
+    }
+    cl::sycl::atomic<int, cl::sycl::access::address_space::local_space>
+        atomic_dep_count(
+            (cl::sycl::multi_ptr<
+                int, cl::sycl::access::address_space::local_space>(
+                &num_outstanding_dependencies)));
+    atomic_dep_count.fetch_add(1);
+    const auto function_val =
+        register_set[call_indirect.lambda_idx].data.function_val;
+    on_indirect_call(m_handle, function_val, thread,
+                      call_indirect.target_register, arg_values);
+  };
 
   const auto non_control_flow_handlers = Visitor{
       HANDLE_BINARY_OP(Add, +),
@@ -210,37 +233,24 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
         return Status::READY;
       },
       [&](const CallIndirect &call_indirect) {
-        const auto arg_indices_handle = call_indirect.arg_indices.unpack();
-        const auto *arg_indices = mem_pool[0].derefHandle(arg_indices_handle);
-        auto arg_values =
-            mem_pool[0].AllocArray<RuntimeValue>(arg_indices_handle.GetCount());
-        auto *arg_values_data = mem_pool[0].derefHandle(arg_values);
-        for (Index_t i = 0; i < arg_indices_handle.GetCount(); ++i) {
-          arg_values_data[i] = register_set[arg_indices[i]];
-        }
-        cl::sycl::atomic<int, cl::sycl::access::address_space::local_space>
-            atomic_dep_count(
-                (cl::sycl::multi_ptr<
-                    int, cl::sycl::access::address_space::local_space>(
-                    &num_outstanding_dependencies)));
-        atomic_dep_count.fetch_add(1);
-        const auto function_val =
-            register_set[call_indirect.lambda_idx].data.function_val;
-        on_indirect_call(m_handle, function_val, thread,
-                         call_indirect.target_register, arg_values);
+        handle_call_indirect(call_indirect);
         return Status::READY;
+      },
+      [&](const BlockingCallIndirect& blocking_call_indirect) {
+        handle_call_indirect(blocking_call_indirect);
+        return Status::STALLED;
       },
       [&](const InstructionBarrier &) { return Status::STALLED; }};
 
 #undef HANDLE_BINARY_OP
 
   auto status = Status::READY;
-  for (Index_t cur_cycle = 0; status == Status::READY; ++cur_cycle) {
+  for (; status == Status::READY; ++cur_cycle) {
     if (cur_cycle > num_instructions) {
       status = Status::COMPLETE;
       continue;
     } else if (cur_cycle == num_instructions ||
-               (instructions[num_instructions - 3].type ==
+               (num_instructions >= 3 && instructions[num_instructions - 3].type ==
                     InstructionType::IF &&
                 cur_cycle > num_instructions - 3)) {
       const auto &target = target_data[thread];
@@ -249,10 +259,11 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
         continue;
       }
       auto &target_block = *mem_pool[0].derefHandle(target.block);
+      const auto last_write_loc_for_fill = last_write_location(block_idx, thread, all_instructions,
+                                           num_instructions);
       target_block.fill_dependency(
           target.thread, target.register_idx,
-          register_set[last_write_location(block_idx, thread, all_instructions,
-                                           num_instructions)],
+          register_set[last_write_loc_for_fill],
           on_activate_block);
       status = Status::COMPLETE;
       continue;
@@ -270,13 +281,13 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
                     : instructions[instr.goto_false];
             return visit(
                 next_instr,
-                [&](const auto &next_instr) {
+                [&](const auto &derived_next_instr) {
                   if constexpr (std::is_same_v<If, std::remove_cvref_t<decltype(
-                                                       next_instr)>>) {
+                                                       derived_next_instr)>>) {
                     // TODO error, this should never happen
                     return Status::READY;
                   } else {
-                    return non_control_flow_handlers(next_instr);
+                    return non_control_flow_handlers(derived_next_instr);
                   }
                 },
                 [](const auto &) {});
@@ -286,8 +297,6 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
         },
         [](const auto &) {});
   }
-  // Thread to local copy
-  registers[thread] = register_set;
   return status;
 }
 
@@ -300,7 +309,8 @@ void RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::fill_dependency(
   cl::sycl::atomic<int> atomic_dep_count(
       (cl::sycl::multi_ptr<int, cl::sycl::access::address_space::global_space>(
           &num_outstanding_dependencies)));
-  if (atomic_dep_count.fetch_sub(1) == 1) {
+  const auto prev_count = atomic_dep_count.fetch_sub(1);
+  if (prev_count == 1) {
     on_activate_block(m_handle);
   }
 }

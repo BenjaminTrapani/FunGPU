@@ -12,6 +12,7 @@ enum class InstructionType {
   ASSIGN_CONSTANT,
   ASSIGN,
   CALL_INDIRECT,
+  BLOCKING_CALL_INDIRECT,
   IF,
   ADD,
   SUB,
@@ -50,14 +51,24 @@ struct Assign {
   Index_t source_register;
 };
 
-struct CallIndirect {
-  static constexpr InstructionType TYPE = InstructionType::CALL_INDIRECT;
-  bool equals(const CallIndirect &, PortableMemPool::HostAccessor_t &) const;
-
+struct CallIndirectCommon {
   Index_t target_register;
   Index_t lambda_idx;
   PortableMemPool::TrivialArrayHandle<Index_t> arg_indices;
 };
+
+struct CallIndirect : public CallIndirectCommon {
+  static constexpr InstructionType TYPE = InstructionType::CALL_INDIRECT;
+  bool equals(const CallIndirect &, PortableMemPool::HostAccessor_t &) const;
+};
+
+struct BlockingCallIndirect : public CallIndirectCommon {
+  static constexpr InstructionType TYPE = InstructionType::BLOCKING_CALL_INDIRECT;
+  bool equals(const BlockingCallIndirect &, PortableMemPool::HostAccessor_t &) const;
+};
+
+static_assert(std::is_standard_layout<CallIndirect>::value);
+static_assert(std::is_standard_layout<BlockingCallIndirect>::value);
 
 struct If {
   static constexpr InstructionType TYPE = InstructionType::IF;
@@ -123,6 +134,7 @@ struct Instruction {
     AssignConstant assign_constant;
     Assign assign;
     CallIndirect call_indirect;
+    BlockingCallIndirect blocking_call_indirect;
     If if_val;
     Add add;
     Sub sub;
@@ -150,6 +162,7 @@ decltype(auto) visit(const Instruction &instruction, CB &&cb,
     _(AssignConstant)
     _(Assign)
     _(CallIndirect)
+    _(BlockingCallIndirect)
     _(If)
     _(Add)
     _(Sub)

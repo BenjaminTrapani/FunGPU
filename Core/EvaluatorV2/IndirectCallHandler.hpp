@@ -330,6 +330,11 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
         });
   });
   // Fill indirect call request blocks
+  const auto max_num_threads_per_lambda_val = max_num_threads_per_lambda
+                               .get_access<cl::sycl::access::mode::read>()[0];
+  if (max_num_threads_per_lambda_val == 0) {
+    throw std::invalid_argument("No threads across any lambdas");
+  }
   work_queue.submit([&](cl::sycl::handler &cgh) {
     auto mem_pool_write =
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
@@ -341,8 +346,7 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
             .template get_access<cl::sycl::access::mode::read_write>(cgh);
     cgh.parallel_for<class InitBlocksPerThread>(
         cl::sycl::range<2>(program.GetCount(),
-                           max_num_threads_per_lambda
-                               .get_access<cl::sycl::access::mode::read>()[0]),
+                           max_num_threads_per_lambda_val),
         [mem_pool_write, block_exec_group_per_lambda_acc,
          indirect_call_handler_acc](const cl::sycl::item<2> itm) {
           indirect_call_handler_acc[0].setup_block(
@@ -387,8 +391,7 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
     cgh.parallel_for<class MergeIntoResult>(
         cl::sycl::range<2>(
             program.GetCount() + 1,
-            max_num_threads_per_lambda
-                    .get_access<cl::sycl::access::mode::read>()[0] /
+            (max_num_threads_per_lambda_val + RuntimeBlockType::NumThreadsPerBlock - 1)  /
                 RuntimeBlockType::NumThreadsPerBlock),
         [mem_pool_write, result_acc, block_exec_group_per_lambda_acc,
          copy_begin_atomic_acc](cl::sycl::item<2> itm) {

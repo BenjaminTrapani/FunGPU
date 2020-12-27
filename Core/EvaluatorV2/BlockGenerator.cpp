@@ -170,6 +170,10 @@ Lambda BlockGenerator::construct_block(
 
   std::unordered_map<Index_t, Index_t> lambda_space_ident_to_register;
   std::set<Index_t> lambda_captured_indices;
+  if (const auto block_iter = lambdas_to_blocks.find(lambda); block_iter != lambdas_to_blocks.end() && block_iter->second == 2) {
+    volatile int x = 1;
+    x = x + 1;
+  }
   extract_lambda_space_captured_indices(lambda, 0, mem_pool_acc,
                                         lambda_captured_indices);
   std::unordered_map<Index_t, Index_t> lambda_space_ident_to_remaining_count;
@@ -182,9 +186,8 @@ Lambda BlockGenerator::construct_block(
     }
   }
   for (Index_t i = 0; i < lambda_node.m_argCount; ++i) {
-    const auto lambda_space_ident = lambda_node.m_argCount - i - 1;
-    lambda_space_ident_to_remaining_count[lambda_space_ident] = 0;
-    lambda_space_ident_to_register[lambda_space_ident] = free_indices.front();
+    lambda_space_ident_to_remaining_count[i] = 0;
+    lambda_space_ident_to_register[i] = free_indices.front();
     free_indices.pop_front();
   }
 
@@ -235,7 +238,8 @@ Lambda BlockGenerator::construct_block(
   std::vector<Instruction> result_instructions;
   const auto primitive_expression_to_instruction =
       [&](const Compiler::ASTNodeHandle ast_node,
-          const std::optional<Index_t> pre_allocated_register) {
+          const std::optional<Index_t> pre_allocated_register,
+          bool is_tail_instruction) {
         Instruction result;
         const auto allocate_register_or_use_pre_allocated = [&] {
           if (pre_allocated_register.has_value()) {
@@ -247,7 +251,7 @@ Lambda BlockGenerator::construct_block(
             *mem_pool_acc[0].derefHandle(ast_node),
             Visitor{
                 [&](const Compiler::CallNode &call_node) {
-                  result.type = InstructionType::CALL_INDIRECT;
+                  result.type = is_tail_instruction ? InstructionType::BLOCKING_CALL_INDIRECT : InstructionType::CALL_INDIRECT;
                   const auto &target_ast_node =
                       *mem_pool_acc[0].derefHandle(call_node.m_target);
                   result.data.call_indirect.lambda_idx =
@@ -265,9 +269,23 @@ Lambda BlockGenerator::construct_block(
                     arg_indices_data[arg_idx] =
                         lookup_register_for_ident(arg_elem);
                   }
-                  result.data.call_indirect.arg_indices = arg_indices;
-                  result.data.call_indirect.target_register =
-                      allocate_register_or_use_pre_allocated();
+                  const auto assign_call_indirect_fields = [&](CallIndirectCommon& derived_result) {
+                    derived_result.arg_indices = arg_indices;
+                    derived_result.target_register =
+                        allocate_register_or_use_pre_allocated();
+                  };
+                  visit(result, Visitor {
+                    [&](CallIndirect& call_indirect) {
+                      assign_call_indirect_fields(call_indirect);
+                    },
+                    [&](BlockingCallIndirect& blocking_indirect) {
+                      assign_call_indirect_fields(blocking_indirect);
+                    }, [](auto&) {
+                      throw std::invalid_argument("Unexpected");
+                    }
+                  }, [](auto&) {
+                    throw std::invalid_argument("Unexpected");
+                  });
                 },
                 [&](const Compiler::LambdaNode &) {
                   result.type = InstructionType::CREATE_LAMBDA;
@@ -280,6 +298,10 @@ Lambda BlockGenerator::construct_block(
                   }
                   result.data.create_lambda.block_idx =
                       lambda_to_block_idx_iter->second;
+                  if (lambda_to_block_idx_iter->second == 2) {
+                    volatile int x = 1;
+                    x = x + 1;
+                  }
                   const auto captured_indices = [&] {
                     std::set<Index_t> captured_indices_set;
                     extract_lambda_space_captured_indices(
@@ -515,7 +537,7 @@ Lambda BlockGenerator::construct_block(
         }
         const auto &instruction = result_instructions.emplace_back(
             primitive_expression_to_instruction(bound_expr_data[i],
-                                                pre_allocated_register));
+                                                pre_allocated_register, false));
         bindingRequiresIndirectCall =
             bindingRequiresIndirectCall ||
             instruction.type == InstructionType::CALL_INDIRECT;
@@ -533,19 +555,19 @@ Lambda BlockGenerator::construct_block(
     case Compiler::ASTNode::Type::If: {
       const auto &if_node = static_cast<const Compiler::IfNode &>(*child_expr);
       result_instructions.emplace_back(primitive_expression_to_instruction(
-          pending_generation, std::nullopt));
+          pending_generation, std::nullopt, false));
       result_instructions.emplace_back(
-          primitive_expression_to_instruction(if_node.m_then, std::nullopt));
+          primitive_expression_to_instruction(if_node.m_then, std::nullopt, true));
       result_instructions.emplace_back(
-          primitive_expression_to_instruction(if_node.m_else, std::nullopt));
+          primitive_expression_to_instruction(if_node.m_else, std::nullopt, true));
       // If exprs are always in tail position
       pending_generation = Compiler::ASTNodeHandle();
       break;
     }
     default:
       // Tail instruction
-      result_instructions.emplace_back(primitive_expression_to_instruction(
-          pending_generation, std::nullopt));
+      auto& tail_instruction = result_instructions.emplace_back(primitive_expression_to_instruction(
+          pending_generation, std::nullopt, true));
       pending_generation = Compiler::ASTNodeHandle();
       break;
     }

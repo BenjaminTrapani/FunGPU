@@ -12,6 +12,22 @@ Instruction::print(PortableMemPool::HostAccessor_t mem_pool_acc) const {
            << " " << #OP << " " << elem.rhs;                                   \
   }
 
+  const auto print_call_indirect_like = [&](const auto& call_indirect) {
+    const auto is_blocking = std::is_same_v<std::remove_cvref_t<decltype(call_indirect)>, BlockingCallIndirect>;
+    if (is_blocking) {
+      result << "Blocking";
+    }
+     result << "CallIndirect: reg " << call_indirect.target_register
+                   << " = call reg " << call_indirect.lambda_idx
+                   << ", arg registers ";
+            const auto *arg_regs =
+                mem_pool_acc[0].derefHandle(call_indirect.arg_indices.unpack());
+            for (Index_t i = 0;
+                 i < call_indirect.arg_indices.unpack().GetCount(); ++i) {
+              result << arg_regs[i] << ", ";
+            }
+  };
+
   visit(
       *this,
       Visitor{
@@ -35,15 +51,10 @@ Instruction::print(PortableMemPool::HostAccessor_t mem_pool_acc) const {
                    << assign.source_register;
           },
           [&](const CallIndirect &call_indirect) {
-            result << "CallIndirect: reg " << call_indirect.target_register
-                   << " = call reg " << call_indirect.lambda_idx
-                   << ", arg registers ";
-            const auto *arg_regs =
-                mem_pool_acc[0].derefHandle(call_indirect.arg_indices.unpack());
-            for (Index_t i = 0;
-                 i < call_indirect.arg_indices.unpack().GetCount(); ++i) {
-              result << arg_regs[i] << ", ";
-            }
+           print_call_indirect_like(call_indirect);
+          },
+          [&](const BlockingCallIndirect& call_indirect) {
+            print_call_indirect_like(call_indirect);
           },
           [&](const If &if_inst) {
             result << "If reg " << if_inst.predicate << " goto "
@@ -84,6 +95,13 @@ bool array_handles_equal(const PortableMemPool::ArrayHandle<T> lhs,
   const auto *rhs_data = mem_pool_acc[0].derefHandle(rhs);
   return std::equal(lhs_data, lhs_data + lhs.GetCount(), rhs_data);
 }
+
+bool call_indirect_common_equals(PortableMemPool::HostAccessor_t& mem_pool_acc, const CallIndirectCommon& lhs, const CallIndirectCommon& rhs) {
+     return lhs.target_register == rhs.target_register &&
+         lhs.lambda_idx == rhs.lambda_idx &&
+         array_handles_equal(lhs.arg_indices.unpack(), rhs.arg_indices.unpack(),
+                             mem_pool_acc);
+}
 } // namespace
 
 bool CreateLambda::equals(const CreateLambda &other,
@@ -108,10 +126,12 @@ bool Assign::equals(const Assign &other,
 
 bool CallIndirect::equals(const CallIndirect &other,
                           PortableMemPool::HostAccessor_t &mem_pool_acc) const {
-  return target_register == other.target_register &&
-         lambda_idx == other.lambda_idx &&
-         array_handles_equal(arg_indices.unpack(), other.arg_indices.unpack(),
-                             mem_pool_acc);
+  return call_indirect_common_equals(mem_pool_acc, *this, other);
+}
+
+bool BlockingCallIndirect::equals(const BlockingCallIndirect &other,
+                          PortableMemPool::HostAccessor_t &mem_pool_acc) const {
+  return call_indirect_common_equals(mem_pool_acc, *this, other);
 }
 
 bool If::equals(const If &other,
