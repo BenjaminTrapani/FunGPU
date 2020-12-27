@@ -46,7 +46,11 @@ RuntimeValue Evaluator::compute(const Program program) {
   }
   const auto end_time = std::chrono::high_resolution_clock::now();
   std::cout << "num_steps: " << num_steps << std::endl;
-  std::cout << "total time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - begin_time).count() << std::endl;
+  std::cout << "total time: "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(end_time -
+                                                                     begin_time)
+                   .count()
+            << std::endl;
   return read_result(first_block_);
 }
 
@@ -95,8 +99,9 @@ auto Evaluator::schedule_next_batch(const Program program)
       work_queue_, mem_pool_buffer_, indirect_call_handler_buffer_, program);
   if (next_batch.block_descs.GetCount() > 1) {
     /*std::cout << "Multiple blocks returned" << std::endl;
-    auto mem_pool_acc = mem_pool_buffer_.get_access<cl::sycl::access::mode::read_write>();
-    const auto* block_metadata = mem_pool_acc[0].derefHandle(next_batch.block_descs);
+    auto mem_pool_acc =
+    mem_pool_buffer_.get_access<cl::sycl::access::mode::read_write>(); const
+    auto* block_metadata = mem_pool_acc[0].derefHandle(next_batch.block_descs);
     for (Index_t i = 0; i < next_batch.block_descs.GetCount(); ++i) {
       Index_t lambda_idx = std::numeric_limits<Index_t>::max();
       const auto* program_data = mem_pool_acc[0].derefHandle(program);
@@ -106,7 +111,8 @@ auto Evaluator::schedule_next_batch(const Program program)
           break;
         }
       }
-      std::cout << " block: num threads " << block_metadata[i].num_threads << " for lambda " << lambda_idx << std::endl;
+      std::cout << " block: num threads " << block_metadata[i].num_threads << "
+    for lambda " << lambda_idx << std::endl;
     }*/
     return next_batch;
   }

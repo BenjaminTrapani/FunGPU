@@ -99,7 +99,7 @@ BOOST_FIXTURE_TEST_CASE(SimpleCallTest, Fixture) {
             CreateLambda{0, 1, PortableMemPool::ArrayHandle<Index_t>()}),
         create_instruction(AssignConstant{1, 42}),
         create_instruction(
-            CallIndirect{2, 0, portable_index_array_from_vector({1})})},
+            BlockingCallIndirect{2, 0, portable_index_array_from_vector({1})})},
        {create_instruction(Assign{1, 0})}});
 }
 
@@ -111,7 +111,7 @@ BOOST_FIXTURE_TEST_CASE(SimpleClosureTest, Fixture) {
             CreateLambda{1, 1, portable_index_array_from_vector({0})}),
         create_instruction(AssignConstant{2, 3}),
         create_instruction(
-            CallIndirect{3, 1, portable_index_array_from_vector({2})})},
+            BlockingCallIndirect{3, 1, portable_index_array_from_vector({2})})},
        {create_instruction(Add{2, 0, 1})}});
 }
 
@@ -124,7 +124,7 @@ BOOST_FIXTURE_TEST_CASE(CallMultiBinding, Fixture) {
         create_instruction(AssignConstant{2, 10}),
         create_instruction(AssignConstant{3, 9}),
         create_instruction(
-            CallIndirect{4, 1, portable_index_array_from_vector({3})})},
+            BlockingCallIndirect{4, 1, portable_index_array_from_vector({3})})},
        {create_instruction(Add{2, 0, 1})}});
 }
 
@@ -136,17 +136,17 @@ BOOST_FIXTURE_TEST_CASE(SimpleLetRec, Fixture) {
         create_instruction(AssignConstant{1, 0}),
         create_instruction(AssignConstant{2, 5}),
         create_instruction(
-            CallIndirect{3, 0, portable_index_array_from_vector({1, 2})})},
-       {create_instruction(Equal{3, 2, 1}),
+            BlockingCallIndirect{3, 0, portable_index_array_from_vector({1, 2})})},
+       {create_instruction(Equal{3, 1, 2}),
         create_instruction(
-            CreateLambda{4, 2, portable_index_array_from_vector({0, 2, 1})}),
-        create_instruction(If{3, 3, 4}), create_instruction(Assign{5, 1}),
+            CreateLambda{4, 2, portable_index_array_from_vector({0, 1, 2})}),
+        create_instruction(If{3, 3, 4}), create_instruction(Assign{5, 2}),
         create_instruction(
-            CallIndirect{6, 4, PortableMemPool::ArrayHandle<Index_t>()})},
+            BlockingCallIndirect{6, 4, PortableMemPool::ArrayHandle<Index_t>()})},
        {create_instruction(AssignConstant{3, 1}),
         create_instruction(Add{4, 3, 1}),
         create_instruction(
-            CallIndirect{5, 0, portable_index_array_from_vector({4, 2})})}});
+            BlockingCallIndirect{5, 0, portable_index_array_from_vector({4, 2})})}});
 }
 
 BOOST_FIXTURE_TEST_CASE(CheckBarrierInstructionGenerated, Fixture) {

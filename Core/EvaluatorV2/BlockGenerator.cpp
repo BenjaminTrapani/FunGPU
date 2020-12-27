@@ -170,7 +170,8 @@ Lambda BlockGenerator::construct_block(
 
   std::unordered_map<Index_t, Index_t> lambda_space_ident_to_register;
   std::set<Index_t> lambda_captured_indices;
-  if (const auto block_iter = lambdas_to_blocks.find(lambda); block_iter != lambdas_to_blocks.end() && block_iter->second == 2) {
+  if (const auto block_iter = lambdas_to_blocks.find(lambda);
+      block_iter != lambdas_to_blocks.end() && block_iter->second == 2) {
     volatile int x = 1;
     x = x + 1;
   }
@@ -251,7 +252,9 @@ Lambda BlockGenerator::construct_block(
             *mem_pool_acc[0].derefHandle(ast_node),
             Visitor{
                 [&](const Compiler::CallNode &call_node) {
-                  result.type = is_tail_instruction ? InstructionType::BLOCKING_CALL_INDIRECT : InstructionType::CALL_INDIRECT;
+                  result.type = is_tail_instruction
+                                    ? InstructionType::BLOCKING_CALL_INDIRECT
+                                    : InstructionType::CALL_INDIRECT;
                   const auto &target_ast_node =
                       *mem_pool_acc[0].derefHandle(call_node.m_target);
                   result.data.call_indirect.lambda_idx =
@@ -269,23 +272,26 @@ Lambda BlockGenerator::construct_block(
                     arg_indices_data[arg_idx] =
                         lookup_register_for_ident(arg_elem);
                   }
-                  const auto assign_call_indirect_fields = [&](CallIndirectCommon& derived_result) {
-                    derived_result.arg_indices = arg_indices;
-                    derived_result.target_register =
-                        allocate_register_or_use_pre_allocated();
-                  };
-                  visit(result, Visitor {
-                    [&](CallIndirect& call_indirect) {
-                      assign_call_indirect_fields(call_indirect);
-                    },
-                    [&](BlockingCallIndirect& blocking_indirect) {
-                      assign_call_indirect_fields(blocking_indirect);
-                    }, [](auto&) {
-                      throw std::invalid_argument("Unexpected");
-                    }
-                  }, [](auto&) {
-                    throw std::invalid_argument("Unexpected");
-                  });
+                  const auto assign_call_indirect_fields =
+                      [&](CallIndirectCommon &derived_result) {
+                        derived_result.arg_indices = arg_indices;
+                        derived_result.target_register =
+                            allocate_register_or_use_pre_allocated();
+                      };
+                  visit(result,
+                        Visitor{[&](CallIndirect &call_indirect) {
+                                  assign_call_indirect_fields(call_indirect);
+                                },
+                                [&](BlockingCallIndirect &blocking_indirect) {
+                                  assign_call_indirect_fields(
+                                      blocking_indirect);
+                                },
+                                [](auto &) {
+                                  throw std::invalid_argument("Unexpected");
+                                }},
+                        [](auto &) {
+                          throw std::invalid_argument("Unexpected");
+                        });
                 },
                 [&](const Compiler::LambdaNode &) {
                   result.type = InstructionType::CREATE_LAMBDA;
@@ -556,18 +562,19 @@ Lambda BlockGenerator::construct_block(
       const auto &if_node = static_cast<const Compiler::IfNode &>(*child_expr);
       result_instructions.emplace_back(primitive_expression_to_instruction(
           pending_generation, std::nullopt, false));
-      result_instructions.emplace_back(
-          primitive_expression_to_instruction(if_node.m_then, std::nullopt, true));
-      result_instructions.emplace_back(
-          primitive_expression_to_instruction(if_node.m_else, std::nullopt, true));
+      result_instructions.emplace_back(primitive_expression_to_instruction(
+          if_node.m_then, std::nullopt, true));
+      result_instructions.emplace_back(primitive_expression_to_instruction(
+          if_node.m_else, std::nullopt, true));
       // If exprs are always in tail position
       pending_generation = Compiler::ASTNodeHandle();
       break;
     }
     default:
       // Tail instruction
-      auto& tail_instruction = result_instructions.emplace_back(primitive_expression_to_instruction(
-          pending_generation, std::nullopt, true));
+      auto &tail_instruction =
+          result_instructions.emplace_back(primitive_expression_to_instruction(
+              pending_generation, std::nullopt, true));
       pending_generation = Compiler::ASTNodeHandle();
       break;
     }

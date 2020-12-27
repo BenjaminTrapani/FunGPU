@@ -114,11 +114,10 @@ if (instruction_count < 3 ||
   return visit(prev_instruction, extract_target_register, [](const auto &) {});
 }
 const auto &if_instr = instructions[instruction_count - 3].data.if_val;
-const auto is_pred_true = static_cast<bool>(register_set[if_instr.predicate].data.float_val);
-const auto last_instr =
-    is_pred_true
-        ? instructions[if_instr.goto_true]
-        : instructions[if_instr.goto_false];
+const auto is_pred_true =
+    static_cast<bool>(register_set[if_instr.predicate].data.float_val);
+const auto last_instr = is_pred_true ? instructions[if_instr.goto_true]
+                                     : instructions[if_instr.goto_false];
 return visit(last_instr, extract_target_register, [](const auto &) {});
 }
 
@@ -153,7 +152,7 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
     return Status::READY;                                                      \
   }
 
-  const auto handle_call_indirect = [&](const auto& call_indirect) {
+  const auto handle_call_indirect = [&](const auto &call_indirect) {
     const auto arg_indices_handle = call_indirect.arg_indices.unpack();
     const auto *arg_indices = mem_pool[0].derefHandle(arg_indices_handle);
     auto arg_values =
@@ -164,14 +163,14 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
     }
     cl::sycl::atomic<int, cl::sycl::access::address_space::local_space>
         atomic_dep_count(
-            (cl::sycl::multi_ptr<
-                int, cl::sycl::access::address_space::local_space>(
+            (cl::sycl::multi_ptr<int,
+                                 cl::sycl::access::address_space::local_space>(
                 &num_outstanding_dependencies)));
     atomic_dep_count.fetch_add(1);
     const auto function_val =
         register_set[call_indirect.lambda_idx].data.function_val;
     on_indirect_call(m_handle, function_val, thread,
-                      call_indirect.target_register, arg_values);
+                     call_indirect.target_register, arg_values);
   };
 
   const auto non_control_flow_handlers = Visitor{
@@ -236,7 +235,7 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
         handle_call_indirect(call_indirect);
         return Status::READY;
       },
-      [&](const BlockingCallIndirect& blocking_call_indirect) {
+      [&](const BlockingCallIndirect &blocking_call_indirect) {
         handle_call_indirect(blocking_call_indirect);
         return Status::STALLED;
       },
@@ -250,7 +249,8 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
       status = Status::COMPLETE;
       continue;
     } else if (cur_cycle == num_instructions ||
-               (num_instructions >= 3 && instructions[num_instructions - 3].type ==
+               (num_instructions >= 3 &&
+                instructions[num_instructions - 3].type ==
                     InstructionType::IF &&
                 cur_cycle > num_instructions - 3)) {
       const auto &target = target_data[thread];
@@ -259,12 +259,11 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
         continue;
       }
       auto &target_block = *mem_pool[0].derefHandle(target.block);
-      const auto last_write_loc_for_fill = last_write_location(block_idx, thread, all_instructions,
-                                           num_instructions);
-      target_block.fill_dependency(
-          target.thread, target.register_idx,
-          register_set[last_write_loc_for_fill],
-          on_activate_block);
+      const auto last_write_loc_for_fill = last_write_location(
+          block_idx, thread, all_instructions, num_instructions);
+      target_block.fill_dependency(target.thread, target.register_idx,
+                                   register_set[last_write_loc_for_fill],
+                                   on_activate_block);
       status = Status::COMPLETE;
       continue;
     }

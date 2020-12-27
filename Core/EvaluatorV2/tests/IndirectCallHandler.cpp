@@ -145,9 +145,8 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
     const auto &target_data = first_block.target_data[0];
     BOOST_CHECK_EQUAL(1, target_data.thread);
     BOOST_CHECK_EQUAL(2, target_data.register_idx);
-    BOOST_CHECK(
-        caller_buf.get_access<cl::sycl::access::mode::read>()[0] ==
-        target_data.block);
+    BOOST_CHECK(caller_buf.get_access<cl::sycl::access::mode::read>()[0] ==
+                target_data.block);
   };
 
   if (mem_pool_acc[0].derefHandle(exec_group.block_descs)[0].instructions ==

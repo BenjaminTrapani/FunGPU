@@ -375,7 +375,11 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
     std::cerr << "Sycl exception: " << e.what() << std::endl;
   }
   const auto end_time = std::chrono::high_resolution_clock::now();
-  std::cout << "total time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - begin_time).count() << std::endl;
+  std::cout << "total time: "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(end_time -
+                                                                     begin_time)
+                   .count()
+            << std::endl;
   m_workQueue.submit([&](handler &cgh) {
     auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
     auto resultOnHostAcc =

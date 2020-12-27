@@ -63,8 +63,10 @@ struct CallIndirect : public CallIndirectCommon {
 };
 
 struct BlockingCallIndirect : public CallIndirectCommon {
-  static constexpr InstructionType TYPE = InstructionType::BLOCKING_CALL_INDIRECT;
-  bool equals(const BlockingCallIndirect &, PortableMemPool::HostAccessor_t &) const;
+  static constexpr InstructionType TYPE =
+      InstructionType::BLOCKING_CALL_INDIRECT;
+  bool equals(const BlockingCallIndirect &,
+              PortableMemPool::HostAccessor_t &) const;
 };
 
 static_assert(std::is_standard_layout<CallIndirect>::value);

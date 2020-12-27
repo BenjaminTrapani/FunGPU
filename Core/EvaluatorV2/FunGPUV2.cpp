@@ -1,6 +1,6 @@
 #include "Core/EvaluatorV2/CompileProgram.hpp"
-#include "Core/PortableMemPool.hpp"
 #include "Core/EvaluatorV2/Evaluator.hpp"
+#include "Core/PortableMemPool.hpp"
 #include <iostream>
 
 using namespace FunGPU;
@@ -10,11 +10,11 @@ int main(int argc, char **argv) {
   auto mem_pool = std::make_shared<PortableMemPool>();
   try {
     cl::sycl::buffer<PortableMemPool> mem_pool_buffer(mem_pool,
-                                                  cl::sycl::range<1>(1));
+                                                      cl::sycl::range<1>(1));
     Evaluator evaluator(mem_pool_buffer);
     Index_t argvIndex = 1;
     while (true) {
-     const auto program_path = [&]() -> std::optional<std::string> {
+      const auto program_path = [&]() -> std::optional<std::string> {
         if (argvIndex < argc) {
           return std::string(argv[argvIndex++]);
         }
@@ -30,8 +30,9 @@ int main(int argc, char **argv) {
       if (!program_path) {
         break;
       }
-      const auto program = compile_program(*program_path, Evaluator::REGISTERS_PER_THREAD,
-                        Evaluator::THREADS_PER_BLOCK, mem_pool_buffer);
+      const auto program =
+          compile_program(*program_path, Evaluator::REGISTERS_PER_THREAD,
+                          Evaluator::THREADS_PER_BLOCK, mem_pool_buffer);
       const auto result = evaluator.compute(program);
       std::cout << "Result: " << result.data.float_val << std::endl;
     }
