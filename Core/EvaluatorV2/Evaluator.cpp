@@ -196,9 +196,10 @@ void Evaluator::run_eval_step(
           }
           itm.barrier();
           if (thread_idx == 0) {
-            *mem_pool_write[0].derefHandle(block_meta.block) = local_block[0];
             if (!any_threads_pending[0]) {
               mem_pool_write[0].Dealloc(block_meta.block);
+            } else {
+              *mem_pool_write[0].derefHandle(block_meta.block) = local_block[0];
             }
           }
         });
