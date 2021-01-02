@@ -43,6 +43,7 @@ RuntimeValue Evaluator::compute(const Program program) {
     }
     ++num_steps;
     run_eval_step(*maybe_next_batch);
+    cleanup(*maybe_next_batch);
   }
   const auto end_time = std::chrono::high_resolution_clock::now();
   std::cout << "num_steps: " << num_steps << std::endl;
@@ -52,6 +53,16 @@ RuntimeValue Evaluator::compute(const Program program) {
                    .count()
             << std::endl;
   return read_result(first_block_);
+}
+
+void Evaluator::cleanup(const RuntimeBlockType::BlockExecGroup exec_group) {
+  work_queue_.submit([&](cl::sycl::handler& cgh) {
+    auto mem_pool_acc =
+        mem_pool_buffer_.get_access<cl::sycl::access::mode::read_write>(cgh);
+    cgh.single_task([mem_pool_acc, exec_group] {
+      mem_pool_acc[0].DeallocArray(exec_group.block_descs);
+    });
+  });
 }
 
 auto Evaluator::construct_initial_block(const Program program)

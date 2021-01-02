@@ -28,6 +28,7 @@ private:
 
   void run_eval_step(RuntimeBlockType::BlockExecGroup);
   std::optional<RuntimeBlockType::BlockExecGroup> schedule_next_batch(Program);
+  void cleanup(RuntimeBlockType::BlockExecGroup);
 
   cl::sycl::buffer<PortableMemPool> mem_pool_buffer_;
   std::shared_ptr<IndirectCallHandlerType> indirect_call_handler_data_ =
