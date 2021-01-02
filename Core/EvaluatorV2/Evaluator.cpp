@@ -2,6 +2,7 @@
 #include "Core/EvaluatorV2/RuntimeBlock.hpp"
 #include "Core/EvaluatorV2/RuntimeValue.h"
 #include "Core/PortableMemPool.hpp"
+#include "sycl/access.hpp"
 #include <stdexcept>
 
 namespace FunGPU::EvaluatorV2 {
@@ -147,6 +148,7 @@ void Evaluator::run_eval_step(
     cl::sycl::accessor<RuntimeBlockType, 1, cl::sycl::access::mode::read_write,
                        cl::sycl::access::target::local>
         local_block(cl::sycl::range<1>(1), cgh);
+    cl::sycl::accessor<bool, 1, cl::sycl::access::mode::read_write, cl::sycl::access::target::local> any_threads_pending(cl::sycl::range<1>(1), cgh);
     RuntimeBlockType::InstructionLocalMemAccessor local_instructions(
         cl::sycl::range<2>(block_group.block_descs.GetCount(),
                            block_group.max_num_instructions),
@@ -156,13 +158,14 @@ void Evaluator::run_eval_step(
                                   block_group.block_descs.GetCount(),
                               THREADS_PER_BLOCK),
         [mem_pool_write, block_group, local_block, local_instructions,
-         indirect_call_handler_acc](cl::sycl::nd_item<1> itm) {
+         indirect_call_handler_acc, any_threads_pending](cl::sycl::nd_item<1> itm) {
           const auto thread_idx = itm.get_local_linear_id();
           const auto block_idx = itm.get_group_linear_id();
           const auto block_meta =
               mem_pool_write[0].derefHandle(block_group.block_descs)[block_idx];
           if (thread_idx == 0) {
             local_block[0] = *mem_pool_write[0].derefHandle(block_meta.block);
+            any_threads_pending[0] = false;
           }
           const auto *instructions_global_data =
               mem_pool_write[0].derefHandle(block_meta.instructions);
@@ -175,7 +178,7 @@ void Evaluator::run_eval_step(
           if (thread_idx >= block_meta.num_threads) {
             return;
           }
-          RuntimeBlockType::Status status = local_block[0].evaluate(
+          const RuntimeBlockType::Status status = local_block[0].evaluate(
               block_idx, thread_idx, mem_pool_write, local_instructions,
               block_meta.instructions.GetCount(),
               [indirect_call_handler_acc, mem_pool_write](
@@ -188,10 +191,15 @@ void Evaluator::run_eval_step(
                 indirect_call_handler_acc[0].on_activate_block(mem_pool_write,
                                                                block);
               });
+          if (status != RuntimeBlockType::Status::COMPLETE) {
+            any_threads_pending[0] = true;
+          }
           itm.barrier();
-          // TODO deallocate block if all complete in thread.
           if (thread_idx == 0) {
             *mem_pool_write[0].derefHandle(block_meta.block) = local_block[0];
+            if (!any_threads_pending[0]) {
+              mem_pool_write[0].Dealloc(block_meta.block);
+            }
           }
         });
   });
