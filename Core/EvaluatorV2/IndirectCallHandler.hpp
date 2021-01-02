@@ -189,6 +189,7 @@ void IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
                       register_set.begin());
   const auto *arg_data = mem_pool_acc[0].derefHandle(indirect_call_req.args);
   std::copy(arg_data, arg_data + indirect_call_req.args.GetCount(), it);
+  mem_pool_acc[0].DeallocArray(indirect_call_req.args);
 
   auto &target_address_data = target_block.target_data[thread_idx_in_block];
   target_address_data.block = indirect_call_req.caller;
