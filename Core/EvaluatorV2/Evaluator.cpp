@@ -2,7 +2,6 @@
 #include "Core/EvaluatorV2/RuntimeBlock.hpp"
 #include "Core/EvaluatorV2/RuntimeValue.h"
 #include "Core/PortableMemPool.hpp"
-#include "sycl/access.hpp"
 #include <stdexcept>
 
 namespace FunGPU::EvaluatorV2 {
