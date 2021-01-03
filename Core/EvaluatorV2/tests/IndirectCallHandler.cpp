@@ -60,11 +60,14 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
     auto reactivated_acc =
         reactivated_block_buf.get_access<cl::sycl::access::mode::discard_write>(
             cgh);
-    auto ind_call_reqs_by_block_acc = buffers.indirect_call_requests_by_block.get_access<cl::sycl::access::mode::read_write>(cgh);
+    auto ind_call_reqs_by_block_acc =
+        buffers.indirect_call_requests_by_block
+            .get_access<cl::sycl::access::mode::read_write>(cgh);
     const auto tmp_program = program;
     cgh.single_task<class RequestIndirectCall>([indirect_call_acc, mem_pool_acc,
                                                 tmp_program, caller_acc,
-                                                reactivated_acc, ind_call_reqs_by_block_acc] {
+                                                reactivated_acc,
+                                                ind_call_reqs_by_block_acc] {
       const auto lambda_0 = mem_pool_acc[0].derefHandle(tmp_program)[0];
       const auto mock_caller =
           mem_pool_acc[0].Alloc<RuntimeBlockType>(lambda_0.instructions, 1);
@@ -77,8 +80,9 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
       const auto test_args = mem_pool_acc[0].AllocArray<RuntimeValue>(1);
       RuntimeValue &arg_val = mem_pool_acc[0].derefHandle(test_args)[0];
       arg_val.data.float_val = 42;
-      indirect_call_acc[0].on_indirect_call(ind_call_reqs_by_block_acc, mock_caller,
-                                            function_value, 1, 2, test_args);
+      indirect_call_acc[0].on_indirect_call(ind_call_reqs_by_block_acc,
+                                            mock_caller, function_value, 1, 2,
+                                            test_args);
 
       const auto lambda_1 = mem_pool_acc[0].derefHandle(tmp_program)[1];
       const auto reactivated_block =
@@ -89,7 +93,8 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
   });
 
   const auto exec_group = IndirectCallHandlerType::create_block_exec_group(
-      work_queue, mem_pool_buffer, indirect_call_handler_buff, buffers, program);
+      work_queue, mem_pool_buffer, indirect_call_handler_buff, buffers,
+      program);
   BOOST_CHECK_EQUAL(2, exec_group.block_descs.GetCount());
   BOOST_CHECK_EQUAL(3, exec_group.max_num_instructions);
   auto mem_pool_acc =
@@ -169,11 +174,13 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
     auto mem_pool_acc =
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
     const auto tmp_program = program;
-     auto ind_call_reqs_by_block_acc = buffers.indirect_call_requests_by_block.get_access<cl::sycl::access::mode::read_write>(cgh);
+    auto ind_call_reqs_by_block_acc =
+        buffers.indirect_call_requests_by_block
+            .get_access<cl::sycl::access::mode::read_write>(cgh);
     cgh.parallel_for<class RequestIndirectCalls>(
         cl::sycl::range<2>(3, RuntimeBlockType::NumThreadsPerBlock * 4),
-        [indirect_call_acc, mem_pool_acc, tmp_program,
-         caller, ind_call_reqs_by_block_acc](const cl::sycl::item<2> itm) {
+        [indirect_call_acc, mem_pool_acc, tmp_program, caller,
+         ind_call_reqs_by_block_acc](const cl::sycl::item<2> itm) {
           switch (itm.get_id(0)) {
           case 0:
             if (itm.get_id(1) >= RuntimeBlockType::NumThreadsPerBlock / 2) {
@@ -205,14 +212,15 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
                 RuntimeValue(itm.get_id(0) + i + captures_acc.GetCount());
           }
           FunctionValue function_value(itm.get_id(0) + 7, captures_acc);
-          indirect_call_acc[0].on_indirect_call(ind_call_reqs_by_block_acc, caller,
-                                                function_value, itm.get_id(0),
-                                                itm.get_id(1), test_args);
+          indirect_call_acc[0].on_indirect_call(
+              ind_call_reqs_by_block_acc, caller, function_value, itm.get_id(0),
+              itm.get_id(1), test_args);
         });
   });
 
   const auto exec_group = IndirectCallHandlerType::create_block_exec_group(
-      work_queue, mem_pool_buffer, indirect_call_handler_buff, buffers, program);
+      work_queue, mem_pool_buffer, indirect_call_handler_buff, buffers,
+      program);
   BOOST_CHECK_EQUAL(7, exec_group.block_descs.GetCount());
   BOOST_CHECK_EQUAL(7, exec_group.max_num_instructions);
   auto mem_pool_acc =

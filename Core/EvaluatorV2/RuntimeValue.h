@@ -28,8 +28,7 @@ struct RuntimeValue {
     FunctionValue function_val;
   };
 
-  explicit RuntimeValue(const Float_t float_val)
-      : data(float_val) {}
+  explicit RuntimeValue(const Float_t float_val) : data(float_val) {}
   explicit RuntimeValue(const FunctionValue function_val)
       : data(function_val) {}
   RuntimeValue() = default;
