@@ -19,4 +19,4 @@
                                (if (> cur-width block-width)
                                    (perform-recursion self integrate-with-accum-f num-integrate-f f a b midpoint max-width block-width)
                                    (integrate-with-accum-f integrate-with-accum-f num-integrate-f f a b max-width zero))))))
-      (integrate-between integrate-between integrate-with-accum num-integrate hard-function 0 4096 0.001 2))
+      (integrate-between integrate-between integrate-with-accum num-integrate hard-function 0 ( * 2 4096) 0.001 (* 2 0.25)))

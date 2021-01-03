@@ -12,12 +12,12 @@
 namespace FunGPU::EvaluatorV2 {
 class Evaluator {
 public:
-  static constexpr Index_t REGISTERS_PER_THREAD = 32;
+  static constexpr Index_t REGISTERS_PER_THREAD = 16;
   static constexpr Index_t THREADS_PER_BLOCK = 32;
   using RuntimeBlockType =
       RuntimeBlock<REGISTERS_PER_THREAD, THREADS_PER_BLOCK>;
   using IndirectCallHandlerType =
-      IndirectCallHandler<RuntimeBlockType, 4096, 2048>;
+      IndirectCallHandler<RuntimeBlockType, 8192 * 4, 2048>;
 
   Evaluator(cl::sycl::buffer<PortableMemPool>);
   RuntimeValue compute(Program);
@@ -31,6 +31,8 @@ private:
   void cleanup(RuntimeBlockType::BlockExecGroup);
 
   cl::sycl::buffer<PortableMemPool> mem_pool_buffer_;
+  cl::sycl::buffer<bool> is_initial_block_ready_again_{cl::sycl::range<1>(1)};
+  IndirectCallHandlerType::Buffers indirect_call_handler_buffers_;
   std::shared_ptr<IndirectCallHandlerType> indirect_call_handler_data_ =
       std::make_shared<IndirectCallHandlerType>();
   cl::sycl::buffer<IndirectCallHandlerType> indirect_call_handler_buffer_{

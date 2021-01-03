@@ -219,6 +219,9 @@ Lambda BlockGenerator::construct_block(
 
   Index_t idents_mapped_so_far = lambda_node.m_argCount;
   const auto allocate_register = [&] {
+    if (free_indices.empty()) {
+      throw std::invalid_argument("Out of registers");
+    }
     const auto allocated_idx = free_indices.front();
     free_indices.pop_front();
     const auto lambda_space_ident = idents_mapped_so_far++;

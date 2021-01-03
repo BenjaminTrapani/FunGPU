@@ -17,7 +17,6 @@ struct Fixture {
         compile_program(program_path, Evaluator::REGISTERS_PER_THREAD,
                         Evaluator::THREADS_PER_BLOCK, mem_pool_buffer);
     const auto result = evaluator.compute(compiled_program);
-    BOOST_CHECK(result.type == RuntimeValue::Type::FLOAT);
     BOOST_CHECK_EQUAL(expected_val, result.data.float_val);
   }
 };

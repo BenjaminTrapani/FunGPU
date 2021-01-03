@@ -18,7 +18,6 @@ struct FunctionValue {
 };
 
 struct RuntimeValue {
-  enum class Type { FLOAT, LAMBDA };
   union Data {
     explicit Data(const Float_t float_val) : float_val(float_val) {}
     explicit Data(const FunctionValue function_val)
@@ -29,13 +28,11 @@ struct RuntimeValue {
     FunctionValue function_val;
   };
 
-  explicit RuntimeValue(const Float_t float_val)
-      : type(Type::FLOAT), data(float_val) {}
+  explicit RuntimeValue(const Float_t float_val) : data(float_val) {}
   explicit RuntimeValue(const FunctionValue function_val)
-      : type(Type::LAMBDA), data(function_val) {}
+      : data(function_val) {}
   RuntimeValue() = default;
 
-  Type type;
   Data data;
 };
 } // namespace FunGPU::EvaluatorV2
