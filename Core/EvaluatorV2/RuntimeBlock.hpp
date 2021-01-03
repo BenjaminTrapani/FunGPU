@@ -152,7 +152,7 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
     return Status::READY;                                                      \
   }
 
-  const auto allocate_arg_values = [&](const auto& call_indirect) {
+  const auto allocate_arg_values = [&](const auto &call_indirect) {
     const auto arg_indices_handle = call_indirect.arg_indices.unpack();
     const auto *arg_indices = mem_pool[0].derefHandle(arg_indices_handle);
     auto arg_values =
@@ -225,15 +225,15 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
       [&](const CallIndirect &call_indirect) {
         const auto arg_values = allocate_arg_values(call_indirect);
         cl::sycl::atomic<int, cl::sycl::access::address_space::local_space>
-        atomic_dep_count(
-            (cl::sycl::multi_ptr<int,
-                                 cl::sycl::access::address_space::local_space>(
-                &num_outstanding_dependencies)));
+            atomic_dep_count(
+                (cl::sycl::multi_ptr<
+                    int, cl::sycl::access::address_space::local_space>(
+                    &num_outstanding_dependencies)));
         atomic_dep_count.fetch_add(1);
         const auto function_val =
             register_set[call_indirect.lambda_idx].data.function_val;
         on_indirect_call(m_handle, function_val, thread,
-                        call_indirect.target_register, arg_values);
+                         call_indirect.target_register, arg_values);
         return Status::READY;
       },
       [&](const BlockingCallIndirect &blocking_call_indirect) {
@@ -242,7 +242,7 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
             register_set[blocking_call_indirect.lambda_idx].data.function_val;
         const auto &target = target_data[thread];
         on_indirect_call(target.block, function_val, target.thread,
-                        target.register_idx, arg_values);
+                         target.register_idx, arg_values);
         return Status::COMPLETE;
       },
       [&](const InstructionBarrier &) { return Status::STALLED; }};

@@ -431,8 +431,8 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
             .template get_access<cl::sycl::access::mode::read>(cgh);
     cgh.parallel_for<class ResetBuffersAfterIndirectCallSchedule>(
         cl::sycl::range<1>(program.GetCount() + 1),
-        [indirect_call_handler_acc, mem_pool_acc,
-         program, block_exec_group_per_lambda_acc](cl::sycl::item<1> itm) {
+        [indirect_call_handler_acc, mem_pool_acc, program,
+         block_exec_group_per_lambda_acc](cl::sycl::item<1> itm) {
           const auto tid = static_cast<Index_t>(itm.get_linear_id());
           if (tid >= program.GetCount()) {
             indirect_call_handler_acc[0].reset_reactivations_buffer();

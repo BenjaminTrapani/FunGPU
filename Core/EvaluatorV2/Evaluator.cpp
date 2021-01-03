@@ -57,7 +57,7 @@ RuntimeValue Evaluator::compute(const Program program) {
 }
 
 void Evaluator::cleanup(const RuntimeBlockType::BlockExecGroup exec_group) {
-  work_queue_.submit([&](cl::sycl::handler& cgh) {
+  work_queue_.submit([&](cl::sycl::handler &cgh) {
     auto mem_pool_acc =
         mem_pool_buffer_.get_access<cl::sycl::access::mode::read_write>(cgh);
     cgh.single_task([mem_pool_acc, exec_group] {
@@ -139,44 +139,56 @@ auto Evaluator::schedule_next_batch(const Program program)
 
 void Evaluator::run_eval_step(
     const RuntimeBlockType::BlockExecGroup block_group) {
-  //std::cout << "about to run eval loop with " << block_group.block_descs.GetCount() << " blocks with max num instructions = " << block_group.max_num_instructions << std::endl;
+  // std::cout << "about to run eval loop with " <<
+  // block_group.block_descs.GetCount() << " blocks with max num instructions = "
+  // << block_group.max_num_instructions << std::endl;
   constexpr Index_t MAX_NUM_BLOCKS_PER_LAUNCH = 32;
-  for (Index_t num_launched = 0; num_launched < block_group.block_descs.GetCount(); num_launched += MAX_NUM_BLOCKS_PER_LAUNCH) {
-    const auto num_blocks_for_this_launch = std::min(block_group.block_descs.GetCount() - num_launched, MAX_NUM_BLOCKS_PER_LAUNCH);
+  for (Index_t num_launched = 0;
+       num_launched < block_group.block_descs.GetCount();
+       num_launched += MAX_NUM_BLOCKS_PER_LAUNCH) {
+    const auto num_blocks_for_this_launch =
+        std::min(block_group.block_descs.GetCount() - num_launched,
+                 MAX_NUM_BLOCKS_PER_LAUNCH);
     const auto tmp_num_launched = num_launched;
-    work_queue_.submit([num_blocks_for_this_launch, block_group, tmp_num_launched, this](cl::sycl::handler &cgh) {
+    work_queue_.submit([num_blocks_for_this_launch, block_group,
+                        tmp_num_launched, this](cl::sycl::handler &cgh) {
       auto mem_pool_write =
           mem_pool_buffer_.get_access<cl::sycl::access::mode::read_write>(cgh);
       auto indirect_call_handler_acc =
           indirect_call_handler_buffer_
               .get_access<cl::sycl::access::mode::read_write>(cgh);
-      cl::sycl::accessor<RuntimeBlockType, 1, cl::sycl::access::mode::read_write,
-                        cl::sycl::access::target::local>
+      cl::sycl::accessor<RuntimeBlockType, 1,
+                         cl::sycl::access::mode::read_write,
+                         cl::sycl::access::target::local>
           local_block(cl::sycl::range<1>(1), cgh);
-      cl::sycl::accessor<bool, 1, cl::sycl::access::mode::read_write, cl::sycl::access::target::local> any_threads_pending(cl::sycl::range<1>(1), cgh);
+      cl::sycl::accessor<bool, 1, cl::sycl::access::mode::read_write,
+                         cl::sycl::access::target::local>
+          any_threads_pending(cl::sycl::range<1>(1), cgh);
       RuntimeBlockType::InstructionLocalMemAccessor local_instructions(
           cl::sycl::range<2>(num_blocks_for_this_launch,
-                            block_group.max_num_instructions),
+                             block_group.max_num_instructions),
           cgh);
       cgh.parallel_for<class TestEvalLoop>(
-          cl::sycl::nd_range<1>(THREADS_PER_BLOCK *
-                                    num_blocks_for_this_launch,
+          cl::sycl::nd_range<1>(THREADS_PER_BLOCK * num_blocks_for_this_launch,
                                 THREADS_PER_BLOCK),
           [mem_pool_write, block_group, local_block, local_instructions,
-          indirect_call_handler_acc, any_threads_pending, tmp_num_launched](cl::sycl::nd_item<1> itm) {
+           indirect_call_handler_acc, any_threads_pending,
+           tmp_num_launched](cl::sycl::nd_item<1> itm) {
             const auto thread_idx = itm.get_local_linear_id();
             const auto block_idx = itm.get_group_linear_id() + tmp_num_launched;
-            const auto block_meta =
-                mem_pool_write[0].derefHandle(block_group.block_descs)[block_idx];
+            const auto block_meta = mem_pool_write[0].derefHandle(
+                block_group.block_descs)[block_idx];
             if (thread_idx == 0) {
               local_block[0] = *mem_pool_write[0].derefHandle(block_meta.block);
               any_threads_pending[0] = false;
             }
             const auto *instructions_global_data =
                 mem_pool_write[0].derefHandle(block_meta.instructions);
-            auto instructions_for_block = local_instructions[itm.get_group_linear_id()];
-            for (auto idx = thread_idx; idx < block_meta.instructions.GetCount();
-                idx += THREADS_PER_BLOCK) {
+            auto instructions_for_block =
+                local_instructions[itm.get_group_linear_id()];
+            for (auto idx = thread_idx;
+                 idx < block_meta.instructions.GetCount();
+                 idx += THREADS_PER_BLOCK) {
               instructions_for_block[idx] = instructions_global_data[idx];
             }
             itm.barrier();
@@ -184,8 +196,8 @@ void Evaluator::run_eval_step(
               return;
             }
             const RuntimeBlockType::Status status = local_block[0].evaluate(
-                itm.get_group_linear_id(), thread_idx, mem_pool_write, local_instructions,
-                block_meta.instructions.GetCount(),
+                itm.get_group_linear_id(), thread_idx, mem_pool_write,
+                local_instructions, block_meta.instructions.GetCount(),
                 [indirect_call_handler_acc, mem_pool_write](
                     const auto block, const auto funv, const auto tid,
                     const auto reg, const auto args) {
@@ -194,7 +206,7 @@ void Evaluator::run_eval_step(
                 },
                 [indirect_call_handler_acc, mem_pool_write](const auto block) {
                   indirect_call_handler_acc[0].on_activate_block(mem_pool_write,
-                                                                block);
+                                                                 block);
                 });
             if (status != RuntimeBlockType::Status::COMPLETE) {
               any_threads_pending[0] = true;
@@ -204,7 +216,8 @@ void Evaluator::run_eval_step(
               if (!any_threads_pending[0]) {
                 mem_pool_write[0].Dealloc(block_meta.block);
               } else {
-                *mem_pool_write[0].derefHandle(block_meta.block) = local_block[0];
+                *mem_pool_write[0].derefHandle(block_meta.block) =
+                    local_block[0];
               }
             }
           });
