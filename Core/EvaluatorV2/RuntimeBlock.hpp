@@ -144,7 +144,6 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
 #define HANDLE_BINARY_OP(TYPE, OP)                                             \
   [&](const TYPE &type) {                                                      \
     auto &target_register = register_set[type.target_register];                \
-    target_register.type = RuntimeValue::Type::FLOAT;                          \
     target_register.data.float_val =                                           \
         register_set[type.lhs]                                                 \
             .data.float_val OP register_set[type.rhs]                          \
@@ -173,14 +172,12 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
       HANDLE_BINARY_OP(GreaterThan, >),
       [&](const Floor &floor) {
         auto &target_register = register_set[floor.target_register];
-        target_register.type = RuntimeValue::Type::FLOAT;
         target_register.data.float_val =
             cl::sycl::floor(register_set[floor.arg].data.float_val);
         return Status::READY;
       },
       [&](const Remainder &remainder) {
         auto &target_register = register_set[remainder.target_register];
-        target_register.type = RuntimeValue::Type::FLOAT;
         target_register.data.float_val =
             cl::sycl::fmod(register_set[remainder.lhs].data.float_val,
                            register_set[remainder.rhs].data.float_val);
@@ -188,7 +185,6 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
       },
       [&](const Expt &expr) {
         auto &target_register = register_set[expr.target_register];
-        target_register.type = RuntimeValue::Type::FLOAT;
         target_register.data.float_val =
             cl::sycl::pow(register_set[expr.lhs].data.float_val,
                           register_set[expr.rhs].data.float_val);
@@ -196,7 +192,6 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
       },
       [&](const AssignConstant &assign_constant) {
         auto &target_register = register_set[assign_constant.target_register];
-        target_register.type = RuntimeValue::Type::FLOAT;
         target_register.data.float_val = assign_constant.constant;
         return Status::READY;
       },
@@ -214,7 +209,6 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
         auto captured_values = mem_pool[0].AllocArray<RuntimeValue>(
             captured_indices_handle.GetCount());
         auto *captured_values_data = mem_pool[0].derefHandle(captured_values);
-        target_register.type = RuntimeValue::Type::LAMBDA;
         target_register.data.function_val =
             FunctionValue(create_lambda.block_idx, captured_values);
         for (Index_t i = 0; i < captured_indices_handle.GetCount(); ++i) {

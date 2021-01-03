@@ -92,8 +92,6 @@ struct Fixture {
            block_idx < block_group.block_descs.GetCount(); ++block_idx) {
         for (Index_t i = 0; i < THREADS_PER_BLOCK; ++i) {
           const auto result_idx = cl::sycl::id<2>(block_idx, i);
-          BOOST_REQUIRE(RuntimeValue::Type::FLOAT ==
-                        result_acc[result_idx].type);
           BOOST_CHECK_EQUAL(vals[block_idx],
                             result_acc[result_idx].data.float_val);
         }
