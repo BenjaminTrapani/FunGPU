@@ -144,7 +144,7 @@ void Evaluator::run_eval_step(
   // std::cout << "about to run eval loop with " <<
   // block_group.block_descs.GetCount() << " blocks with max num instructions = "
   // << block_group.max_num_instructions << std::endl;
-  constexpr Index_t MAX_NUM_BLOCKS_PER_LAUNCH = 32;
+  constexpr Index_t MAX_NUM_BLOCKS_PER_LAUNCH = 64;
   for (Index_t num_launched = 0;
        num_launched < block_group.block_descs.GetCount();
        num_launched += MAX_NUM_BLOCKS_PER_LAUNCH) {
