@@ -6,31 +6,35 @@
 
 namespace FunGPU::EvaluatorV2 {
 Evaluator::Evaluator(cl::sycl::buffer<PortableMemPool> buffer)
-    : mem_pool_buffer_(buffer) {
+    : mem_pool_buffer_(buffer),
+      indirect_call_handler_buffers_(4) {
   std::cout << "Running on "
             << work_queue_.get_device().get_info<cl::sycl::info::device::name>()
-            << ", block size: " << sizeof(RuntimeBlockType) << std::endl;
+            << ", block size: " << sizeof(RuntimeBlockType)
+            << ", RuntimeBlockType::target_data size: " << sizeof(RuntimeBlockType::target_data) 
+            << ", runtime value size: " << sizeof(RuntimeValue)
+            << std::endl;
 }
 
 RuntimeValue Evaluator::compute(const Program program) {
+  indirect_call_handler_buffers_ = IndirectCallHandlerType::Buffers(program.GetCount());
   const auto begin_time = std::chrono::high_resolution_clock::now();
   first_block_ = construct_initial_block(program);
+  indirect_call_handler_buffers_.update_for_num_lambdas(program.GetCount());
   work_queue_.submit([&](cl::sycl::handler &cgh) {
     auto indirect_call_acc =
         indirect_call_handler_buffer_
             .get_access<cl::sycl::access::mode::read_write>(cgh);
-    auto mem_pool_acc =
-        mem_pool_buffer_.get_access<cl::sycl::access::mode::read_write>(cgh);
     const auto first_block_tmp = first_block_;
+    auto indirect_call_buffer_acc = indirect_call_handler_buffers_.indirect_call_requests_by_block.get_access<cl::sycl::access::mode::read_write>(cgh);
     cgh.single_task(
-        [indirect_call_acc, mem_pool_acc, first_block_tmp, program] {
-          indirect_call_acc[0].update_for_num_lambdas(mem_pool_acc,
-                                                      program.GetCount());
+        [indirect_call_acc, first_block_tmp, program, indirect_call_buffer_acc] {
           FunctionValue funv;
           funv.block_idx = 0;
           funv.captures = PortableMemPool::ArrayHandle<RuntimeValue>();
           indirect_call_acc[0].on_indirect_call(
-              mem_pool_acc, first_block_tmp, funv, 0, 0,
+            indirect_call_buffer_acc,
+              first_block_tmp, funv, 0, 0,
               PortableMemPool::ArrayHandle<RuntimeValue>());
         });
   });
@@ -107,29 +111,28 @@ RuntimeValue Evaluator::read_result(
 auto Evaluator::schedule_next_batch(const Program program)
     -> std::optional<RuntimeBlockType::BlockExecGroup> {
   const auto next_batch = IndirectCallHandlerType::create_block_exec_group(
-      work_queue_, mem_pool_buffer_, indirect_call_handler_buffer_, program);
+      work_queue_, mem_pool_buffer_, indirect_call_handler_buffer_, indirect_call_handler_buffers_, program);
   if (next_batch.block_descs.GetCount() > 1) {
     return next_batch;
   }
   if (next_batch.block_descs.GetCount() != 1) {
     throw std::invalid_argument("Expected at least one block");
   }
-  cl::sycl::buffer<bool> is_initial_block_ready_again(cl::sycl::range<1>(1));
   work_queue_.submit([&](cl::sycl::handler &cgh) {
     auto mem_pool_acc =
         mem_pool_buffer_.get_access<cl::sycl::access::mode::read_write>(cgh);
     auto result_acc =
-        is_initial_block_ready_again
+        is_initial_block_ready_again_
             .get_access<cl::sycl::access::mode::discard_write>(cgh);
     const auto first_block_tmp = first_block_;
-    cgh.single_task([mem_pool_acc, next_batch, is_initial_block_ready_again,
+    cgh.single_task([mem_pool_acc, next_batch,
                      first_block_tmp, result_acc] {
       const auto &block_meta =
           mem_pool_acc[0].derefHandle((next_batch.block_descs))[0];
       result_acc[0] = block_meta.block == first_block_tmp;
     });
   });
-  if (is_initial_block_ready_again
+  if (is_initial_block_ready_again_
           .get_access<cl::sycl::access::mode::read>()[0]) {
     return std::nullopt;
   }
@@ -156,6 +159,7 @@ void Evaluator::run_eval_step(
       auto indirect_call_handler_acc =
           indirect_call_handler_buffer_
               .get_access<cl::sycl::access::mode::read_write>(cgh);
+      auto indirect_all_acc = indirect_call_handler_buffers_.indirect_call_requests_by_block.get_access<cl::sycl::access::mode::read_write>(cgh);
       cl::sycl::accessor<RuntimeBlockType, 1,
                          cl::sycl::access::mode::read_write,
                          cl::sycl::access::target::local>
@@ -172,7 +176,7 @@ void Evaluator::run_eval_step(
                                 THREADS_PER_BLOCK),
           [mem_pool_write, block_group, local_block, local_instructions,
            indirect_call_handler_acc, any_threads_pending,
-           tmp_num_launched](cl::sycl::nd_item<1> itm) {
+           tmp_num_launched, indirect_all_acc](cl::sycl::nd_item<1> itm) {
             const auto thread_idx = itm.get_local_linear_id();
             const auto block_idx = itm.get_group_linear_id() + tmp_num_launched;
             const auto block_meta = mem_pool_write[0].derefHandle(
@@ -197,11 +201,11 @@ void Evaluator::run_eval_step(
             const RuntimeBlockType::Status status = local_block[0].evaluate(
                 itm.get_group_linear_id(), thread_idx, mem_pool_write,
                 local_instructions, block_meta.instructions.GetCount(),
-                [indirect_call_handler_acc, mem_pool_write](
+                [indirect_call_handler_acc, mem_pool_write, indirect_all_acc](
                     const auto block, const auto funv, const auto tid,
                     const auto reg, const auto args) {
                   indirect_call_handler_acc[0].on_indirect_call(
-                      mem_pool_write, block, funv, tid, reg, args);
+                      indirect_all_acc, block, funv, tid, reg, args);
                 },
                 [indirect_call_handler_acc, mem_pool_write](const auto block) {
                   indirect_call_handler_acc[0].on_activate_block(mem_pool_write,

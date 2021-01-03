@@ -31,6 +31,8 @@ private:
   void cleanup(RuntimeBlockType::BlockExecGroup);
 
   cl::sycl::buffer<PortableMemPool> mem_pool_buffer_;
+  cl::sycl::buffer<bool> is_initial_block_ready_again_{cl::sycl::range<1>(1)};
+  IndirectCallHandlerType::Buffers indirect_call_handler_buffers_;
   std::shared_ptr<IndirectCallHandlerType> indirect_call_handler_data_ =
       std::make_shared<IndirectCallHandlerType>();
   cl::sycl::buffer<IndirectCallHandlerType> indirect_call_handler_buffer_{

@@ -24,19 +24,7 @@ struct Fixture {
         << "Running on "
         << work_queue.get_device().get_info<cl::sycl::info::device::name>()
         << ", block size: " << sizeof(RuntimeBlockType) << std::endl;
-    work_queue.submit([&](cl::sycl::handler &cgh) {
-      const auto tmp_program = program;
-      auto mem_pool_acc =
-          mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
-      auto indirect_call_handler_acc =
-          indirect_call_handler_buff
-              .get_access<cl::sycl::access::mode::read_write>(cgh);
-      cgh.single_task<class InitForProgramSize>(
-          [tmp_program, mem_pool_acc, indirect_call_handler_acc] {
-            indirect_call_handler_acc[0].update_for_num_lambdas(
-                mem_pool_acc, tmp_program.GetCount());
-          });
-    });
+    buffers.update_for_num_lambdas(program.GetCount());
   }
 
   std::shared_ptr<PortableMemPool> mem_pool_data =
@@ -44,6 +32,7 @@ struct Fixture {
   cl::sycl::buffer<PortableMemPool> mem_pool_buffer{mem_pool_data,
                                                     cl::sycl::range<1>(1)};
   const Program program;
+  IndirectCallHandlerType::Buffers buffers{program.GetCount()};
   std::shared_ptr<IndirectCallHandlerType> indirect_call_handler =
       std::make_shared<IndirectCallHandlerType>();
   cl::sycl::buffer<IndirectCallHandlerType> indirect_call_handler_buff{
@@ -71,10 +60,11 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
     auto reactivated_acc =
         reactivated_block_buf.get_access<cl::sycl::access::mode::discard_write>(
             cgh);
+    auto ind_call_reqs_by_block_acc = buffers.indirect_call_requests_by_block.get_access<cl::sycl::access::mode::read_write>(cgh);
     const auto tmp_program = program;
     cgh.single_task<class RequestIndirectCall>([indirect_call_acc, mem_pool_acc,
                                                 tmp_program, caller_acc,
-                                                reactivated_acc] {
+                                                reactivated_acc, ind_call_reqs_by_block_acc] {
       const auto lambda_0 = mem_pool_acc[0].derefHandle(tmp_program)[0];
       const auto mock_caller =
           mem_pool_acc[0].Alloc<RuntimeBlockType>(lambda_0.instructions, 1);
@@ -86,9 +76,8 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
       FunctionValue function_value(0, captures_acc);
       const auto test_args = mem_pool_acc[0].AllocArray<RuntimeValue>(1);
       RuntimeValue &arg_val = mem_pool_acc[0].derefHandle(test_args)[0];
-      arg_val.type = RuntimeValue::Type::FLOAT;
       arg_val.data.float_val = 42;
-      indirect_call_acc[0].on_indirect_call(mem_pool_acc, mock_caller,
+      indirect_call_acc[0].on_indirect_call(ind_call_reqs_by_block_acc, mock_caller,
                                             function_value, 1, 2, test_args);
 
       const auto lambda_1 = mem_pool_acc[0].derefHandle(tmp_program)[1];
@@ -100,7 +89,7 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
   });
 
   const auto exec_group = IndirectCallHandlerType::create_block_exec_group(
-      work_queue, mem_pool_buffer, indirect_call_handler_buff, program);
+      work_queue, mem_pool_buffer, indirect_call_handler_buff, buffers, program);
   BOOST_CHECK_EQUAL(2, exec_group.block_descs.GetCount());
   BOOST_CHECK_EQUAL(3, exec_group.max_num_instructions);
   auto mem_pool_acc =
@@ -135,8 +124,6 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
     for (Index_t i = 0; i < expected_captures_and_arg.size(); ++i) {
       const auto actual_val = first_block.registers[0][i];
       const auto expected_val = expected_captures_and_arg[i];
-      BOOST_CHECK_EQUAL(static_cast<int>(expected_val.type),
-                        static_cast<int>(actual_val.type));
       BOOST_CHECK_EQUAL(expected_val.data.float_val, actual_val.data.float_val);
     }
     BOOST_CHECK(block_meta.instructions ==
@@ -182,10 +169,11 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
     auto mem_pool_acc =
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
     const auto tmp_program = program;
+     auto ind_call_reqs_by_block_acc = buffers.indirect_call_requests_by_block.get_access<cl::sycl::access::mode::read_write>(cgh);
     cgh.parallel_for<class RequestIndirectCalls>(
         cl::sycl::range<2>(3, RuntimeBlockType::NumThreadsPerBlock * 4),
         [indirect_call_acc, mem_pool_acc, tmp_program,
-         caller](const cl::sycl::item<2> itm) {
+         caller, ind_call_reqs_by_block_acc](const cl::sycl::item<2> itm) {
           switch (itm.get_id(0)) {
           case 0:
             if (itm.get_id(1) >= RuntimeBlockType::NumThreadsPerBlock / 2) {
@@ -217,14 +205,14 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
                 RuntimeValue(itm.get_id(0) + i + captures_acc.GetCount());
           }
           FunctionValue function_value(itm.get_id(0) + 7, captures_acc);
-          indirect_call_acc[0].on_indirect_call(mem_pool_acc, caller,
+          indirect_call_acc[0].on_indirect_call(ind_call_reqs_by_block_acc, caller,
                                                 function_value, itm.get_id(0),
                                                 itm.get_id(1), test_args);
         });
   });
 
   const auto exec_group = IndirectCallHandlerType::create_block_exec_group(
-      work_queue, mem_pool_buffer, indirect_call_handler_buff, program);
+      work_queue, mem_pool_buffer, indirect_call_handler_buff, buffers, program);
   BOOST_CHECK_EQUAL(7, exec_group.block_descs.GetCount());
   BOOST_CHECK_EQUAL(7, exec_group.max_num_instructions);
   auto mem_pool_acc =
@@ -295,8 +283,6 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
       for (Index_t j = 0; j < expected_captures_and_args.size(); ++j) {
         const auto actual_val = first_block.registers[tid][j];
         const auto expected_val = expected_captures_and_args[j];
-        BOOST_CHECK_EQUAL(static_cast<int>(expected_val.type),
-                          static_cast<int>(actual_val.type));
         BOOST_CHECK_EQUAL(expected_val.data.float_val,
                           actual_val.data.float_val);
       }
