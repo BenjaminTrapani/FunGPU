@@ -13,8 +13,8 @@ struct FunctionValue {
       const PortableMemPool::TrivialArrayHandle<RuntimeValue> captures)
       : block_idx(block_idx), captures(captures) {}
 
-  PortableMemPool::TrivialArrayHandle<RuntimeValue> captures;
   Index_t block_idx;
+  PortableMemPool::TrivialArrayHandle<RuntimeValue> captures;
 };
 
 struct RuntimeValue {
