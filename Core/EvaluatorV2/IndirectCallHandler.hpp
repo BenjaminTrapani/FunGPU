@@ -189,6 +189,7 @@ void IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
                       register_set.begin());
   const auto *arg_data = mem_pool_acc[0].derefHandle(indirect_call_req.args);
   std::copy(arg_data, arg_data + indirect_call_req.args.GetCount(), it);
+  mem_pool_acc[0].DeallocArray(indirect_call_req.args);
 
   auto &target_address_data = target_block.target_data[thread_idx_in_block];
   target_address_data.block = indirect_call_req.caller;
@@ -425,10 +426,13 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
             .template get_access<cl::sycl::access::mode::read_write>(cgh);
     auto mem_pool_acc =
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
+    auto block_exec_group_per_lambda_acc =
+        block_exec_group_per_lambda
+            .template get_access<cl::sycl::access::mode::read>(cgh);
     cgh.parallel_for<class ResetBuffersAfterIndirectCallSchedule>(
         cl::sycl::range<1>(program.GetCount() + 1),
-        [indirect_call_handler_acc, mem_pool_acc,
-         program](cl::sycl::item<1> itm) {
+        [indirect_call_handler_acc, mem_pool_acc, program,
+         block_exec_group_per_lambda_acc](cl::sycl::item<1> itm) {
           const auto tid = static_cast<Index_t>(itm.get_linear_id());
           if (tid >= program.GetCount()) {
             indirect_call_handler_acc[0].reset_reactivations_buffer();
@@ -436,6 +440,9 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
             indirect_call_handler_acc[0].reset_indirect_call_buffers(
                 mem_pool_acc, tid);
           }
+          const auto source_block_descs =
+              block_exec_group_per_lambda_acc[itm.get_linear_id()].block_descs;
+          mem_pool_acc[0].DeallocArray(source_block_descs);
         });
   });
 
