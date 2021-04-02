@@ -139,4 +139,4 @@ The current implementation has two versions: an initial interpreter (binary FunG
 The built binary can be run as ./Core/EvaluatorV2/FunGPUV2 ../TestPrograms/MergeSort.fgpu
 
 ## Build ##
-[![Build Status](http://skytopsoftware.ddns.net:8081/job/FunGPU/job/master/badge/icon)](http://skytopsoftware.ddns.net:8081/job/FunGPU/job/master/)
+[![Build Status](http://gpuandai.com:8081/job/FunGPU/job/master/badge/icon)](http://gpuandai.com:8081/job/FunGPU/job/master/)
