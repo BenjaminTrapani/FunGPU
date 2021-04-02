@@ -1,5 +1,10 @@
 pipeline {
-    agent any
+    agent {
+        docker { 
+		image 'docker.pkg.github.com/benjamintrapani/fungpu/fungpu_built:latest'
+		args '--gpus all'
+	}
+    }
     stages {
         stage('build') {
             steps {
