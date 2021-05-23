@@ -6,8 +6,8 @@ The VM uses the SYCL API (https://www.khronos.org/sycl/) and any SYCL implementa
 
 ## Grammer ##
 ```
-FGPU = Symbol | Number
-       (<FGPU>...)
+FGPU = Symbol
+       Number
        (let ((Symbol <FGPU>)...) <FGPU>) // Bind the value of <FGPU> to "Symbol" for the expression in the body. Evaluates to the body.
        (letrec ((Symbol <FGPU>)...) <FGPU>) // Same as let but bindings can reference themselves.
        (<FGPU> <FGPU>...) // First arg should evaluate to a lambda, remaining expressions are args.
