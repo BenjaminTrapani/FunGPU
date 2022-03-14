@@ -4,7 +4,7 @@ This project provides a lightweight compiler and VM that support running a subse
 ## Supported Targets ##
 The VM uses the SYCL API (https://www.khronos.org/sycl/) and any SYCL implementation should work. The current version uses hipSYCL (https://github.com/illuhad/hipSYCL), which uses the clang PTX and HIP backends to generate code for nvidia and  AMD GPUs respectively. The code is known to work for nvidia architecture 61. No additional work should be required to run on AMD GPUs. Intel chips can be targeted using SPIR-V and the ComputeCPP SYCL implementation (https://developer.codeplay.com/products/computecpp/ce/guides/).
 
-## Grammer ##
+## Grammar ##
 ```
 FGPU = Symbol
        Number
