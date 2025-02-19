@@ -6,7 +6,7 @@
 #include "Core/EvaluatorV2/RuntimeValue.h"
 #include "Core/PortableMemPool.hpp"
 #include "Core/sycl.hpp"
-#include "sycl/queue.hpp"
+#include <CL/sycl.hpp>
 #include <optional>
 
 namespace FunGPU::EvaluatorV2 {

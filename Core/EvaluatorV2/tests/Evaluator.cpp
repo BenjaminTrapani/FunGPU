@@ -1,7 +1,7 @@
 #define BOOST_TEST_MODULE EvaluatorTestModule
 #include "Core/EvaluatorV2/Evaluator.hpp"
 #include "Core/EvaluatorV2/CompileProgram.hpp"
-#include <boost/test/included/unit_test.hpp>
+#include <boost/test/unit_test.hpp>
 
 namespace FunGPU::EvaluatorV2 {
 struct Fixture {

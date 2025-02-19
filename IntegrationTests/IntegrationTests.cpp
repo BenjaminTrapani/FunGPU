@@ -3,7 +3,7 @@
 //
 
 #define BOOST_TEST_MODULE IntegrationTestsModule
-#include <boost/test/included/unit_test.hpp>
+#include <boost/test/unit_test.hpp>
 
 // windows weirdness
 #undef max

@@ -4,9 +4,7 @@
 #include "Core/EvaluatorV2/RuntimeBlock.hpp"
 #include "Core/EvaluatorV2/RuntimeValue.h"
 #include "Core/PortableMemPool.hpp"
-#include "sycl/handler.hpp"
-#include "sycl/libkernel/item.hpp"
-#include <boost/test/included/unit_test.hpp>
+#include <boost/test/unit_test.hpp>
 #include <unordered_set>
 
 namespace FunGPU::EvaluatorV2 {

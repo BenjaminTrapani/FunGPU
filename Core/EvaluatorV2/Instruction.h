@@ -119,9 +119,8 @@ using GreaterThan = BinaryOp<InstructionType::GREATER_THAN>;
 using Remainder = BinaryOp<InstructionType::REMAINDER>;
 using Expt = BinaryOp<InstructionType::EXPT>;
 
-template <typename T> concept HasTargetRegister = requires(T x) {
-  x.target_register;
-};
+template <typename T>
+concept HasTargetRegister = requires(T x) { x.target_register; };
 
 struct Instruction {
   std::string print(PortableMemPool::HostAccessor_t mem_pool_acc) const;

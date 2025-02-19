@@ -14,7 +14,7 @@ public:
 private:
   struct ParsedExpr {
     virtual void DebugPrint() = 0;
-    virtual ~ParsedExpr(){};
+    virtual ~ParsedExpr() {};
   };
 
   struct ParenthesizedExpr : public ParsedExpr {

@@ -95,30 +95,29 @@ Index_t RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::last_write_location(
     const Index_t block_idx, const Index_t thread,
     const InstructionLocalMemAccessor all_instructions,
     const Index_t instruction_count) const {
-  const auto extract_target_register = Visitor{[]<typename DerivedInstruction>(
-      const DerivedInstruction
-          &instr) requires HasTargetRegister<DerivedInstruction>{
-      return instr.target_register;
-}
-, [](const auto &) {
-  // TODO error, should not happen
-  return Index_t(-1);
-}
-}; // namespace FunGPU::EvaluatorV2
+  const auto extract_target_register =
+      Visitor{[]<typename DerivedInstruction>(const DerivedInstruction &instr)
+                requires HasTargetRegister<DerivedInstruction>
+              { return instr.target_register; },
+              [](const auto &) {
+                // TODO error, should not happen
+                return Index_t(-1);
+              }}; // namespace FunGPU::EvaluatorV2
 
-const auto &register_set = registers[thread];
-const auto &instructions = all_instructions[block_idx];
-if (instruction_count < 3 ||
-    instructions[instruction_count - 3].type != InstructionType::IF) {
-  const auto prev_instruction = instructions[instruction_count - 1];
-  return visit(prev_instruction, extract_target_register, [](const auto &) {});
-}
-const auto &if_instr = instructions[instruction_count - 3].data.if_val;
-const auto is_pred_true =
-    static_cast<bool>(register_set[if_instr.predicate].data.float_val);
-const auto last_instr = is_pred_true ? instructions[if_instr.goto_true]
-                                     : instructions[if_instr.goto_false];
-return visit(last_instr, extract_target_register, [](const auto &) {});
+  const auto &register_set = registers[thread];
+  const auto &instructions = all_instructions[block_idx];
+  if (instruction_count < 3 ||
+      instructions[instruction_count - 3].type != InstructionType::IF) {
+    const auto prev_instruction = instructions[instruction_count - 1];
+    return visit(prev_instruction, extract_target_register,
+                 [](const auto &) {});
+  }
+  const auto &if_instr = instructions[instruction_count - 3].data.if_val;
+  const auto is_pred_true =
+      static_cast<bool>(register_set[if_instr.predicate].data.float_val);
+  const auto last_instr = is_pred_true ? instructions[if_instr.goto_true]
+                                       : instructions[if_instr.goto_false];
+  return visit(last_instr, extract_target_register, [](const auto &) {});
 }
 
 template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
@@ -281,8 +280,9 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
             return visit(
                 next_instr,
                 [&](const auto &derived_next_instr) {
-                  if constexpr (std::is_same_v<If, std::remove_cvref_t<decltype(
-                                                       derived_next_instr)>>) {
+                  if constexpr (std::is_same_v<
+                                    If, std::remove_cvref_t<
+                                            decltype(derived_next_instr)>>) {
                     // TODO error, this should never happen
                     return Status::READY;
                   } else {

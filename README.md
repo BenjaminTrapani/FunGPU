@@ -129,12 +129,11 @@ Numeric integration (https://github.com/BenjaminTrapani/FunGPU/blob/master/TestP
 The current implementation has two versions: an initial interpreter (binary FunGPU) that evaluates the AST directly. Warp divergence is high and execution efficiency is low, but it contains a garbage collector and is very stable. The more recent and fastest version (./Core/EvaluatorV2/FunGPUV2) uses the compilation pipeline above and outperforms the racket implementation on all non-trivial programs (performance gains increase as the number of program subtrees increases, think embarrassingly parallel problems with divide and conquer solutions). The evaluator at ./Core/EvaluatorV2/FunGPUV2 does not have a garbage collector yet, which is required to correctly deallocate lambda captures. Lambda captures are leaked in that implementation. The remaining work consists of adding a garbage collector for the V2 evaluator, improving GPU utilization by reducing shared memory requirements and adding optimization steps to the compilation pipeline.
 
 ## Building ##
-1. Install hipSYCL by following the instructions at https://github.com/illuhad/hipSYCL
+1. Install AdaptiveCpp by following the instructions at https://github.com/AdaptiveCpp/AdaptiveCpp/blob/develop/doc/installing.md
 2. mkdir build
 3. cd build
-4. export HIPSYCL_GPU_ARCH={gpu architecture of choice. sm_61 tested for nvidia gpus}
-5. cmake -DCMAKE_CXX_COMPILER=syclcc-clang -DCMAKE_BUILD_TYPE=Release -G Ninja ../
-6. ninja all
+3. cmake -DCMAKE_CXX_COMPILER=acpp -DCMAKE_BUILD_TYPE=Release ../
+6. make
 
 The built binary can be run as ./Core/EvaluatorV2/FunGPUV2 ../TestPrograms/MergeSort.fgpu
 

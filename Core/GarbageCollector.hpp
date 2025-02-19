@@ -16,7 +16,7 @@ public:
 
   template <class... Args_t>
   Error AllocManaged(const PortableMemPool::DeviceAccessor_t &memPoolAcc,
-                     PortableMemPool::Handle<T> &result, Args_t &&... args) {
+                     PortableMemPool::Handle<T> &result, Args_t &&...args) {
     cl::sycl::atomic<Index_t> allocCount(
         (cl::sycl::multi_ptr<Index_t,
                              cl::sycl::access::address_space::global_space>(

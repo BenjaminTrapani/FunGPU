@@ -6,7 +6,7 @@
 #include "Core/EvaluatorV2/CompileProgram.hpp"
 #include "Core/Parser.hpp"
 #include "Core/Visitor.hpp"
-#include <boost/test/included/unit_test.hpp>
+#include <boost/test/unit_test.hpp>
 #include <stdexcept>
 
 namespace FunGPU::EvaluatorV2 {
