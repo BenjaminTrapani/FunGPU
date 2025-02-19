@@ -129,7 +129,7 @@ public:
     // Handle<T> m_handle;
   };
 
-  template <class T, class... Args_t> Handle<T> Alloc(const Args_t &... args) {
+  template <class T, class... Args_t> Handle<T> Alloc(const Args_t &...args) {
     const auto handle =
         AllocImpl<T>(m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
     if (handle == Handle<T>()) {
@@ -277,7 +277,7 @@ private:
             Index_t... allocSizes, Index_t... totalSizes>
   decltype(auto) WithArena(Pred &&pred, CB &&cb,
                            Arena<allocSize, totalSize> &arena,
-                           Arena<allocSizes, totalSizes> &... arenas) {
+                           Arena<allocSizes, totalSizes> &...arenas) {
     if (pred(arena)) {
       return cb(arena);
     }
@@ -311,7 +311,7 @@ private:
   };
 
   template <class T, Index_t... allocSizes, Index_t... totalSizes>
-  Handle<T> AllocImpl(Arena<allocSizes, totalSizes> &... arenas) {
+  Handle<T> AllocImpl(Arena<allocSizes, totalSizes> &...arenas) {
     return WithArena<T>(AllocPred<T>(), AllocHandler<T>(*this), arenas...);
   }
 
@@ -357,7 +357,7 @@ private:
 
   template <class T, Index_t... allocSizes, Index_t... totalSizes>
   ArrayHandle<T> AllocArrayImpl(const Index_t arraySize, const T &initialValue,
-                                Arena<allocSizes, totalSizes> &... arenas) {
+                                Arena<allocSizes, totalSizes> &...arenas) {
     return WithArena<T>(AllocArrayPred<T>(arraySize),
                         AllocArrayHandler<T>(arraySize, initialValue, *this),
                         arenas...);
@@ -396,7 +396,7 @@ private:
 
   template <class T, Index_t... allocSizes, Index_t... totalSizes>
   void DeallocImpl(const Handle<T> &handle,
-                   Arena<allocSizes, totalSizes> &... arenas) {
+                   Arena<allocSizes, totalSizes> &...arenas) {
     WithArena<T>(MatchArenaOffset<T>(*this, handle.GetDistFromMemPoolBase()),
                  DeallocHandler<T>(handle, *this), arenas...);
   }
@@ -424,7 +424,7 @@ private:
 
   template <class T, Index_t... allocSizes, Index_t... totalSizes>
   void DeallocArrayImpl(const ArrayHandle<T> &arrayHandle,
-                        Arena<allocSizes, totalSizes> &... arenas) {
+                        Arena<allocSizes, totalSizes> &...arenas) {
     WithArena<T>(MatchArenaOffset<T>(
                      *this, arrayHandle.m_handle.GetDistFromMemPoolBase()),
                  DeallocArrayHandler<T>(arrayHandle, *this), arenas...);
@@ -434,7 +434,7 @@ private:
             Index_t... totalSizes>
   Index_t
   GetTotalAllocationCountImpl(Arena<allocSize, totalSize> &arena,
-                              Arena<allocSizes, totalSizes> &... arenas) {
+                              Arena<allocSizes, totalSizes> &...arenas) {
     Index_t totalAllocCount = 0;
 
     cl::sycl::atomic<Index_t> totalAllocations(
@@ -459,7 +459,7 @@ private:
   template <class T, Index_t allocSize, Index_t totalSize,
             Index_t... allocSizes, Index_t... totalSizes>
   Index_t GetNumFreeImpl(Arena<allocSize, totalSize> &arena,
-                         Arena<allocSizes, totalSizes> &... arenas) {
+                         Arena<allocSizes, totalSizes> &...arenas) {
     if (allocSize >= sizeof(T)) {
       cl::sycl::atomic<Index_t> totalAllocations(
           (cl::sycl::multi_ptr<Index_t,
