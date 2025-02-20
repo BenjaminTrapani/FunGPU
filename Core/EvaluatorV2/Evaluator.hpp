@@ -5,7 +5,6 @@
 #include "Core/EvaluatorV2/RuntimeBlock.hpp"
 #include "Core/EvaluatorV2/RuntimeValue.h"
 #include "Core/PortableMemPool.hpp"
-#include "Core/sycl.hpp"
 #include <CL/sycl.hpp>
 #include <optional>
 

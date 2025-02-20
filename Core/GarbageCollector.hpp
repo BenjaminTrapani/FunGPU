@@ -6,7 +6,7 @@
 
 #include "Core/Error.hpp"
 #include "Core/PortableMemPool.hpp"
-#include "Core/sycl.hpp"
+#include <CL/sycl.hpp>
 
 namespace FunGPU {
 template <class T, Index_t maxManagedAllocationsCount> class GarbageCollector {

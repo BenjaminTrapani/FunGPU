@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core/Types.hpp"
-#include "Core/sycl.hpp"
+#include <CL/sycl.hpp>
 #include <limits>
 #include <memory>
 #include <type_traits>
