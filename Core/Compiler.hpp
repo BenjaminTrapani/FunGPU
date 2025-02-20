@@ -4,7 +4,7 @@
 #include "Core/PortableMemPool.hpp"
 #include "Core/SExpr.hpp"
 #include "Core/Types.hpp"
-#include "Core/sycl.hpp"
+#include <CL/sycl.hpp>
 
 #include <list>
 #include <memory>

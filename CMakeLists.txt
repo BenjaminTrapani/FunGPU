@@ -16,6 +16,8 @@ if(ENABLE_COMPUTE_CPP)
 	include_directories(SYSTEM "${OpenCL_INCLUDE_DIR}")
 else()
 	find_package(AdaptiveCpp REQUIRED)
+	# To ensure that the system include is appended to the compile_commands.json
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -isystem /usr/local/include/AdaptiveCpp/")
 endif()
 
 find_package(Boost 1.58 REQUIRED COMPONENTS unit_test_framework)
