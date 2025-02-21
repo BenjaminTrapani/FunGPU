@@ -52,5 +52,8 @@ BOOST_FIXTURE_TEST_CASE(MapExample, Fixture) {
 BOOST_FIXTURE_TEST_CASE(MergeSort, Fixture) {
   check_program_yields_result(123456, "./TestPrograms/MergeSort.fgpu");
 }
+BOOST_FIXTURE_TEST_CASE(BranchInBinding, Fixture) {
+  check_program_yields_result(8, "./TestPrograms/BranchInBinding.fgpu");
+}
 } // namespace
 } // namespace FunGPU::EvaluatorV2
