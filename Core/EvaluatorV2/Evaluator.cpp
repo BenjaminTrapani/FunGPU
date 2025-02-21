@@ -2,6 +2,8 @@
 #include "Core/EvaluatorV2/RuntimeBlock.hpp"
 #include "Core/EvaluatorV2/RuntimeValue.h"
 #include "Core/PortableMemPool.hpp"
+#include <hipSYCL/sycl/access.hpp>
+#include <hipSYCL/sycl/libkernel/group_functions.hpp>
 #include <stdexcept>
 
 namespace FunGPU::EvaluatorV2 {
@@ -147,6 +149,11 @@ void Evaluator::run_eval_step(
   // "
   // << block_group.max_num_instructions << std::endl;
   constexpr Index_t MAX_NUM_BLOCKS_PER_LAUNCH = 64;
+  // TODO: Even though max number of blocks per kernel launch is constrained,
+  // the buffers in the memory pool and indirect call handler are shared across
+  // invocations. Debug which ones are overflowing and consider using linked
+  // list of blocks to more efficiently use memory. Add error reporting
+  // mechanism for these failure modes.
   for (Index_t num_launched = 0;
        num_launched < block_group.block_descs.GetCount();
        num_launched += MAX_NUM_BLOCKS_PER_LAUNCH) {
@@ -198,7 +205,7 @@ void Evaluator::run_eval_step(
                  idx += THREADS_PER_BLOCK) {
               instructions_for_block[idx] = instructions_global_data[idx];
             }
-            itm.barrier();
+            itm.barrier(cl::sycl::access::fence_space::local_space);
             if (thread_idx >= block_meta.num_threads) {
               return;
             }
@@ -218,7 +225,7 @@ void Evaluator::run_eval_step(
             if (status != RuntimeBlockType::Status::COMPLETE) {
               any_threads_pending[0] = true;
             }
-            itm.barrier();
+            itm.barrier(cl::sycl::access::fence_space::local_space);
             if (thread_idx == 0) {
               if (!any_threads_pending[0]) {
                 mem_pool_write[0].Dealloc(block_meta.block);

@@ -437,7 +437,12 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
           cl::sycl::atomic<Index_t> copy_begin_atomic(copy_begin_atomic_acc[0]);
           const auto source_block_descs =
               block_exec_group_per_lambda_acc[itm.get_id(0)].block_descs;
-          const auto source_data =
+          if (source_block_descs ==
+              PortableMemPool::ArrayHandle<
+                  typename RuntimeBlockType::BlockMetadata>()) {
+            return;
+          }
+          const auto *source_data =
               mem_pool_write[0].derefHandle(source_block_descs);
           if (itm.get_id(1) < source_block_descs.GetCount()) {
             target_block_descs[copy_begin_atomic.fetch_add(1)] =

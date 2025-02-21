@@ -71,7 +71,7 @@ struct Fixture {
                  idx += THREADS_PER_BLOCK) {
               instructions_for_block[idx] = instructions_global_data[idx];
             }
-            itm.barrier();
+            itm.barrier(cl::sycl::access::fence_space::local_space);
             RuntimeBlockType::Status status = local_block[0].evaluate(
                 block_idx, thread_idx, mem_pool_write, local_instructions,
                 block_meta.instructions.GetCount(), [](auto &&...) {},
