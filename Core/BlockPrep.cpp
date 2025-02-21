@@ -4,6 +4,18 @@
 #include <map>
 
 namespace FunGPU {
+namespace {
+template <typename ContainedType>
+std::set<std::remove_cvref_t<ContainedType>>
+toConcrete(const std::set<ContainedType *> &original) {
+  std::set<std::remove_cvref_t<ContainedType>> result;
+  for (const auto val : original) {
+    result.emplace(*val);
+  }
+  return result;
+}
+} // namespace
+
 BlockPrep::BlockPrep(const Index_t registersPerBlock,
                      const Index_t instructionsPerCycle,
                      const Index_t cyclesPerBlock,
@@ -176,15 +188,6 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
         PortableMemPool::HostAccessor_t inputMemPoolAcc)
         : m_root(inputRoot), m_memPoolAcc(inputMemPoolAcc) {}
 
-    std::set<Compiler::ASTNodeHandle>
-    toConcrete(const std::set<Compiler::ASTNodeHandle *> &original) {
-      std::set<Compiler::ASTNodeHandle> result;
-      for (auto val : original) {
-        result.emplace(*val);
-      }
-      return result;
-    }
-
     Compiler::ASTNodeHandle
     PullPrimOpsAbove(Compiler::ASTNodeHandle &root,
                      std::vector<Compiler::ASTNodeHandle *> &primOps) {
@@ -230,7 +233,7 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
       // rewriting these. Probably best to rewrite each sub-tree as usual and
       // leave recursive bindings as before, generating one block of
       // instructions for each bound expression in the recursive binding. This
-      // is actually required do enable correct indirect calls in evaluation.
+      // is actually required to enable correct indirect calls in evaluation.
       if (node.m_type == Compiler::ASTNode::Type::BindRec) {
         node.m_childExpr = RewriteAsPrimOps(node.m_childExpr, m_memPoolAcc);
         auto *bindingData = m_memPoolAcc[0].derefHandle(node.m_bindings);
@@ -242,13 +245,15 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
 
       std::set<Compiler::ASTNodeHandle *> allNestedBindings;
       auto *bindingsData = m_memPoolAcc[0].derefHandle(node.m_bindings);
+      std::set<Compiler::ASTNodeHandle *> boundBranches;
+
       for (size_t i = 0; i < node.m_bindings.GetCount(); ++i) {
         std::set<Compiler::ASTNodeHandle *> curBindings;
-        CollectAllASTNodes(bindingsData[i], m_memPoolAcc,
-                           {Compiler::ASTNode::Type::Bind,
-                            Compiler::ASTNode::Type::BindRec,
-                            Compiler::ASTNode::Type::Lambda},
-                           curBindings);
+        CollectAllASTNodes(
+            bindingsData[i], m_memPoolAcc,
+            {Compiler::ASTNode::Type::Bind, Compiler::ASTNode::Type::BindRec,
+             Compiler::ASTNode::Type::Lambda, Compiler::ASTNode::Type::If},
+            curBindings);
         // Collect lambdas to prevent collection of binds inside lambda, cannot
         // move these.
         for (auto elem : curBindings) {
@@ -260,6 +265,9 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
             break;
           case Compiler::ASTNode::Type::Lambda:
             *elem = RewriteAsPrimOps(*elem, m_memPoolAcc);
+            break;
+          case Compiler::ASTNode::Type::If:
+            boundBranches.emplace(elem);
             break;
           default:
             throw std::invalid_argument("Unexpected node type");
@@ -294,6 +302,63 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
           mostRecentUnestedLet = tmpNestedBindHandle;
         }
         return RewriteAsPrimOps(outermostGeneratedLet, m_memPoolAcc);
+      }
+
+      if (!boundBranches.empty()) {
+        // Reformat (let ((bound-result (if a b c))) ...) as
+        //           (if a (let ((bound-result b)) ...
+        //                 (let ((bound-result c)) ... ))
+        const auto create_continuation_binding =
+            [&](const Compiler::ASTNodeHandle &bound_value) {
+              auto new_binding_handle =
+                  m_memPoolAcc[0].Alloc<Compiler::BindNode>(1, false,
+                                                            m_memPoolAcc);
+              auto &new_binding = *static_cast<Compiler::BindNode *>(
+                  m_memPoolAcc[0].derefHandle(new_binding_handle));
+              auto *binding_data =
+                  m_memPoolAcc[0].derefHandle(new_binding.m_bindings);
+              binding_data[0] = bound_value;
+              new_binding.m_childExpr = m_root;
+              return new_binding_handle;
+            };
+        const auto &first_branch_handle = **boundBranches.begin();
+        std::set<const Compiler::ASTNodeHandle *> identsToExclude;
+        CollectAllASTNodes(first_branch_handle, m_memPoolAcc,
+                           {Compiler::ASTNode::Type::Identifier},
+                           identsToExclude);
+        IncreaseBindingRefIndices(m_root, 1, m_memPoolAcc, 0,
+                                  toConcrete(identsToExclude));
+
+        auto *original_bindings_data =
+            m_memPoolAcc[0].derefHandle(node.m_bindings);
+        auto new_bindings_handle =
+            m_memPoolAcc[0].AllocArray<Compiler::ASTNodeHandle>(
+                node.m_bindings.GetCount() - 1);
+        std::size_t new_bindings_index = 0;
+        auto *new_bindings_data =
+            m_memPoolAcc[0].derefHandle(new_bindings_handle);
+        for (size_t original_bind_index = 0;
+             original_bind_index < node.m_bindings.GetCount();
+             ++original_bind_index) {
+          if (original_bindings_data[original_bind_index] ==
+              first_branch_handle) {
+            continue;
+          }
+          new_bindings_data[new_bindings_index++] =
+              original_bindings_data[original_bind_index];
+        }
+        m_memPoolAcc[0].DeallocArray(node.m_bindings);
+        node.m_bindings = new_bindings_handle;
+
+        auto &ifNode = static_cast<Compiler::IfNode &>(
+            *m_memPoolAcc[0].derefHandle(first_branch_handle));
+        auto true_branch_continuation =
+            create_continuation_binding(ifNode.m_then);
+        auto false_branch_continuation =
+            create_continuation_binding(ifNode.m_else);
+        ifNode.m_then = true_branch_continuation;
+        ifNode.m_else = false_branch_continuation;
+        return RewriteAsPrimOps(first_branch_handle, m_memPoolAcc);
       }
 
       // Decompose complex bound expressions in current scope into their own let
