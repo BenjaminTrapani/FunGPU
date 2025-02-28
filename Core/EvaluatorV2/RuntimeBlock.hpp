@@ -6,8 +6,6 @@
 #include "Core/Types.hpp"
 #include "Core/Visitor.hpp"
 #include <cstdint>
-#include <hipSYCL/sycl/libkernel/atomic_ref.hpp>
-#include <hipSYCL/sycl/libkernel/group_functions.hpp>
 
 namespace FunGPU::EvaluatorV2 {
 template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
@@ -233,11 +231,10 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
             call_indirect.arg_indices.unpack().GetCount() > 0) {
           return Status::ALLOCATION_ERROR;
         }
-        cl::sycl::atomic<int, cl::sycl::access::address_space::local_space>
-            atomic_dep_count(
-                (cl::sycl::multi_ptr<
-                    int, cl::sycl::access::address_space::local_space>(
-                    &num_outstanding_dependencies)));
+        cl::sycl::atomic_ref<int, cl::sycl::memory_order::seq_cst,
+                             cl::sycl::memory_scope::work_group,
+                             cl::sycl::access::address_space::local_space>
+            atomic_dep_count(num_outstanding_dependencies);
         atomic_dep_count.fetch_add(1);
         const auto function_val =
             register_set[call_indirect.lambda_idx].data.function_val;
@@ -320,7 +317,8 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
   }
   cl::sycl::group_barrier(itm.get_group());
   cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
-                       cl::sycl::memory_scope::work_group>
+                       cl::sycl::memory_scope::work_group,
+                       cl::sycl::access::address_space::local_space>
       cur_cycle_atomic(cur_cycle);
   cur_cycle_atomic.fetch_max(local_cycle);
   return status;
@@ -332,9 +330,10 @@ void RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::fill_dependency(
     const Index_t thread, const Index_t register_idx, const RuntimeValue value,
     OnActivateBlock &&on_activate_block) {
   registers[thread][register_idx] = value;
-  cl::sycl::atomic<int> atomic_dep_count(
-      (cl::sycl::multi_ptr<int, cl::sycl::access::address_space::global_space>(
-          &num_outstanding_dependencies)));
+  cl::sycl::atomic_ref<int, cl::sycl::memory_order::seq_cst,
+                       cl::sycl::memory_scope::device,
+                       cl::sycl::access::address_space::global_space>
+      atomic_dep_count(num_outstanding_dependencies);
   const auto prev_count = atomic_dep_count.fetch_sub(1);
   if (prev_count == 1) {
     on_activate_block(m_handle);

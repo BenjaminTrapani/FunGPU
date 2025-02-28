@@ -205,20 +205,20 @@ private:
     }
 
     std::byte *AllocFromArena() {
-      cl::sycl::atomic<Index_t> allocCount(
-          (cl::sycl::multi_ptr<Index_t,
-                               cl::sycl::access::address_space::global_space>(
-              &m_totalAllocations)));
-      const auto prevAllocCount = allocCount.fetch_add(1);
+      cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                           cl::sycl::memory_scope::device,
+                           cl::sycl::access::address_space::global_space>
+          allocCount(m_totalAllocations);
+      const auto prevAllocCount = allocCount.fetch_add(1U);
       if (prevAllocCount >= m_allocBeginIndices.size()) {
         return nullptr;
       }
-      cl::sycl::atomic<Index_t> freeBlockBegin(
-          (cl::sycl::multi_ptr<Index_t,
-                               cl::sycl::access::address_space::global_space>(
-              &m_freeBlockBegin)));
+      cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                           cl::sycl::memory_scope::device,
+                           cl::sycl::access::address_space::global_space>
+          freeBlockBegin(m_freeBlockBegin);
       const auto allocdIndex =
-          freeBlockBegin.fetch_add(1) % m_allocBeginIndices.size();
+          freeBlockBegin.fetch_add(1U) % m_allocBeginIndices.size();
       return &m_storage[m_allocBeginIndices[allocdIndex]];
     }
 
@@ -228,19 +228,19 @@ private:
     }
 
     void FreeFromArena(std::byte *data) {
-      cl::sycl::atomic<Index_t> allocdBlockBegin(
-          (cl::sycl::multi_ptr<Index_t,
-                               cl::sycl::access::address_space::global_space>(
-              &m_allocdBlockBegin)));
+      cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                           cl::sycl::memory_scope::device,
+                           cl::sycl::access::address_space::global_space>
+          allocdBlockBegin(m_allocdBlockBegin);
       const auto freeDst =
-          allocdBlockBegin.fetch_add(1) % m_allocBeginIndices.size();
+          allocdBlockBegin.fetch_add(1U) % m_allocBeginIndices.size();
       m_allocBeginIndices[freeDst] = data - &m_storage[0];
 
-      cl::sycl::atomic<Index_t> allocCount(
-          (cl::sycl::multi_ptr<Index_t,
-                               cl::sycl::access::address_space::global_space>(
-              &m_totalAllocations)));
-      allocCount.fetch_sub(1);
+      cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                           cl::sycl::memory_scope::device,
+                           cl::sycl::access::address_space::global_space>
+          allocCount(m_totalAllocations);
+      allocCount.fetch_sub(1U);
     }
 
     alignas(AllocSize_i) std::byte m_storage[TotalBytes_i];
@@ -437,11 +437,11 @@ private:
                               Arena<allocSizes, totalSizes> &...arenas) {
     Index_t totalAllocCount = 0;
 
-    cl::sycl::atomic<Index_t> totalAllocations(
-        (cl::sycl::multi_ptr<Index_t,
-                             cl::sycl::access::address_space::global_space>(
-            &arena.m_totalAllocations)));
-    totalAllocCount += totalAllocations.fetch_add(0);
+    cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                         cl::sycl::memory_scope::device,
+                         cl::sycl::access::address_space::global_space>
+        totalAllocations(arena.m_totalAllocations);
+    totalAllocCount += totalAllocations.load();
     totalAllocCount += GetTotalAllocationCountImpl(arenas...);
 
     return totalAllocCount;
@@ -449,11 +449,11 @@ private:
 
   template <Index_t allocSize, Index_t totalSize>
   Index_t GetTotalAllocationCountImpl(Arena<allocSize, totalSize> &arena) {
-    cl::sycl::atomic<Index_t> totalAllocations(
-        (cl::sycl::multi_ptr<Index_t,
-                             cl::sycl::access::address_space::global_space>(
-            &arena.m_totalAllocations)));
-    return totalAllocations.fetch_add(0);
+    cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                         cl::sycl::memory_scope::device,
+                         cl::sycl::access::address_space::global_space>
+        totalAllocations(arena.m_totalAllocations);
+    return totalAllocations.load();
   }
 
   template <class T, Index_t allocSize, Index_t totalSize,
@@ -461,11 +461,11 @@ private:
   Index_t GetNumFreeImpl(Arena<allocSize, totalSize> &arena,
                          Arena<allocSizes, totalSizes> &...arenas) {
     if (allocSize >= sizeof(T)) {
-      cl::sycl::atomic<Index_t> totalAllocations(
-          (cl::sycl::multi_ptr<Index_t,
-                               cl::sycl::access::address_space::global_space>(
-              &arena.m_totalAllocations)));
-      return (totalSize / allocSize) - totalAllocations.fetch_add(0);
+      cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                           cl::sycl::memory_scope::device,
+                           cl::sycl::access::address_space::global_space>
+          totalAllocations(arena.m_totalAllocations);
+      return (totalSize / allocSize) - totalAllocations.load();
     } else {
       return GetNumFreeImpl<T>(arenas...);
     }
@@ -474,11 +474,11 @@ private:
   template <class T, Index_t allocSize, Index_t totalSize>
   Index_t GetNumFreeImpl(Arena<allocSize, totalSize> &arena) {
     if (allocSize >= sizeof(T)) {
-      cl::sycl::atomic<Index_t> totalAllocations(
-          (cl::sycl::multi_ptr<Index_t,
-                               cl::sycl::access::address_space::global_space>(
-              &arena.m_totalAllocations)));
-      return (totalSize / allocSize) - totalAllocations.fetch_add(0);
+      cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                           cl::sycl::memory_scope::device,
+                           cl::sycl::access::address_space::global_space>
+          totalAllocations(arena.m_totalAllocations);
+      return (totalSize / allocSize) - totalAllocations.load();
     }
     return 0;
   }

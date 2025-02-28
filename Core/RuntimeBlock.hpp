@@ -119,10 +119,10 @@ public:
   }
 
   bool SetMarked() {
-    cl::sycl::atomic<unsigned int> isMarkedAtomic(
-        (cl::sycl::multi_ptr<unsigned int,
-                             cl::sycl::access::address_space::global_space>(
-            &m_isMarkedData)));
+    cl::sycl::atomic_ref<unsigned int, cl::sycl::memory_order::seq_cst,
+                         cl::sycl::memory_scope::device,
+                         cl::sycl::access::address_space::global_space>
+        isMarkedAtomic(m_isMarkedData);
     return isMarkedAtomic.exchange(true);
   }
 
@@ -158,11 +158,11 @@ public:
   }
 
   bool GetIsMarked() {
-    cl::sycl::atomic<unsigned int> isMarkedAtomic(
-        (cl::sycl::multi_ptr<unsigned int,
-                             cl::sycl::access::address_space::global_space>(
-            &m_isMarkedData)));
-    return isMarkedAtomic.fetch_add(0);
+    cl::sycl::atomic_ref<unsigned int, cl::sycl::memory_order::seq_cst,
+                         cl::sycl::memory_scope::device,
+                         cl::sycl::access::address_space::global_space>
+        isMarkedAtomic(m_isMarkedData);
+    return isMarkedAtomic.load();
   }
 
   void ClearMarking() { m_isMarkedData = false; }
@@ -595,10 +595,10 @@ private:
         isNewDependency) {
       auto derefdParent =
           m_memPoolDeviceAcc[0].derefHandle(derefdBlock->m_parent);
-      cl::sycl::atomic<int> atomicDepCount(
-          (cl::sycl::multi_ptr<int,
-                               cl::sycl::access::address_space::global_space>(
-              &derefdParent->m_dependenciesRemainingData)));
+      cl::sycl::atomic_ref<int, cl::sycl::memory_order::seq_cst,
+                           cl::sycl::memory_scope::device,
+                           cl::sycl::access::address_space::global_space>
+          atomicDepCount(derefdParent->m_dependenciesRemainingData);
       atomicDepCount.fetch_add(1);
     }
 
@@ -611,10 +611,10 @@ private:
     destRef->SetValue(type, data);
     if (m_parent != SharedRuntimeBlockHandle_t()) {
       auto derefdParent = m_memPoolDeviceAcc[0].derefHandle(m_parent);
-      cl::sycl::atomic<int> atomicDepCount(
-          (cl::sycl::multi_ptr<int,
-                               cl::sycl::access::address_space::global_space>(
-              &derefdParent->m_dependenciesRemainingData)));
+      cl::sycl::atomic_ref<int, cl::sycl::memory_order::seq_cst,
+                           cl::sycl::memory_scope::device,
+                           cl::sycl::access::address_space::global_space>
+          atomicDepCount(derefdParent->m_dependenciesRemainingData);
       if (atomicDepCount.fetch_add(-1) == 1) {
         RETURN_IF_FAILURE(m_depTracker[0].AddActiveBlock(m_parent));
       }

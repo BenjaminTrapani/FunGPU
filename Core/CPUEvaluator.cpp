@@ -1,5 +1,6 @@
 #include "Core/CPUEvaluator.hpp"
 #include <algorithm>
+
 #include <iostream>
 #include <sstream>
 
@@ -20,11 +21,11 @@ class gc_compact;
 
 Error CPUEvaluator::DependencyTracker::AddActiveBlock(
     const RuntimeBlock_t::SharedRuntimeBlockHandle_t &block) {
-  cl::sycl::atomic<Index_t> activeBlockCount(
-      (cl::sycl::multi_ptr<Index_t,
-                           cl::sycl::access::address_space::global_space>(
-          &m_activeBlockCountData)));
-  const auto indexToInsert = activeBlockCount.fetch_add(1);
+  cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                       cl::sycl::memory_scope::device,
+                       cl::sycl::access::address_space::global_space>
+      activeBlockCount(m_activeBlockCountData);
+  const auto indexToInsert = activeBlockCount.fetch_add(1U);
   auto &destArray = m_activeBlocks[m_activeBlocksBufferIdx];
   if (indexToInsert >= destArray.size()) {
     return Error(Error::Type::EvaluatorOutOfActiveBlocks);
@@ -326,7 +327,7 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
             m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
 
         auto blockErrorIdxAtomicAcc =
-            m_blockErrorIdx.get_access<access::mode::atomic>(cgh);
+            m_blockErrorIdx.get_access<access::mode::read_write>(cgh);
         auto blockErrorAcc =
             m_errorsPerBlock.get_access<access::mode::read_write>(cgh);
         auto requiresGarbageCollectionAcc =
@@ -364,9 +365,12 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
               case Error::Type::EvaluatorOutOfDeletionBlocks:
                 break;
               }
-              cl::sycl::atomic<Index_t> blockErrorIdxAtomic(
-                  blockErrorIdxAtomicAcc[0]);
-              blockErrorAcc[blockErrorIdxAtomic.fetch_add(1)] = error;
+              cl::sycl::atomic_ref<
+                  Index_t, cl::sycl::memory_order::seq_cst,
+                  cl::sycl::memory_scope::device,
+                  cl::sycl::access::address_space::global_space>
+                  blockErrorIdxAtomic(blockErrorIdxAtomicAcc[0]);
+              blockErrorAcc[blockErrorIdxAtomic.fetch_add(1U)] = error;
             });
       });
     }
