@@ -2,8 +2,6 @@
 #include "Core/EvaluatorV2/RuntimeBlock.hpp"
 #include "Core/EvaluatorV2/RuntimeValue.h"
 #include "Core/PortableMemPool.hpp"
-#include <hipSYCL/sycl/access.hpp>
-#include <hipSYCL/sycl/libkernel/group_functions.hpp>
 #include <stdexcept>
 
 namespace FunGPU::EvaluatorV2 {
@@ -210,7 +208,7 @@ void Evaluator::run_eval_step(
               return;
             }
             const RuntimeBlockType::Status status = local_block[0].evaluate(
-                itm.get_group_linear_id(), thread_idx, mem_pool_write,
+                itm.get_group_linear_id(), thread_idx, itm, mem_pool_write,
                 local_instructions, block_meta.instructions.GetCount(),
                 [indirect_call_handler_acc, mem_pool_write, indirect_all_acc](
                     const auto block, const auto funv, const auto tid,
@@ -222,8 +220,16 @@ void Evaluator::run_eval_step(
                   indirect_call_handler_acc[0].on_activate_block(mem_pool_write,
                                                                  block);
                 });
-            if (status != RuntimeBlockType::Status::COMPLETE) {
+            switch (status) {
+            case RuntimeBlockType::Status::COMPLETE:
+              break;
+            case RuntimeBlockType::Status::STALLED:
+            // TODO : retry block on allocation error and treat as stalled.
+            // Maybe reuse on_indirect_call buffer?
+            case RuntimeBlockType::Status::ALLOCATION_ERROR:
+            case RuntimeBlockType::Status::READY:
               any_threads_pending[0] = true;
+              break;
             }
             itm.barrier(cl::sycl::access::fence_space::local_space);
             if (thread_idx == 0) {
