@@ -124,8 +124,8 @@ concept HasTargetRegister = requires(T x) { x.target_register; };
 
 struct Instruction {
   std::string print(PortableMemPool::HostAccessor_t mem_pool_acc) const;
-
   bool equals(const Instruction &, PortableMemPool::HostAccessor_t &) const;
+  void deallocate(PortableMemPool::HostAccessor_t);
 
   Instruction() = default;
   Instruction(const InstructionType type) : type(type) {}

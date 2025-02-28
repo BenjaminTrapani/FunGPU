@@ -82,8 +82,9 @@ auto Evaluator::construct_initial_block(const Program program)
         mem_pool_buffer_.get_access<cl::sycl::access::mode::read_write>(cgh);
     cgh.single_task([result_acc, mem_pool_acc, program] {
       const auto &main_lambda = mem_pool_acc[0].derefHandle(program)[0];
-      const auto block =
-          mem_pool_acc[0].Alloc<RuntimeBlockType>(main_lambda.instructions, 1);
+      const auto block = mem_pool_acc[0].Alloc<RuntimeBlockType>(
+          main_lambda.instructions,
+          RuntimeBlockType::PreAllocatedRuntimeValuesPerThread(), 1);
       result_acc[0] = block;
       auto &block_data = *mem_pool_acc[0].derefHandle(block);
       block_data.num_outstanding_dependencies = 1;
@@ -102,8 +103,11 @@ RuntimeValue Evaluator::read_result(
     auto result_acc =
         result.get_access<cl::sycl::access::mode::discard_write>(cgh);
     cgh.single_task([mem_pool_acc, result_acc, first_block] {
-      const auto &first_block_data = *mem_pool_acc[0].derefHandle(first_block);
+      auto &first_block_data = *mem_pool_acc[0].derefHandle(first_block);
       result_acc[0] = first_block_data.registers[0][0];
+      first_block_data.deallocate_runtime_values_array_for_thread(mem_pool_acc,
+                                                                  0);
+      mem_pool_acc[0].Dealloc(first_block);
     });
   });
   return result.get_access<cl::sycl::access::mode::read>()[0];
@@ -135,6 +139,7 @@ auto Evaluator::schedule_next_batch(const Program program)
   });
   if (is_initial_block_ready_again_
           .get_access<cl::sycl::access::mode::read>()[0]) {
+    cleanup(next_batch);
     return std::nullopt;
   }
   return next_batch;
@@ -224,14 +229,18 @@ void Evaluator::run_eval_step(
             case RuntimeBlockType::Status::COMPLETE:
               break;
             case RuntimeBlockType::Status::STALLED:
-            // TODO : retry block on allocation error and treat as stalled.
-            // Maybe reuse on_indirect_call buffer?
-            case RuntimeBlockType::Status::ALLOCATION_ERROR:
             case RuntimeBlockType::Status::READY:
               any_threads_pending[0] = true;
               break;
             }
             itm.barrier(cl::sycl::access::fence_space::local_space);
+            if (!any_threads_pending[0]) {
+              mem_pool_write[0]
+                  .derefHandle(block_meta.block)
+                  ->deallocate_runtime_values_array_for_thread(mem_pool_write,
+                                                               thread_idx);
+            }
+            cl::sycl::group_barrier(itm.get_group());
             if (thread_idx == 0) {
               if (!any_threads_pending[0]) {
                 mem_pool_write[0].Dealloc(block_meta.block);

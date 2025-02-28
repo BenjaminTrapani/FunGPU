@@ -579,7 +579,7 @@ Lambda BlockGenerator::construct_block(
   for (Index_t i = 0; i < instructions_handle.GetCount(); ++i) {
     instructions_data[i] = result_instructions[i];
   }
-  return Lambda(instructions_handle);
+  return Lambda(instructions_handle, mem_pool_acc);
 }
 
 Program BlockGenerator::construct_blocks(const Compiler::ASTNodeHandle root) {

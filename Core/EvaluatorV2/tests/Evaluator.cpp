@@ -1,7 +1,11 @@
 #define BOOST_TEST_MODULE EvaluatorTestModule
+
 #include "Core/EvaluatorV2/Evaluator.hpp"
 #include "Core/EvaluatorV2/CompileProgram.hpp"
+#include "Core/EvaluatorV2/Instruction.h"
+#include <boost/test/tools/old/interface.hpp>
 #include <boost/test/unit_test.hpp>
+#include <stdexcept>
 
 namespace FunGPU::EvaluatorV2 {
 struct Fixture {
@@ -11,13 +15,71 @@ struct Fixture {
                                                     cl::sycl::range<1>(1)};
   Evaluator evaluator{mem_pool_buffer};
 
+  Index_t get_alloc_count() {
+    auto hostAcc =
+        mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
+    return hostAcc[0].GetTotalAllocationCount();
+  }
+
+  bool program_contains_lambdas_with_captures(
+      const PortableMemPool::ArrayHandle<Lambda> &program) {
+    auto mem_pool_acc =
+        mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
+    const auto *lambdas = mem_pool_acc[0].derefHandle(program);
+    for (Index_t i = 0; i < program.GetCount(); ++i) {
+      const auto *instructions =
+          mem_pool_acc[0].derefHandle(lambdas[i].instructions);
+      for (Index_t j = 0; j < lambdas[i].instructions.GetCount(); ++j) {
+        const auto contains_captures = visit(
+            instructions[j],
+            Visitor{
+                [&](const CreateLambda &create_lambda) {
+                  return create_lambda.captured_indices.unpack().GetCount() > 0;
+                },
+                [](const auto &) { return false; }},
+            [](const auto &) {
+              throw std::invalid_argument("Encountered unknown instruction");
+            });
+        if (contains_captures) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   void check_program_yields_result(const Float_t expected_val,
                                    const std::string &program_path) {
+    const auto initial_alloc_count = get_alloc_count();
     const auto compiled_program =
         compile_program(program_path, Evaluator::REGISTERS_PER_THREAD,
                         Evaluator::THREADS_PER_BLOCK, mem_pool_buffer);
+    const auto program_contains_captures =
+        program_contains_lambdas_with_captures(compiled_program);
+    std::cout << "Program contains captures: " << program_contains_captures
+              << std::endl;
+    const auto pre_eval_alloc_count = get_alloc_count();
     const auto result = evaluator.compute(compiled_program);
+    const auto post_eval_alloc_count = get_alloc_count();
+    {
+      auto mem_pool_acc =
+          mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
+      deallocate_program(compiled_program, mem_pool_acc);
+    }
     BOOST_CHECK_EQUAL(expected_val, result.data.float_val);
+    const auto final_alloc_count = get_alloc_count();
+    // TODO assert no allocation delta once captured runtime values are garbage
+    // collected.
+    if (program_contains_captures) {
+      BOOST_CHECK_GE(post_eval_alloc_count, pre_eval_alloc_count);
+    } else {
+      BOOST_CHECK_EQUAL(post_eval_alloc_count, pre_eval_alloc_count);
+    }
+    BOOST_CHECK_EQUAL(initial_alloc_count,
+                      final_alloc_count -
+                          (post_eval_alloc_count - pre_eval_alloc_count));
+    std::cout << "initial_alloc_count=" << initial_alloc_count
+              << ", final_alloc_count=" << final_alloc_count << std::endl;
   }
 };
 
