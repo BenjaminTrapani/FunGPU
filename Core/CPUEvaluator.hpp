@@ -5,6 +5,7 @@
 #include "Core/RuntimeBlock.hpp"
 #include <CL/sycl.hpp>
 #include <array>
+
 #include <memory>
 
 namespace FunGPU {
@@ -25,11 +26,11 @@ public:
                            Index_t);
 
     Index_t GetActiveBlockCount() {
-      cl::sycl::atomic<Index_t> activeBlockCount(
-          (cl::sycl::multi_ptr<Index_t,
-                               cl::sycl::access::address_space::global_space>(
-              &m_activeBlockCountData)));
-      return activeBlockCount.fetch_add(0);
+      cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                           cl::sycl::memory_scope::device,
+                           cl::sycl::access::address_space::global_space>
+          activeBlockCount(m_activeBlockCountData);
+      return activeBlockCount.load();
     }
 
     void FlipActiveBlocksBuffer(const Index_t newActiveBlockCount = 0) {

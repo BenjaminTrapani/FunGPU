@@ -17,10 +17,10 @@ public:
   template <class... Args_t>
   Error AllocManaged(const PortableMemPool::DeviceAccessor_t &memPoolAcc,
                      PortableMemPool::Handle<T> &result, Args_t &&...args) {
-    cl::sycl::atomic<Index_t> allocCount(
-        (cl::sycl::multi_ptr<Index_t,
-                             cl::sycl::access::address_space::global_space>(
-            &m_managedAllocationsCountData)));
+    cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                         cl::sycl::memory_scope::device,
+                         cl::sycl::access::address_space::global_space>
+        allocCount(m_managedAllocationsCountData);
     result = memPoolAcc[0].template Alloc<T>(std::forward<Args_t>(args)...);
     if (result == PortableMemPool::Handle<T>()) {
       return Error(Error::Type::MemPoolAllocFailure);
@@ -31,7 +31,7 @@ public:
       memPoolAcc[0].Dealloc(result);
       return error;
     }
-    const auto indexToAlloc = allocCount.fetch_add(1);
+    const auto indexToAlloc = allocCount.fetch_add(1U);
     if (indexToAlloc >= maxManagedAllocationsCount) {
       memPoolAcc[0].Dealloc(result);
       return Error(Error::Type::GCOutOfSlots);
@@ -42,11 +42,11 @@ public:
   }
 
   Index_t GetManagedAllocationCount() {
-    cl::sycl::atomic<Index_t> allocCount(
-        (cl::sycl::multi_ptr<Index_t,
-                             cl::sycl::access::address_space::global_space>(
-            &m_managedAllocationsCountData)));
-    return std::min(allocCount.fetch_add(0), maxManagedAllocationsCount);
+    cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                         cl::sycl::memory_scope::device,
+                         cl::sycl::access::address_space::global_space>
+        allocCount(m_managedAllocationsCountData);
+    return std::min(allocCount.load(), maxManagedAllocationsCount);
   }
 
   bool RunMarkPass(const Index_t idx,
@@ -77,11 +77,11 @@ public:
   void Compact(const Index_t idx) {
     const auto &handleForIdx = m_managedHandles[m_prevManagedHandlesIdx][idx];
     if (handleForIdx != PortableMemPool::Handle<T>()) {
-      cl::sycl::atomic<Index_t> allocCount(
-          (cl::sycl::multi_ptr<Index_t,
-                               cl::sycl::access::address_space::global_space>(
-              &m_managedAllocationsCountData)));
-      m_managedHandles[m_managedHandlesIdx][allocCount.fetch_add(1)] =
+      cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                           cl::sycl::memory_scope::device,
+                           cl::sycl::access::address_space::global_space>
+          allocCount(m_managedAllocationsCountData);
+      m_managedHandles[m_managedHandlesIdx][allocCount.fetch_add(1U)] =
           handleForIdx;
     }
   }

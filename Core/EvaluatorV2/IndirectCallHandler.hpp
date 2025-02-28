@@ -221,11 +221,11 @@ template <typename RuntimeBlockType, Index_t MaxNumIndirectCalls,
 void IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
                          MaxNumReactivations>::IndirectCallRequestBuffer::
     append(const IndirectCallRequest &req) {
-  cl::sycl::atomic<Index_t> count(
-      (cl::sycl::multi_ptr<Index_t,
-                           cl::sycl::access::address_space::global_space>(
-          &num_indirect_call_reqs)));
-  const auto target_idx = count.fetch_add(1);
+  cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                       cl::sycl::memory_scope::device,
+                       cl::sycl::access::address_space::global_space>
+      count(num_indirect_call_reqs);
+  const auto target_idx = count.fetch_add(1U);
   indirect_call_requests[target_idx] = req;
 }
 
@@ -235,11 +235,11 @@ void IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
                          MaxNumReactivations>::BlockReactivationRequestBuffer::
     append(PortableMemPool::DeviceAccessor_t mem_pool_acc,
            const PortableMemPool::Handle<RuntimeBlockType> block) {
-  cl::sycl::atomic<Index_t> count(
-      (cl::sycl::multi_ptr<Index_t,
-                           cl::sycl::access::address_space::global_space>(
-          &num_runtime_blocks_reactivated)));
-  const auto target_idx = count.fetch_add(1);
+  cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                       cl::sycl::memory_scope::device,
+                       cl::sycl::access::address_space::global_space>
+      count(num_runtime_blocks_reactivated);
+  const auto target_idx = count.fetch_add(1U);
   runtime_blocks_reactivated[target_idx] =
       mem_pool_acc[0].derefHandle(block)->block_metadata();
 }
@@ -326,10 +326,10 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
             .template get_access<cl::sycl::access::mode::read_write>(cgh);
     auto atomic_max_threads_per_lambda =
         buffers.max_num_threads_per_lambda
-            .template get_access<cl::sycl::access::mode::atomic>(cgh);
+            .template get_access<cl::sycl::access::mode::read_write>(cgh);
     auto total_num_blocks_acc =
         buffers.total_num_blocks
-            .template get_access<cl::sycl::access::mode::atomic>(cgh);
+            .template get_access<cl::sycl::access::mode::read_write>(cgh);
     auto indirect_call_requests_by_block_acc =
         buffers.indirect_call_requests_by_block
             .template get_access<cl::sycl::access::mode::read_write>(cgh);
@@ -350,15 +350,19 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
                 indirect_call_handler_acc[0].setup_block_for_reactivation(
                     mem_pool_write);
           }
-          cl::sycl::atomic<Index_t> max_num_threads_per_lambda(
-              atomic_max_threads_per_lambda[0]);
+          cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                               cl::sycl::memory_scope::device,
+                               cl::sycl::access::address_space::global_space>
+              max_num_threads_per_lambda(atomic_max_threads_per_lambda[0]);
           const auto num_blocks_in_lambda =
               block_exec_group_per_lambda_acc[lambda_idx]
                   .block_descs.GetCount();
           max_num_threads_per_lambda.fetch_max(
               num_blocks_in_lambda * RuntimeBlockType::NumThreadsPerBlock);
-          cl::sycl::atomic<Index_t> total_num_blocks_atomic(
-              total_num_blocks_acc[0]);
+          cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                               cl::sycl::memory_scope::device,
+                               cl::sycl::access::address_space::global_space>
+              total_num_blocks_atomic(total_num_blocks_acc[0]);
           total_num_blocks_atomic.fetch_add(num_blocks_in_lambda);
         });
   });
@@ -424,7 +428,7 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
             .template get_access<cl::sycl::access::mode::read>(cgh);
     auto copy_begin_atomic_acc =
         buffers.copy_begin_idx
-            .template get_access<cl::sycl::access::mode::atomic>(cgh);
+            .template get_access<cl::sycl::access::mode::read_write>(cgh);
     cgh.parallel_for<class MergeIntoResult>(
         cl::sycl::range<2>(program.GetCount() + 1,
                            (max_num_threads_per_lambda_val +
@@ -434,7 +438,10 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
          copy_begin_atomic_acc](cl::sycl::item<2> itm) {
           auto *target_block_descs =
               mem_pool_write[0].derefHandle(result_acc[0].block_descs);
-          cl::sycl::atomic<Index_t> copy_begin_atomic(copy_begin_atomic_acc[0]);
+          cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                               cl::sycl::memory_scope::device,
+                               cl::sycl::access::address_space::global_space>
+              copy_begin_atomic(copy_begin_atomic_acc[0]);
           const auto source_block_descs =
               block_exec_group_per_lambda_acc[itm.get_id(0)].block_descs;
           if (source_block_descs ==
@@ -445,16 +452,14 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
           const auto *source_data =
               mem_pool_write[0].derefHandle(source_block_descs);
           if (itm.get_id(1) < source_block_descs.GetCount()) {
-            target_block_descs[copy_begin_atomic.fetch_add(1)] =
+            target_block_descs[copy_begin_atomic.fetch_add(1U)] =
                 source_data[itm.get_id(1)];
           }
           if (itm.get_id(1) == 0) {
-            cl::sycl::atomic<Index_t,
-                             cl::sycl::access::address_space::global_space>
-                max_num_instructions_atomic(
-                    (cl::sycl::multi_ptr<
-                        Index_t, cl::sycl::access::address_space::global_space>(
-                        &result_acc[0].max_num_instructions)));
+            cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                                 cl::sycl::memory_scope::device,
+                                 cl::sycl::access::address_space::global_space>
+                max_num_instructions_atomic(result_acc[0].max_num_instructions);
             max_num_instructions_atomic.fetch_max(
                 block_exec_group_per_lambda_acc[itm.get_id(0)]
                     .max_num_instructions);
