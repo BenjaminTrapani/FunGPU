@@ -6,6 +6,8 @@
 #include "Core/Types.hpp"
 #include "Core/Visitor.hpp"
 #include <cstdint>
+#include <hipSYCL/sycl/libkernel/atomic_ref.hpp>
+#include <hipSYCL/sycl/libkernel/group_functions.hpp>
 
 namespace FunGPU::EvaluatorV2 {
 template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
@@ -45,7 +47,7 @@ public:
     Index_t max_num_instructions = 0;
   };
 
-  enum class Status { READY, STALLED, COMPLETE };
+  enum class Status { READY, STALLED, COMPLETE, ALLOCATION_ERROR };
 
   using InstructionLocalMemAccessor =
       cl::sycl::accessor<Instruction, 2, cl::sycl::access::mode::read_write,
@@ -56,8 +58,10 @@ public:
       const Index_t num_threads)
       : instruction_ref(instructions), num_threads(num_threads) {}
 
+  // RuntimeBlock must be loaded into local memory before invoking evaluate
   template <typename OnIndirectCall, typename OnActivateBlock>
   Status evaluate(const Index_t block_idx, const Index_t thread,
+                  const cl::sycl::nd_item<1> &,
                   PortableMemPool::DeviceAccessor_t mem_pool,
                   const InstructionLocalMemAccessor instructions,
                   const Index_t instruction_count,
@@ -134,7 +138,7 @@ template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
 template <typename OnIndirectCall, typename OnActivateBlock>
 auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
     const Index_t block_idx, const Index_t thread,
-    PortableMemPool::DeviceAccessor_t mem_pool,
+    const cl::sycl::nd_item<1> &itm, PortableMemPool::DeviceAccessor_t mem_pool,
     const InstructionLocalMemAccessor all_instructions,
     const Index_t num_instructions, OnIndirectCall &&on_indirect_call,
     OnActivateBlock &&on_activate_block) -> Status {
@@ -155,6 +159,10 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
     const auto *arg_indices = mem_pool[0].derefHandle(arg_indices_handle);
     auto arg_values =
         mem_pool[0].AllocArray<RuntimeValue>(arg_indices_handle.GetCount());
+    if (arg_values == PortableMemPool::ArrayHandle<RuntimeValue>() &&
+        arg_indices_handle.GetCount() > 0) {
+      return arg_values;
+    }
     auto *arg_values_data = mem_pool[0].derefHandle(arg_values);
     for (Index_t i = 0; i < arg_indices_handle.GetCount(); ++i) {
       arg_values_data[i] = register_set[arg_indices[i]];
@@ -207,6 +215,10 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
         auto &target_register = register_set[create_lambda.target_register];
         auto captured_values = mem_pool[0].AllocArray<RuntimeValue>(
             captured_indices_handle.GetCount());
+        if (captured_values == PortableMemPool::ArrayHandle<RuntimeValue>() &&
+            captured_indices_handle.GetCount() > 0) {
+          return Status::ALLOCATION_ERROR;
+        }
         auto *captured_values_data = mem_pool[0].derefHandle(captured_values);
         target_register.data.function_val =
             FunctionValue(create_lambda.block_idx, captured_values);
@@ -217,6 +229,10 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
       },
       [&](const CallIndirect &call_indirect) {
         const auto arg_values = allocate_arg_values(call_indirect);
+        if (arg_values == PortableMemPool::ArrayHandle<RuntimeValue>() &&
+            call_indirect.arg_indices.unpack().GetCount() > 0) {
+          return Status::ALLOCATION_ERROR;
+        }
         cl::sycl::atomic<int, cl::sycl::access::address_space::local_space>
             atomic_dep_count(
                 (cl::sycl::multi_ptr<
@@ -231,6 +247,10 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
       },
       [&](const BlockingCallIndirect &blocking_call_indirect) {
         const auto arg_values = allocate_arg_values(blocking_call_indirect);
+        if (arg_values == PortableMemPool::ArrayHandle<RuntimeValue>() &&
+            blocking_call_indirect.arg_indices.unpack().GetCount() > 0) {
+          return Status::ALLOCATION_ERROR;
+        }
         const auto function_val =
             register_set[blocking_call_indirect.lambda_idx].data.function_val;
         const auto &target = target_data[thread];
@@ -243,15 +263,16 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
 #undef HANDLE_BINARY_OP
 
   auto status = Status::READY;
-  for (; status == Status::READY; ++cur_cycle) {
-    if (cur_cycle > num_instructions) {
+  auto local_cycle = cur_cycle;
+  while (status == Status::READY) {
+    if (local_cycle > num_instructions) {
       status = Status::COMPLETE;
       continue;
-    } else if (cur_cycle == num_instructions ||
+    } else if (local_cycle == num_instructions ||
                (num_instructions >= 3 &&
                 instructions[num_instructions - 3].type ==
                     InstructionType::IF &&
-                cur_cycle > num_instructions - 3)) {
+                local_cycle > num_instructions - 3)) {
       const auto &target = target_data[thread];
       if (target.block == PortableMemPool::Handle<RuntimeBlock>()) {
         status = Status::COMPLETE;
@@ -267,7 +288,7 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
       continue;
     }
 
-    const auto &instruction = instructions[cur_cycle];
+    const auto &instruction = instructions[local_cycle];
     status = visit(
         instruction,
         [&](const auto &instr) {
@@ -295,7 +316,13 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
           }
         },
         [](const auto &) {});
+    ++local_cycle;
   }
+  cl::sycl::group_barrier(itm.get_group());
+  cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                       cl::sycl::memory_scope::work_group>
+      cur_cycle_atomic(cur_cycle);
+  cur_cycle_atomic.fetch_max(local_cycle);
   return status;
 }
 

@@ -73,7 +73,7 @@ struct Fixture {
             }
             itm.barrier(cl::sycl::access::fence_space::local_space);
             RuntimeBlockType::Status status = local_block[0].evaluate(
-                block_idx, thread_idx, mem_pool_write, local_instructions,
+                block_idx, thread_idx, itm, mem_pool_write, local_instructions,
                 block_meta.instructions.GetCount(), [](auto &&...) {},
                 [](const auto) {});
             if (status == RuntimeBlockType::Status::COMPLETE) {
