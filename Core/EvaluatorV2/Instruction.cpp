@@ -34,8 +34,11 @@ Instruction::print(PortableMemPool::HostAccessor_t mem_pool_acc) const {
         Visitor{
             [&](const CreateLambda &create_lambda) {
               result << "CreateLambda: reg " << create_lambda.target_register
-                     << " = " << create_lambda.block_idx
-                     << ", capture registers ";
+                     << " = " << create_lambda.block_idx;
+              if (create_lambda.captured_indices.unpack().GetCount() == 0) {
+                return;
+              }
+              result << ", capture registers ";
               const auto *captured_indices = mem_pool_acc[0].derefHandle(
                   create_lambda.captured_indices.unpack());
               for (Index_t i = 0;

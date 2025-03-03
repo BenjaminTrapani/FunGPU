@@ -2,10 +2,9 @@
 
 #include "Core/EvaluatorV2/BlockGenerator.h"
 #include "Core/BlockPrep.hpp"
-#include "Core/Compiler.hpp"
 #include "Core/EvaluatorV2/CompileProgram.hpp"
-#include "Core/Parser.hpp"
 #include "Core/Visitor.hpp"
+#include <boost/test/tools/context.hpp>
 #include <boost/test/unit_test.hpp>
 #include <stdexcept>
 
@@ -31,6 +30,9 @@ struct Fixture {
       for (Index_t instruction_idx = 0;
            instruction_idx < lambda.instructions.GetCount();
            ++instruction_idx) {
+        BOOST_TEST_INFO_SCOPE("lambda_idx: " << lambda_idx
+                                             << ", instruction_idx: "
+                                             << instruction_idx);
         BOOST_CHECK(instructions[lambda_idx][instruction_idx].equals(
             mem_pool_acc[0].derefHandle(lambda.instructions)[instruction_idx],
             mem_pool_acc));
@@ -131,12 +133,11 @@ BOOST_FIXTURE_TEST_CASE(CallMultiBinding, Fixture) {
 BOOST_FIXTURE_TEST_CASE(SimpleLetRec, Fixture) {
   check_program_generates_instructions(
       "./TestPrograms/SimpleLetRec.fgpu",
-      {{create_instruction(
-            CreateLambda{0, 1, portable_index_array_from_vector({0})}),
+      {{create_instruction(CreateLambda{0, 1, {}}),
         create_instruction(AssignConstant{1, 0}),
         create_instruction(AssignConstant{2, 5}),
         create_instruction(BlockingCallIndirect{
-            3, 0, portable_index_array_from_vector({1, 2})})},
+            3, 0, portable_index_array_from_vector({0, 1, 2})})},
        {create_instruction(Equal{3, 1, 2}),
         create_instruction(
             CreateLambda{4, 2, portable_index_array_from_vector({0, 1, 2})}),
@@ -146,7 +147,7 @@ BOOST_FIXTURE_TEST_CASE(SimpleLetRec, Fixture) {
        {create_instruction(AssignConstant{3, 1}),
         create_instruction(Add{4, 3, 1}),
         create_instruction(BlockingCallIndirect{
-            5, 0, portable_index_array_from_vector({4, 2})})}});
+            5, 0, portable_index_array_from_vector({0, 4, 2})})}});
 }
 
 BOOST_FIXTURE_TEST_CASE(CheckBarrierInstructionGenerated, Fixture) {
