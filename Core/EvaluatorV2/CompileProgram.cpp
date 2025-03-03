@@ -3,6 +3,7 @@
 #include "Core/Compiler.hpp"
 #include "Core/EvaluatorV2/BlockGenerator.h"
 #include "Core/Parser.hpp"
+#include <stdexcept>
 
 namespace FunGPU::EvaluatorV2 {
 Program compile_program(const std::string &path,
@@ -20,7 +21,13 @@ Program compile_program(const std::string &path,
   BlockGenerator block_generator(mem_pool_buffer, registers_per_thread);
 
   Compiler compiler(parsed_result, mem_pool_buffer);
-  auto compiled_result = compiler.Compile();
+  Compiler::ASTNodeHandle compiled_result;
+  try {
+    compiled_result = compiler.Compile();
+  } catch (const Compiler::CompileException &e) {
+    std::cerr << "Failed to compile " << path << ": " << e.What() << std::endl;
+    throw std::runtime_error("Compilation failure");
+  }
   std::cout << "Compiled program: " << std::endl;
   compiler.DebugPrintAST(compiled_result);
   std::cout << std::endl;

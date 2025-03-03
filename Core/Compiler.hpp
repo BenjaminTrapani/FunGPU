@@ -69,6 +69,8 @@ public:
       cb(m_childExpr);
     }
 
+    bool is_rec() const noexcept { return m_type == Type::BindRec; }
+
     DEF_MUTABLE_FOR_EACH_SUB_EXPR(BindNode)
 
     PortableMemPool::ArrayHandle<ASTNodeHandle> m_bindings;

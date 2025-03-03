@@ -1,0 +1,5 @@
+(letrec ((a 1) (cond-rec (if (= a 1) 
+    (lambda (n) (if (= n 0) 1 (* n (cond-rec (- n 1)))))
+    (lambda (n) (if (> 2 n) 1 (+ (cond-rec (- n 1)) (cond-rec (- n 1)))))
+    )))
+  (cond-rec 5))

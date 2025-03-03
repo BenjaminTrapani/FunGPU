@@ -117,5 +117,8 @@ BOOST_FIXTURE_TEST_CASE(MergeSort, Fixture) {
 BOOST_FIXTURE_TEST_CASE(BranchInBinding, Fixture) {
   check_program_yields_result(130, "./TestPrograms/BranchInBinding.fgpu");
 }
+BOOST_FIXTURE_TEST_CASE(ConditionalLetRec, Fixture) {
+  check_program_yields_result(120, "./TestPrograms/ConditionalLetRec.fgpu");
+}
 } // namespace
 } // namespace FunGPU::EvaluatorV2

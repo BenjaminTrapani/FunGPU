@@ -32,6 +32,21 @@ private:
   static Compiler::ASTNodeHandle
   wrap_in_no_arg_lambda(Compiler::ASTNodeHandle root,
                         PortableMemPool::HostAccessor_t &);
+  static Compiler::ASTNodeHandle
+  rewrite_letrec_as_let(Compiler::ASTNodeHandle root,
+                        PortableMemPool::HostAccessor_t &memPoolAcc);
+  static Compiler::ASTNodeHandle substitute_identifiers_in_range_with_call(
+      Compiler::ASTNodeHandle root, const Index_t start, const Index_t end,
+      PortableMemPool::HostAccessor_t &mem_pool_acc);
+  static Compiler::ASTNodeHandle rewrite_recursive_lambdas_with_self_args(
+      Compiler::ASTNodeHandle root,
+      PortableMemPool::HostAccessor_t &mem_pool_acc);
+  static bool all_idents_in_range_direct_calls(
+      const Compiler::ASTNodeHandle node_handle, Index_t start_idx,
+      Index_t end_idx, PortableMemPool::HostAccessor_t &mem_pool_acc);
+  static Compiler::ASTNodeHandle extend_call_args_with_binding_identifiers(
+      Compiler::ASTNodeHandle root, Index_t start_idx, Index_t end_index,
+      PortableMemPool::HostAccessor_t &mem_pool_acc);
   /*
     Output of this whole process:
     Array of RuntimeBlock instances for each lambda, initial call instruction.
