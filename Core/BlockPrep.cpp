@@ -1,7 +1,6 @@
 #include "Core/BlockPrep.hpp"
 #include "Core/CollectAllASTNodes.hpp"
 #include "Core/Visitor.hpp"
-#include <map>
 
 namespace FunGPU {
 namespace {
@@ -305,60 +304,83 @@ BlockPrep::RewriteAsPrimOps(Compiler::ASTNodeHandle root,
       }
 
       if (!boundBranches.empty()) {
-        // Reformat (let ((bound-result (if a b c))) ...) as
-        //           (if a (let ((bound-result b)) ...
-        //                 (let ((bound-result c)) ... ))
-        const auto create_continuation_binding =
-            [&](const Compiler::ASTNodeHandle &bound_value) {
-              auto new_binding_handle =
-                  m_memPoolAcc[0].Alloc<Compiler::BindNode>(1, false,
-                                                            m_memPoolAcc);
-              auto &new_binding = *static_cast<Compiler::BindNode *>(
-                  m_memPoolAcc[0].derefHandle(new_binding_handle));
-              auto *binding_data =
-                  m_memPoolAcc[0].derefHandle(new_binding.m_bindings);
-              binding_data[0] = bound_value;
-              new_binding.m_childExpr = m_root;
-              return new_binding_handle;
-            };
+        // Reformat (let ((x 1) (bound-result (if a b c)) (y 2)) body-expr) as
+        //          (let ((x 1) (body_cont (lambda (bound-result) (let ((y 2))
+        //          body-expr)))))
+        //                (if a (body-cont b) (body-cont c)))
+        // Locate the position of the first bound branch.
+        // Split the bind expression around the branch.
+        // Increase binding indices for all identifiers in bindings to the right
+        // hand side of the split by the number of identifiers on the lhs of the
+        // split Create a new binding for the continuation of the body
+        // expression. Make the right hand side of the split bindings the child
+        // expression of the continuation binding lambda. The expression in the
+        // tail position is the original branch that invokes the continuation.
         const auto &first_branch_handle = **boundBranches.begin();
-        std::set<const Compiler::ASTNodeHandle *> identsToExclude;
-        CollectAllASTNodes(first_branch_handle, m_memPoolAcc,
-                           {Compiler::ASTNode::Type::Identifier},
-                           identsToExclude);
-        IncreaseBindingRefIndices(m_root, 1, m_memPoolAcc, 0,
-                                  toConcrete(identsToExclude));
-
-        auto *original_bindings_data =
-            m_memPoolAcc[0].derefHandle(node.m_bindings);
-        auto new_bindings_handle =
-            m_memPoolAcc[0].AllocArray<Compiler::ASTNodeHandle>(
-                node.m_bindings.GetCount() - 1);
-        std::size_t new_bindings_index = 0;
-        auto *new_bindings_data =
-            m_memPoolAcc[0].derefHandle(new_bindings_handle);
-        for (size_t original_bind_index = 0;
-             original_bind_index < node.m_bindings.GetCount();
-             ++original_bind_index) {
-          if (original_bindings_data[original_bind_index] ==
-              first_branch_handle) {
-            continue;
-          }
-          new_bindings_data[new_bindings_index++] =
-              original_bindings_data[original_bind_index];
+        const auto position_of_first_branch_handle =
+            &first_branch_handle - bindingsData;
+        const auto bind_split_lhs = m_memPoolAcc[0].Alloc<Compiler::BindNode>(
+            position_of_first_branch_handle, false, m_memPoolAcc);
+        auto &bind_split_lhs_ref = *m_memPoolAcc[0].derefHandle(bind_split_lhs);
+        auto *bind_split_lhs_bindings_data =
+            m_memPoolAcc[0].derefHandle(bind_split_lhs_ref.m_bindings);
+        std::copy(bindingsData, bindingsData + position_of_first_branch_handle,
+                  bind_split_lhs_bindings_data);
+        const auto bind_split_rhs = m_memPoolAcc[0].Alloc<Compiler::BindNode>(
+            node.m_bindings.GetCount() - position_of_first_branch_handle - 1,
+            false, m_memPoolAcc);
+        auto &bind_split_rhs_ref = *m_memPoolAcc[0].derefHandle(bind_split_rhs);
+        bind_split_rhs_ref.m_childExpr = node.m_childExpr;
+        auto *bind_split_rhs_bindings_data =
+            m_memPoolAcc[0].derefHandle(bind_split_rhs_ref.m_bindings);
+        std::copy(bindingsData + position_of_first_branch_handle + 1,
+                  bindingsData + node.m_bindings.GetCount(),
+                  bind_split_rhs_bindings_data);
+        for (size_t i = 0; i < bind_split_rhs_ref.m_bindings.GetCount(); ++i) {
+          IncreaseBindingRefIndices(bind_split_rhs_bindings_data[i],
+                                    bind_split_lhs_ref.m_bindings.GetCount() +
+                                        1,
+                                    m_memPoolAcc, 0, {});
         }
-        m_memPoolAcc[0].DeallocArray(node.m_bindings);
-        node.m_bindings = new_bindings_handle;
+        IncreaseBindingRefIndices(first_branch_handle,
+                                  bind_split_lhs_ref.m_bindings.GetCount() + 1,
+                                  m_memPoolAcc, 0, {});
 
-        auto &ifNode = static_cast<Compiler::IfNode &>(
+        const auto continuation_lambda =
+            m_memPoolAcc[0].Alloc<Compiler::LambdaNode>(1, bind_split_rhs);
+        const auto bind_node_for_continuation =
+            m_memPoolAcc[0].Alloc<Compiler::BindNode>(1, false, m_memPoolAcc);
+        auto &bind_node_for_continuation_ref =
+            *m_memPoolAcc[0].derefHandle(bind_node_for_continuation);
+        auto *bindings_data = m_memPoolAcc[0].derefHandle(
+            bind_node_for_continuation_ref.m_bindings);
+        bindings_data[0] = continuation_lambda;
+        bind_split_lhs_ref.m_childExpr = bind_node_for_continuation;
+        bind_node_for_continuation_ref.m_childExpr = first_branch_handle;
+
+        auto &first_branch_data = static_cast<Compiler::IfNode &>(
             *m_memPoolAcc[0].derefHandle(first_branch_handle));
-        auto true_branch_continuation =
-            create_continuation_binding(ifNode.m_then);
-        auto false_branch_continuation =
-            create_continuation_binding(ifNode.m_else);
-        ifNode.m_then = true_branch_continuation;
-        ifNode.m_else = false_branch_continuation;
-        return RewriteAsPrimOps(first_branch_handle, m_memPoolAcc);
+        auto call_body_cont_with_true_branch =
+            m_memPoolAcc[0].Alloc<Compiler::CallNode>(
+                1, m_memPoolAcc[0].Alloc<Compiler::IdentifierNode>(0),
+                m_memPoolAcc);
+        auto &call_true_data = static_cast<Compiler::CallNode &>(
+            *m_memPoolAcc[0].derefHandle(call_body_cont_with_true_branch));
+        m_memPoolAcc[0].derefHandle(call_true_data.m_args)[0] =
+            first_branch_data.m_then;
+        auto call_body_cont_with_false_branch =
+            m_memPoolAcc[0].Alloc<Compiler::CallNode>(
+                1, m_memPoolAcc[0].Alloc<Compiler::IdentifierNode>(0),
+                m_memPoolAcc);
+        auto &call_false_data = static_cast<Compiler::CallNode &>(
+            *m_memPoolAcc[0].derefHandle(call_body_cont_with_false_branch));
+        m_memPoolAcc[0].derefHandle(call_false_data.m_args)[0] =
+            first_branch_data.m_else;
+        first_branch_data.m_then = call_body_cont_with_true_branch;
+        first_branch_data.m_else = call_body_cont_with_false_branch;
+        m_memPoolAcc[0].DeallocArray(node.m_bindings);
+        m_memPoolAcc[0].Dealloc(m_root);
+        return RewriteAsPrimOps(bind_split_lhs, m_memPoolAcc);
       }
 
       // Decompose complex bound expressions in current scope into their own let

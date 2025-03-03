@@ -1,3 +1,5 @@
 (let ((x 1) (y 2))
     (let ((branch-result (if (= x 2) 3 4)))
-        (* branch-result 2)))
+        (let ((a-val 10) (inner-branch-result (if (= branch-result 4) (* branch-result 2) (* branch-result 4)))
+            (b-val 15))
+            (+ a-val (* inner-branch-result b-val)))))
