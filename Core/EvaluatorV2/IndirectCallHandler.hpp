@@ -1,6 +1,8 @@
 #pragma once
 
+#include "Core/EvaluatorV2/Lambda.hpp"
 #include "Core/EvaluatorV2/Program.hpp"
+#include "Core/EvaluatorV2/RuntimeBlock.hpp"
 #include "Core/EvaluatorV2/RuntimeValue.h"
 #include "Core/PortableMemPool.hpp"
 
@@ -135,7 +137,7 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
   const auto block_meta_handle =
       mem_pool_acc[0].AllocArray<typename RuntimeBlockType::BlockMetadata>(
           num_blocks_required);
-  const auto instructions_data =
+  const auto &instructions_data =
       mem_pool_acc[0].derefHandle(program)[lambda_idx];
   auto *block_metadata = mem_pool_acc[0].derefHandle(block_meta_handle);
   Index_t max_num_instructions = 0;
@@ -143,8 +145,14 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
   for (Index_t i = 0; i < num_blocks_required; ++i) {
     const auto num_threads =
         std::min(num_threads_per_block, num_calls_remaining);
+    // TODO fan out pre allocated runtime value allocation across blocks in
+    // separate kernel
+    const auto pre_allocated_rvs =
+        RuntimeBlockType::template pre_allocate_runtime_values<
+            cl::sycl::access::target::device>(num_threads, mem_pool_acc,
+                                              program, lambda_idx);
     const auto runtime_block_handle = mem_pool_acc[0].Alloc<RuntimeBlockType>(
-        instructions_data.instructions, num_threads);
+        instructions_data.instructions, pre_allocated_rvs, num_threads);
     block_metadata[i] = typename RuntimeBlockType::BlockMetadata(
         runtime_block_handle, instructions_data.instructions, num_threads);
     max_num_instructions = std::max(max_num_instructions,

@@ -1,4 +1,5 @@
 #include "Core/EvaluatorV2/Instruction.h"
+#include "Core/PortableMemPool.hpp"
 #include "Core/Visitor.hpp"
 #include <sstream>
 
@@ -174,5 +175,24 @@ bool Instruction::equals(const Instruction &other,
         throw std::invalid_argument("Unknown instruction type in equals");
       });
   return matches;
+}
+
+void Instruction::deallocate(PortableMemPool::HostAccessor_t mem_pool_acc) {
+  visit(*this,
+        Visitor{
+            [&](const CreateLambda &create_lambda) {
+              mem_pool_acc[0].DeallocArray(
+                  create_lambda.captured_indices.unpack());
+            },
+            [&](const CallIndirect &call_indirect) {
+              mem_pool_acc[0].DeallocArray(call_indirect.arg_indices.unpack());
+            },
+            [&](const BlockingCallIndirect &blocking_call_indirect) {
+              mem_pool_acc[0].DeallocArray(
+                  blocking_call_indirect.arg_indices.unpack());
+            },
+            [](const auto &) {},
+        },
+        [](const auto &) {});
 }
 } // namespace FunGPU::EvaluatorV2

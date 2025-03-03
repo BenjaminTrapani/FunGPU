@@ -36,4 +36,5 @@ find_program (CLANGFORMAT_CMD clang-format "/usr/lib/llvm-18/bin/")
 add_custom_target(clangformat
     COMMAND ${CLANGFORMAT_CMD}
     -i
-    ${ALL_SOURCE_FILES})
+    ${ALL_SOURCE_FILES}
+	-style=file)

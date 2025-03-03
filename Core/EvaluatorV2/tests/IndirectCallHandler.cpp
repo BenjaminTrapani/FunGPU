@@ -67,8 +67,10 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
                                                 reactivated_acc,
                                                 ind_call_reqs_by_block_acc] {
       const auto lambda_0 = mem_pool_acc[0].derefHandle(tmp_program)[0];
-      const auto mock_caller =
-          mem_pool_acc[0].Alloc<RuntimeBlockType>(lambda_0.instructions, 1);
+      auto pre_allocated_rvs = RuntimeBlockType::pre_allocate_runtime_values<
+          cl::sycl::access::target::device>(1, mem_pool_acc, tmp_program, 0);
+      const auto mock_caller = mem_pool_acc[0].Alloc<RuntimeBlockType>(
+          lambda_0.instructions, pre_allocated_rvs, 1);
       caller_acc[0] = mock_caller;
       const auto captures_acc = mem_pool_acc[0].AllocArray<RuntimeValue>(2);
       auto *captures_data = mem_pool_acc[0].derefHandle(captures_acc);
@@ -83,8 +85,12 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
                                             test_args);
 
       const auto lambda_1 = mem_pool_acc[0].derefHandle(tmp_program)[1];
-      const auto reactivated_block =
-          mem_pool_acc[0].Alloc<RuntimeBlockType>(lambda_1.instructions, 2);
+      auto pre_allocated_rvs_for_reactivated_block =
+          RuntimeBlockType::pre_allocate_runtime_values<
+              cl::sycl::access::target::device>(2, mem_pool_acc, tmp_program,
+                                                1);
+      const auto reactivated_block = mem_pool_acc[0].Alloc<RuntimeBlockType>(
+          lambda_1.instructions, pre_allocated_rvs_for_reactivated_block, 2);
       reactivated_acc[0] = reactivated_block;
       indirect_call_acc[0].on_activate_block(mem_pool_acc, reactivated_block);
     });
@@ -162,8 +168,11 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
   {
     auto mem_pool_acc =
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
+    auto pre_allocated_rvs = RuntimeBlockType::pre_allocate_runtime_values<
+        cl::sycl::access::target::host_buffer>(1, mem_pool_acc, program, 0);
     caller = mem_pool_acc[0].Alloc<RuntimeBlockType>(
-        mem_pool_acc[0].derefHandle(program)[0].instructions, 1);
+        mem_pool_acc[0].derefHandle(program)[0].instructions, pre_allocated_rvs,
+        1);
   }
   work_queue.submit([&](cl::sycl::handler &cgh) {
     auto indirect_call_acc =

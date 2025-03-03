@@ -31,6 +31,7 @@ Program compile_program(const std::string &path,
   std::cout << std::endl << std::endl;
 
   const auto program = block_generator.construct_blocks(compiled_result);
+  compiler.DeallocateAST(compiled_result);
   auto mem_pool_acc =
       mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
   std::cout << "Printed program: " << std::endl;

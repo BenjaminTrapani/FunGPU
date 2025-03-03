@@ -473,7 +473,7 @@ void Compiler::DeallocateAST(const ASTNodeHandle &rootOfASTHandle,
     break;
   }
   default:
-    throw CompileException("Unexpected AST node type during debug print");
+    throw CompileException("Unexpected AST node type during deallocate");
   }
 }
 
