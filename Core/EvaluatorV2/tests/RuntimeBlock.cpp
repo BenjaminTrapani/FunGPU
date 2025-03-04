@@ -74,8 +74,8 @@ struct Fixture {
             itm.barrier(cl::sycl::access::fence_space::local_space);
             RuntimeBlockType::Status status = local_block[0].evaluate(
                 block_idx, thread_idx, itm, mem_pool_write, local_instructions,
-                block_meta.instructions.GetCount(), [](auto &&...) {},
-                [](const auto) {});
+                block_meta.instructions.GetCount(), block_meta.num_threads,
+                [](auto &&...) {}, [](const auto) {});
             if (status == RuntimeBlockType::Status::COMPLETE) {
               results_acc[cl::sycl::id<2>(block_idx, thread_idx)] =
                   local_block[0].result(block_idx, thread_idx,
