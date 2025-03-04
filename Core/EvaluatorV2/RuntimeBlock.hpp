@@ -77,7 +77,7 @@ public:
                   const cl::sycl::nd_item<1> &,
                   PortableMemPool::DeviceAccessor_t mem_pool,
                   const InstructionLocalMemAccessor instructions,
-                  const Index_t instruction_count,
+                  const Index_t instruction_count, Index_t num_threads,
                   OnIndirectCall &&on_indirect_call,
                   OnActivateBlock &&on_activate_block);
   RuntimeValue result(Index_t block_idx, Index_t thread,
@@ -116,7 +116,10 @@ template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
 void RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
     deallocate_runtime_values_array_for_thread(
         PortableMemPool::DeviceAccessor_t mem_pool, const Index_t thread_idx) {
-  mem_pool[0].DeallocArray(pre_allocated_runtime_values[thread_idx]);
+  if (const auto &prealloced_values = pre_allocated_runtime_values[thread_idx];
+      prealloced_values.GetCount() != 0) {
+    mem_pool[0].DeallocArray(prealloced_values);
+  }
 }
 
 template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
@@ -139,14 +142,15 @@ Index_t RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::last_write_location(
       instructions[instruction_count - 3].type != InstructionType::IF) {
     const auto prev_instruction = instructions[instruction_count - 1];
     return visit(prev_instruction, extract_target_register,
-                 [](const auto &) {});
+                 [](const auto &) { return Index_t(-1); });
   }
   const auto &if_instr = instructions[instruction_count - 3].data.if_val;
   const auto is_pred_true =
       static_cast<bool>(register_set[if_instr.predicate].data.float_val);
   const auto last_instr = is_pred_true ? instructions[if_instr.goto_true]
                                        : instructions[if_instr.goto_false];
-  return visit(last_instr, extract_target_register, [](const auto &) {});
+  return visit(last_instr, extract_target_register,
+               [](const auto &) { return Index_t(-1); });
 }
 
 template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
@@ -165,13 +169,17 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
     const Index_t block_idx, const Index_t thread,
     const cl::sycl::nd_item<1> &itm, PortableMemPool::DeviceAccessor_t mem_pool,
     const InstructionLocalMemAccessor all_instructions,
-    const Index_t num_instructions, OnIndirectCall &&on_indirect_call,
+    const Index_t num_instructions, const Index_t num_threads,
+    OnIndirectCall &&on_indirect_call,
     OnActivateBlock &&on_activate_block) -> Status {
-  auto &register_set = registers[thread];
-  const auto &instructions = all_instructions[block_idx];
-  auto &pre_allocated_rvs = pre_allocated_runtime_values[thread];
+  auto local_cycle = cur_cycle;
+  const auto pre_allocated_rvs = pre_allocated_runtime_values[thread];
   auto local_pre_allocated_runtime_values_idx =
       pre_allocated_runtime_values_idx;
+  auto status = Status::COMPLETE;
+  if (thread < num_threads) {
+    auto &register_set = registers[thread];
+    const auto &instructions = all_instructions[block_idx];
 #define HANDLE_BINARY_OP(TYPE, OP)                                             \
   [&](const TYPE &type) {                                                      \
     auto &target_register = register_set[type.target_register];                \
@@ -182,174 +190,195 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
     return Status::READY;                                                      \
   }
 
-  const auto allocate_arg_values = [&](const auto &call_indirect) {
-    const auto arg_indices_handle = call_indirect.arg_indices.unpack();
-    const auto *arg_indices = mem_pool[0].derefHandle(arg_indices_handle);
-    auto *pre_allocated_runtime_values_data =
-        mem_pool[0].derefHandle(pre_allocated_rvs);
-    auto arg_values = pre_allocated_runtime_values_data
-        [local_pre_allocated_runtime_values_idx++];
-    auto *arg_values_data = mem_pool[0].derefHandle(arg_values);
-    for (Index_t i = 0; i < arg_indices_handle.GetCount(); ++i) {
-      arg_values_data[i] = register_set[arg_indices[i]];
-    }
-    return arg_values;
-  };
+    const auto allocate_arg_values = [&](const auto &call_indirect) {
+      const auto arg_indices_handle = call_indirect.arg_indices.unpack();
+      if (arg_indices_handle.GetCount() == 0) {
+        ++local_pre_allocated_runtime_values_idx;
+        return PortableMemPool::ArrayHandle<RuntimeValue>();
+      }
+      const auto *arg_indices = mem_pool[0].derefHandle(arg_indices_handle);
+      auto *pre_allocated_runtime_values_data =
+          mem_pool[0].derefHandle(pre_allocated_rvs);
+      auto arg_values = pre_allocated_runtime_values_data
+          [local_pre_allocated_runtime_values_idx++];
+      auto *arg_values_data = mem_pool[0].derefHandle(arg_values);
+      for (Index_t i = 0; i < arg_indices_handle.GetCount(); ++i) {
+        arg_values_data[i] = register_set[arg_indices[i]];
+      }
+      return arg_values;
+    };
 
-  const auto deallocate_runtime_values = Visitor{
-      [&](const OneOf<CallIndirect, BlockingCallIndirect, CreateLambda> auto
-              &op_with_rvs) {
-        auto *pre_alloated_runtime_values_data =
-            mem_pool[0].derefHandle(pre_allocated_rvs);
-        mem_pool[0].DeallocArray(pre_alloated_runtime_values_data
-                                     [local_pre_allocated_runtime_values_idx]);
-        return true;
-      },
-      [](const auto &) { return false; }};
+    const auto deallocate_runtime_values = Visitor{
+        [&](const OneOf<CallIndirect, BlockingCallIndirect, CreateLambda> auto
+                &op_with_rvs) {
+          auto *pre_allocated_runtime_values_data =
+              mem_pool[0].derefHandle(pre_allocated_rvs);
+          if (const auto &pre_allocated_runtime_values =
+                  pre_allocated_runtime_values_data
+                      [local_pre_allocated_runtime_values_idx];
+              pre_allocated_runtime_values.GetCount() != 0) {
+            mem_pool[0].DeallocArray(pre_allocated_runtime_values);
+          }
+          return true;
+        },
+        [](const OneOf<Add, Sub, Mul, Div, Equal, GreaterThan, Remainder, Expt,
+                       If, Assign, AssignConstant, Floor,
+                       InstructionBarrier> auto &) { return false; }};
 
-  const auto non_control_flow_handlers = Visitor{
-      HANDLE_BINARY_OP(Add, +),
-      HANDLE_BINARY_OP(Sub, -),
-      HANDLE_BINARY_OP(Mul, *),
-      HANDLE_BINARY_OP(Div, /),
-      HANDLE_BINARY_OP(Equal, ==),
-      HANDLE_BINARY_OP(GreaterThan, >),
-      [&](const Floor &floor) {
-        auto &target_register = register_set[floor.target_register];
-        target_register.data.float_val =
-            cl::sycl::floor(register_set[floor.arg].data.float_val);
-        return Status::READY;
-      },
-      [&](const Remainder &remainder) {
-        auto &target_register = register_set[remainder.target_register];
-        target_register.data.float_val =
-            cl::sycl::fmod(register_set[remainder.lhs].data.float_val,
-                           register_set[remainder.rhs].data.float_val);
-        return Status::READY;
-      },
-      [&](const Expt &expr) {
-        auto &target_register = register_set[expr.target_register];
-        target_register.data.float_val =
-            cl::sycl::pow(register_set[expr.lhs].data.float_val,
-                          register_set[expr.rhs].data.float_val);
-        return Status::READY;
-      },
-      [&](const AssignConstant &assign_constant) {
-        auto &target_register = register_set[assign_constant.target_register];
-        target_register.data.float_val = assign_constant.constant;
-        return Status::READY;
-      },
-      [&](const Assign &assign) {
-        register_set[assign.target_register] =
-            register_set[assign.source_register];
-        return Status::READY;
-      },
-      [&](const CreateLambda &create_lambda) {
-        const auto captured_indices_handle =
-            create_lambda.captured_indices.unpack();
-        auto *captured_indices =
-            mem_pool[0].derefHandle(captured_indices_handle);
-        auto &target_register = register_set[create_lambda.target_register];
-        auto *rv_data = mem_pool[0].derefHandle(pre_allocated_rvs);
-        const auto captured_values =
-            rv_data[local_pre_allocated_runtime_values_idx++];
-        auto *captured_values_data = mem_pool[0].derefHandle(captured_values);
-        target_register.data.function_val =
-            FunctionValue(create_lambda.block_idx, captured_values);
-        for (Index_t i = 0; i < captured_indices_handle.GetCount(); ++i) {
-          captured_values_data[i] = register_set[captured_indices[i]];
-        }
-        return Status::READY;
-      },
-      [&](const CallIndirect &call_indirect) {
-        const auto arg_values = allocate_arg_values(call_indirect);
-        cl::sycl::atomic_ref<int, cl::sycl::memory_order::seq_cst,
-                             cl::sycl::memory_scope::work_group,
-                             cl::sycl::access::address_space::local_space>
-            atomic_dep_count(num_outstanding_dependencies);
-        atomic_dep_count.fetch_add(1);
-        const auto function_val =
-            register_set[call_indirect.lambda_idx].data.function_val;
-        on_indirect_call(m_handle, function_val, thread,
-                         call_indirect.target_register, arg_values);
-        return Status::READY;
-      },
-      [&](const BlockingCallIndirect &blocking_call_indirect) {
-        const auto arg_values = allocate_arg_values(blocking_call_indirect);
-        const auto function_val =
-            register_set[blocking_call_indirect.lambda_idx].data.function_val;
-        const auto &target = target_data[thread];
-        on_indirect_call(target.block, function_val, target.thread,
-                         target.register_idx, arg_values);
-        return Status::COMPLETE;
-      },
-      [&](const InstructionBarrier &) { return Status::STALLED; }};
+    const auto non_control_flow_handlers = Visitor{
+        HANDLE_BINARY_OP(Add, +),
+        HANDLE_BINARY_OP(Sub, -),
+        HANDLE_BINARY_OP(Mul, *),
+        HANDLE_BINARY_OP(Div, /),
+        HANDLE_BINARY_OP(Equal, ==),
+        HANDLE_BINARY_OP(GreaterThan, >),
+        [&](const Floor &floor) {
+          auto &target_register = register_set[floor.target_register];
+          target_register.data.float_val =
+              cl::sycl::floor(register_set[floor.arg].data.float_val);
+          return Status::READY;
+        },
+        [&](const Remainder &remainder) {
+          auto &target_register = register_set[remainder.target_register];
+          target_register.data.float_val =
+              cl::sycl::fmod(register_set[remainder.lhs].data.float_val,
+                             register_set[remainder.rhs].data.float_val);
+          return Status::READY;
+        },
+        [&](const Expt &expr) {
+          auto &target_register = register_set[expr.target_register];
+          target_register.data.float_val =
+              cl::sycl::pow(register_set[expr.lhs].data.float_val,
+                            register_set[expr.rhs].data.float_val);
+          return Status::READY;
+        },
+        [&](const AssignConstant &assign_constant) {
+          auto &target_register = register_set[assign_constant.target_register];
+          target_register.data.float_val = assign_constant.constant;
+          return Status::READY;
+        },
+        [&](const Assign &assign) {
+          register_set[assign.target_register] =
+              register_set[assign.source_register];
+          return Status::READY;
+        },
+        [&](const CreateLambda &create_lambda) {
+          const auto captured_indices_handle =
+              create_lambda.captured_indices.unpack();
+          auto &target_register = register_set[create_lambda.target_register];
+          auto *rv_data = mem_pool[0].derefHandle(pre_allocated_rvs);
+          const auto captured_values =
+              rv_data[local_pre_allocated_runtime_values_idx++];
+          target_register.data.function_val =
+              FunctionValue(create_lambda.block_idx, captured_values);
+          if (captured_indices_handle.GetCount() != 0) {
+            auto *captured_values_data =
+                mem_pool[0].derefHandle(captured_values);
+            auto *captured_indices =
+                mem_pool[0].derefHandle(captured_indices_handle);
+            for (Index_t i = 0; i < captured_indices_handle.GetCount(); ++i) {
+              captured_values_data[i] = register_set[captured_indices[i]];
+            }
+          }
+          return Status::READY;
+        },
+        [&](const CallIndirect &call_indirect) {
+          const auto arg_values = allocate_arg_values(call_indirect);
+          cl::sycl::atomic_ref<int, cl::sycl::memory_order::seq_cst,
+                               cl::sycl::memory_scope::work_group,
+                               cl::sycl::access::address_space::local_space>
+              atomic_dep_count(num_outstanding_dependencies);
+          atomic_dep_count.fetch_add(1);
+          const auto function_val =
+              register_set[call_indirect.lambda_idx].data.function_val;
+          on_indirect_call(m_handle, function_val, thread,
+                           call_indirect.target_register, arg_values);
+          return Status::READY;
+        },
+        [&](const BlockingCallIndirect &blocking_call_indirect) {
+          const auto arg_values = allocate_arg_values(blocking_call_indirect);
+          const auto function_val =
+              register_set[blocking_call_indirect.lambda_idx].data.function_val;
+          const auto &target = target_data[thread];
+          on_indirect_call(target.block, function_val, target.thread,
+                           target.register_idx, arg_values);
+          return Status::COMPLETE;
+        },
+        [&](const InstructionBarrier &) { return Status::STALLED; }};
 
 #undef HANDLE_BINARY_OP
 
-  auto status = Status::READY;
-  auto local_cycle = cur_cycle;
-  while (status == Status::READY) {
-    if (local_cycle > num_instructions) {
-      status = Status::COMPLETE;
-      continue;
-    } else if (local_cycle == num_instructions ||
-               (num_instructions >= 3 &&
-                instructions[num_instructions - 3].type ==
-                    InstructionType::IF &&
-                local_cycle > num_instructions - 3)) {
-      const auto &target = target_data[thread];
-      if (target.block == PortableMemPool::Handle<RuntimeBlock>()) {
+    status = Status::READY;
+    while (status == Status::READY) {
+      if (local_cycle > num_instructions) {
+        status = Status::COMPLETE;
+        continue;
+      } else if (local_cycle == num_instructions ||
+                 (num_instructions >= 3 &&
+                  instructions[num_instructions - 3].type ==
+                      InstructionType::IF &&
+                  local_cycle > num_instructions - 3)) {
+        const auto &target = target_data[thread];
+        if (target.block == PortableMemPool::Handle<RuntimeBlock>()) {
+          status = Status::COMPLETE;
+          continue;
+        }
+        auto &target_block = *mem_pool[0].derefHandle(target.block);
+        const auto last_write_loc_for_fill = last_write_location(
+            block_idx, thread, all_instructions, num_instructions);
+        target_block.fill_dependency(target.thread, target.register_idx,
+                                     register_set[last_write_loc_for_fill],
+                                     on_activate_block);
         status = Status::COMPLETE;
         continue;
       }
-      auto &target_block = *mem_pool[0].derefHandle(target.block);
-      const auto last_write_loc_for_fill = last_write_location(
-          block_idx, thread, all_instructions, num_instructions);
-      target_block.fill_dependency(target.thread, target.register_idx,
-                                   register_set[last_write_loc_for_fill],
-                                   on_activate_block);
-      status = Status::COMPLETE;
-      continue;
-    }
 
-    const auto &instruction = instructions[local_cycle];
-    status = visit(
-        instruction,
-        [&](const auto &instr) {
-          if constexpr (std::is_same_v<If,
-                                       std::remove_cvref_t<decltype(instr)>>) {
-            const auto is_branch_true =
-                static_cast<bool>(register_set[instr.predicate].data.float_val);
-            const auto &next_instr = is_branch_true
-                                         ? instructions[instr.goto_true]
-                                         : instructions[instr.goto_false];
-            if (is_branch_true) {
-              deallocate_runtime_values(instructions[instr.goto_false]);
-            } else {
-              if (deallocate_runtime_values(instructions[instr.goto_true])) {
-                ++local_pre_allocated_runtime_values_idx;
+      const auto &instruction = instructions[local_cycle];
+      status = visit(
+          instruction,
+          [&](const auto &instr) {
+            if constexpr (std::is_same_v<
+                              If, std::remove_cvref_t<decltype(instr)>>) {
+              const auto is_branch_true = static_cast<bool>(
+                  register_set[instr.predicate].data.float_val);
+              const auto &next_instr = is_branch_true
+                                           ? instructions[instr.goto_true]
+                                           : instructions[instr.goto_false];
+              if (!is_branch_true) {
+                if (visit(instructions[instr.goto_true],
+                          deallocate_runtime_values,
+                          [](const auto &) { return false; })) {
+                  ++local_pre_allocated_runtime_values_idx;
+                }
               }
+              const auto result = visit(
+                  next_instr,
+                  [&](const auto &derived_next_instr) {
+                    if constexpr (std::is_same_v<
+                                      If, std::remove_cvref_t<
+                                              decltype(derived_next_instr)>>) {
+                      // TODO error, this should never happen
+                      return Status::READY;
+                    } else {
+                      return non_control_flow_handlers(derived_next_instr);
+                    }
+                  },
+                  [](const auto &) { return Status::READY; });
+              if (is_branch_true) {
+                if (visit(instructions[instr.goto_false],
+                          deallocate_runtime_values,
+                          [](const auto &) { return false; })) {
+                  ++local_pre_allocated_runtime_values_idx;
+                }
+              }
+              return result;
+            } else {
+              return non_control_flow_handlers(instr);
             }
-            return visit(
-                next_instr,
-                [&](const auto &derived_next_instr) {
-                  if constexpr (std::is_same_v<
-                                    If, std::remove_cvref_t<
-                                            decltype(derived_next_instr)>>) {
-                    // TODO error, this should never happen
-                    return Status::READY;
-                  } else {
-                    return non_control_flow_handlers(derived_next_instr);
-                  }
-                },
-                [](const auto &) {});
-          } else {
-            return non_control_flow_handlers(instr);
-          }
-        },
-        [](const auto &) {});
-    ++local_cycle;
+          },
+          [](const auto &) { return Status::READY; });
+      ++local_cycle;
+    }
   }
   cl::sycl::group_barrier(itm.get_group());
   if (thread == 0) {

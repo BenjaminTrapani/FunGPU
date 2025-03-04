@@ -1,0 +1,3 @@
+(let ((fact_0 (lambda (self x) (let ((get-one (lambda () 1)) (false-cont (lambda (func v) (* v (func func (- v 1))))))
+                                   (if (= x 0) (get-one) (false-cont self x))))))
+      (fact_0 fact_0 5))

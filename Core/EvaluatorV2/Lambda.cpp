@@ -1,4 +1,5 @@
 #include "Core/EvaluatorV2/Lambda.hpp"
+#include "Core/EvaluatorV2/RuntimeBlock.hpp"
 #include "Core/PortableMemPool.hpp"
 #include "Core/Visitor.hpp"
 #include <sstream>
@@ -63,8 +64,23 @@ void Lambda::deallocate(PortableMemPool::HostAccessor_t mem_pool_acc) {
 std::string Lambda::print(PortableMemPool::HostAccessor_t mem_pool_acc) const {
   std::stringstream result;
   const auto *instruction_data = mem_pool_acc[0].derefHandle(instructions);
+  Index_t pre_allocated_rv_index = 0U;
+  const auto *pre_allocated_count = mem_pool_acc[0].derefHandle(
+      instruction_properties.num_runtime_values_per_op);
   for (Index_t i = 0; i < instructions.GetCount(); ++i) {
-    result << i << ": " << instruction_data[i].print(mem_pool_acc) << std::endl;
+    result << i << ": " << instruction_data[i].print(mem_pool_acc);
+    visit(instruction_data[i],
+          Visitor{[&](const OneOf<CallIndirect, BlockingCallIndirect,
+                                  CreateLambda> auto &) {
+                    result << " (pre_allocated_rv_index: "
+                           << pre_allocated_rv_index << ", num_allocated: "
+                           << pre_allocated_count[pre_allocated_rv_index]
+                           << ")";
+                    ++pre_allocated_rv_index;
+                  },
+                  [](const auto &) {}},
+          [](const auto &) {});
+    result << std::endl;
   }
   return result.str();
 }

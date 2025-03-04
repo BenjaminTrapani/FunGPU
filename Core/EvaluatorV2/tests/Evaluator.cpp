@@ -37,7 +37,7 @@ struct Fixture {
                   return create_lambda.captured_indices.unpack().GetCount() > 0;
                 },
                 [](const auto &) { return false; }},
-            [](const auto &) {
+            [](const auto &) -> bool {
               throw std::invalid_argument("Encountered unknown instruction");
             });
         if (contains_captures) {
@@ -119,6 +119,9 @@ BOOST_FIXTURE_TEST_CASE(BranchInBinding, Fixture) {
 }
 BOOST_FIXTURE_TEST_CASE(ConditionalLetRec, Fixture) {
   check_program_yields_result(120, "./TestPrograms/ConditionalLetRec.fgpu");
+}
+BOOST_FIXTURE_TEST_CASE(ExplicitFactorial, Fixture) {
+  check_program_yields_result(120, "./TestPrograms/ExplicitFactorial.fgpu");
 }
 } // namespace
 } // namespace FunGPU::EvaluatorV2

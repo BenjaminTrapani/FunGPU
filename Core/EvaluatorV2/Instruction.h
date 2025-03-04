@@ -177,7 +177,7 @@ decltype(auto) visit(const Instruction &instruction, CB &&cb,
     _(InstructionBarrier)
   }
 
-  unexpected_cb(instruction);
+  return unexpected_cb(instruction);
 #undef _
 }
 
@@ -187,10 +187,11 @@ decltype(auto) visit(Instruction &instruction, CB &&cb,
   return visit(
       std::as_const(instruction),
       [&](const auto &elem) {
-        cb(const_cast<std::remove_cvref_t<decltype(elem)> &>(elem));
+        return cb(const_cast<std::remove_cvref_t<decltype(elem)> &>(elem));
       },
       [&](const auto &elem) {
-        unexpected_cb(const_cast<std::remove_cvref_t<decltype(elem)> &>(elem));
+        return unexpected_cb(
+            const_cast<std::remove_cvref_t<decltype(elem)> &>(elem));
       });
 }
 } // namespace FunGPU::EvaluatorV2

@@ -2,6 +2,7 @@
 #include "Core/EvaluatorV2/RuntimeBlock.hpp"
 #include "Core/EvaluatorV2/RuntimeValue.h"
 #include "Core/PortableMemPool.hpp"
+#include <ostream>
 #include <stdexcept>
 
 namespace FunGPU::EvaluatorV2 {
@@ -209,12 +210,10 @@ void Evaluator::run_eval_step(
               instructions_for_block[idx] = instructions_global_data[idx];
             }
             itm.barrier(cl::sycl::access::fence_space::local_space);
-            if (thread_idx >= block_meta.num_threads) {
-              return;
-            }
             const RuntimeBlockType::Status status = local_block[0].evaluate(
                 itm.get_group_linear_id(), thread_idx, itm, mem_pool_write,
                 local_instructions, block_meta.instructions.GetCount(),
+                block_meta.num_threads,
                 [indirect_call_handler_acc, mem_pool_write, indirect_all_acc](
                     const auto block, const auto funv, const auto tid,
                     const auto reg, const auto args) {
@@ -234,7 +233,8 @@ void Evaluator::run_eval_step(
               break;
             }
             itm.barrier(cl::sycl::access::fence_space::local_space);
-            if (!any_threads_pending[0]) {
+            if (!any_threads_pending[0] &&
+                thread_idx < block_meta.num_threads) {
               mem_pool_write[0]
                   .derefHandle(block_meta.block)
                   ->deallocate_runtime_values_array_for_thread(mem_pool_write,
