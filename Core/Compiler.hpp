@@ -32,13 +32,13 @@ public:
       Identifier,
       Lambda,
     };
-    ASTNode(Type type, Index_t frameSize)
-        : m_type(type), m_frameSize(frameSize) {}
+    ASTNode(Type type, Index_t frame_size)
+        : node_type(type), frame_size(frame_size) {}
 
-    Index_t GetFrameCount() const { return m_frameSize; }
+    Index_t get_frame_count() const { return frame_size; }
 
-    Type m_type;
-    Index_t m_frameSize;
+    Type node_type;
+    Index_t frame_size;
   };
 
   using ASTNodeHandle = PortableMemPool::Handle<ASTNode>;
@@ -53,28 +53,29 @@ public:
 
   class BindNode : public ASTNode {
   public:
-    BindNode(const Index_t numBindings, const bool isRec,
+    BindNode(const Index_t num_bindings, const bool is_rec,
              PortableMemPool::HostAccessor_t pool)
-        : ASTNode(isRec ? Type::BindRec : Type::Bind, numBindings),
-          m_bindings(pool[0].template AllocArray<ASTNodeHandle>(numBindings)) {}
+        : ASTNode(is_rec ? Type::BindRec : Type::Bind, num_bindings),
+          m_bindings(
+              pool[0].template alloc_array<ASTNodeHandle>(num_bindings)) {}
 
     template <typename CB>
     void for_each_sub_expr(PortableMemPool::HostAccessor_t &host_acc, CB &&cb) {
       if (m_bindings != PortableMemPool::ArrayHandle<ASTNodeHandle>()) {
-        auto *child_expr_data = host_acc[0].derefHandle(m_bindings);
-        for (Index_t i = 0; i < m_bindings.GetCount(); ++i) {
+        auto *child_expr_data = host_acc[0].deref_handle(m_bindings);
+        for (Index_t i = 0; i < m_bindings.get_count(); ++i) {
           cb(child_expr_data[i]);
         }
       }
-      cb(m_childExpr);
+      cb(m_child_expr);
     }
 
-    bool is_rec() const noexcept { return m_type == Type::BindRec; }
+    bool is_rec() const noexcept { return node_type == Type::BindRec; }
 
     DEF_MUTABLE_FOR_EACH_SUB_EXPR(BindNode)
 
     PortableMemPool::ArrayHandle<ASTNodeHandle> m_bindings;
-    ASTNodeHandle m_childExpr;
+    ASTNodeHandle m_child_expr;
   };
 
   class UnaryOpNode : public ASTNode {
@@ -155,27 +156,27 @@ public:
 
   class LambdaNode : public ASTNode {
   public:
-    LambdaNode(const Index_t argCount, ASTNodeHandle childExpr)
-        : ASTNode(ASTNode::Type::Lambda, 0), m_argCount(argCount),
-          m_childExpr(childExpr) {}
+    LambdaNode(const Index_t arg_count, ASTNodeHandle child_expr)
+        : ASTNode(ASTNode::Type::Lambda, 0), m_arg_count(arg_count),
+          m_child_expr(child_expr) {}
 
     template <typename CB>
     void for_each_sub_expr(PortableMemPool::HostAccessor_t &, CB &&cb) {
-      cb(m_childExpr);
+      cb(m_child_expr);
     }
 
     DEF_MUTABLE_FOR_EACH_SUB_EXPR(LambdaNode)
 
-    Index_t m_argCount;
-    ASTNodeHandle m_childExpr;
+    Index_t m_arg_count;
+    ASTNodeHandle m_child_expr;
   };
 
   class CallNode : public ASTNode {
   public:
-    CallNode(const Index_t argCount, ASTNodeHandle target,
+    CallNode(const Index_t arg_count, ASTNodeHandle target,
              PortableMemPool::HostAccessor_t pool)
-        : ASTNode(ASTNode::Type::Call, argCount + 1), m_target(target),
-          m_args(pool[0].template AllocArray<ASTNodeHandle>(argCount)) {}
+        : ASTNode(ASTNode::Type::Call, arg_count + 1), m_target(target),
+          m_args(pool[0].template alloc_array<ASTNodeHandle>(arg_count)) {}
 
     template <typename CB>
     void for_each_sub_expr(PortableMemPool::HostAccessor_t &host_acc, CB &&cb) {
@@ -183,8 +184,8 @@ public:
       if (m_args == PortableMemPool::ArrayHandle<ASTNodeHandle>()) {
         return;
       }
-      auto *args_data = host_acc[0].derefHandle(m_args);
-      for (Index_t i = 0; i < m_args.GetCount(); ++i) {
+      auto *args_data = host_acc[0].deref_handle(m_args);
+      for (Index_t i = 0; i < m_args.get_count(); ++i) {
         cb(args_data[i]);
       }
     }
@@ -200,7 +201,7 @@ public:
   class CompileException {
   public:
     CompileException(const std::string &what) : m_what(what) {}
-    const std::string &What() const { return m_what; }
+    const std::string &what() const { return m_what; }
 
   private:
     std::string m_what;
@@ -208,41 +209,41 @@ public:
 
   Compiler(std::shared_ptr<const SExpr> sexpr,
            cl::sycl::buffer<PortableMemPool> pool)
-      : m_sExpr(sexpr), m_memPool(pool) {}
+      : m_sexpr(sexpr), m_mem_pool(pool) {}
 
-  ASTNodeHandle Compile() {
-    std::list<std::string> initialBound;
-    auto memPoolAcc =
-        m_memPool.get_access<cl::sycl::access::mode::read_write>();
-    return Compile(m_sExpr, initialBound, memPoolAcc);
+  ASTNodeHandle compile() {
+    std::list<std::string> initial_bound;
+    auto mem_pool_acc =
+        m_mem_pool.get_access<cl::sycl::access::mode::read_write>();
+    return compile(m_sexpr, initial_bound, mem_pool_acc);
   }
 
-  void DebugPrintAST(ASTNodeHandle rootOfAST);
-  void DeallocateAST(const ASTNodeHandle rootOfAST);
+  void debug_print_ast(ASTNodeHandle root_of_ast);
+  void deallocate_ast(const ASTNodeHandle root_of_ast);
 
 private:
-  static void DebugPrintAST(ASTNodeHandle rootOfAST,
-                            PortableMemPool::HostAccessor_t memPoolAcc,
-                            std::size_t indent);
-  static void DeallocateAST(const ASTNodeHandle &handle,
-                            PortableMemPool::HostAccessor_t memPoolAcc);
+  static void debug_print_ast(ASTNodeHandle root_of_ast,
+                              PortableMemPool::HostAccessor_t mem_pool_acc,
+                              std::size_t indent);
+  static void deallocate_ast(const ASTNodeHandle &handle,
+                             PortableMemPool::HostAccessor_t mem_pool_acc);
 
-  static ASTNodeHandle Compile(std::shared_ptr<const SExpr> sexpr,
-                               std::list<std::string> boundIdentifiers,
-                               PortableMemPool::HostAccessor_t memPoolAcc);
+  static ASTNodeHandle compile(std::shared_ptr<const SExpr> sexpr,
+                               std::list<std::string> bound_identifiers,
+                               PortableMemPool::HostAccessor_t mem_pool_acc);
   static ASTNodeHandle
-  CompileListOfSExpr(std::shared_ptr<const SExpr> sexpr,
-                     std::list<std::string> boundIdentifiers,
-                     PortableMemPool::HostAccessor_t memPoolAcc);
+  compile_list_of_sexpr(std::shared_ptr<const SExpr> sexpr,
+                        std::list<std::string> bound_identifiers,
+                        PortableMemPool::HostAccessor_t mem_pool_acc);
 
-  std::shared_ptr<const SExpr> m_sExpr;
-  cl::sycl::buffer<PortableMemPool> m_memPool;
+  std::shared_ptr<const SExpr> m_sexpr;
+  cl::sycl::buffer<PortableMemPool> m_mem_pool;
 };
 
 template <typename CB, typename UnexpectedCB>
 decltype(auto) visit(Compiler::ASTNode &node, CB &&cb,
                      UnexpectedCB &&unexpectedCB) {
-  switch (node.m_type) {
+  switch (node.node_type) {
   case Compiler::ASTNode::Type::Bind:
   case Compiler::ASTNode::Type::BindRec:
     return cb(static_cast<Compiler::BindNode &>(node));

@@ -2,5 +2,5 @@
 
 namespace FunGPU {
 template <typename Type, typename... PossibleTypes>
-concept OneOf = (std::is_same_v<Type, PossibleTypes> || ...);
+concept OneOf = (std::same_as<Type, PossibleTypes> || ...);
 }

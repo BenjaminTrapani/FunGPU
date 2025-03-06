@@ -7,34 +7,34 @@
 namespace FunGPU {
 class BlockPrep {
 public:
-  BlockPrep(Index_t registersPerBlock, Index_t instructionsPerCycle,
-            Index_t cyclesPerBlock, cl::sycl::buffer<PortableMemPool> pool);
+  BlockPrep(Index_t registers_per_block, Index_t instructions_per_cycle,
+            Index_t cycles_per_block, cl::sycl::buffer<PortableMemPool> pool);
 
   Compiler::ASTNodeHandle
-  PrepareForBlockGeneration(Compiler::ASTNodeHandle root);
+  prepare_for_block_generation(Compiler::ASTNodeHandle root);
 
 private:
   Compiler::ASTNodeHandle
-  PrepareForBlockGeneration(Compiler::ASTNodeHandle root,
-                            PortableMemPool::HostAccessor_t memPoolAcc);
+  prepare_for_block_generation(Compiler::ASTNodeHandle root,
+                               PortableMemPool::HostAccessor_t mem_pool_acc);
   static Compiler::ASTNodeHandle
-  RewriteAsPrimOps(Compiler::ASTNodeHandle root,
-                   PortableMemPool::HostAccessor_t memPoolAcc);
+  rewrite_as_prim_ops(Compiler::ASTNodeHandle root,
+                      PortableMemPool::HostAccessor_t mem_pool_acc);
 
-  static void GetPrimOps(Compiler::ASTNodeHandle &root,
-                         PortableMemPool::HostAccessor_t memPoolAcc,
-                         std::vector<Compiler::ASTNodeHandle *> &out);
-  static void IncreaseBindingRefIndices(
-      Compiler::ASTNodeHandle, std::size_t increment,
-      PortableMemPool::HostAccessor_t memPoolAcc,
-      std::size_t minRefForIncrement,
-      const std::set<Compiler::ASTNodeHandle> &identsToExclude);
+  static void get_prim_ops(Compiler::ASTNodeHandle &root,
+                           PortableMemPool::HostAccessor_t mem_pool_acc,
+                           std::vector<Compiler::ASTNodeHandle *> &out);
+  static void increase_binding_ref_indices(
+      Compiler::ASTNodeHandle node, std::size_t increment,
+      PortableMemPool::HostAccessor_t mem_pool_acc,
+      std::size_t min_ref_for_increment,
+      const std::set<Compiler::ASTNodeHandle> &idents_to_exclude);
   static Compiler::ASTNodeHandle
   wrap_in_no_arg_lambda(Compiler::ASTNodeHandle root,
                         PortableMemPool::HostAccessor_t &);
   static Compiler::ASTNodeHandle
   rewrite_letrec_as_let(Compiler::ASTNodeHandle root,
-                        PortableMemPool::HostAccessor_t &memPoolAcc);
+                        PortableMemPool::HostAccessor_t &mem_pool_acc);
   static Compiler::ASTNodeHandle substitute_identifiers_in_range_with_call(
       Compiler::ASTNodeHandle root, const Index_t start, const Index_t end,
       PortableMemPool::HostAccessor_t &mem_pool_acc);
@@ -202,9 +202,9 @@ private:
    initial load.
   */
 
-  const Index_t m_registersPerBlock;
-  const Index_t m_instructionsPerCycle;
-  const Index_t m_cyclesPerBlock;
+  const Index_t m_registers_per_block;
+  const Index_t m_instructions_per_cycle;
+  const Index_t m_cycles_per_block;
   cl::sycl::buffer<PortableMemPool> m_pool;
 };
 } // namespace FunGPU

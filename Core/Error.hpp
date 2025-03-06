@@ -17,14 +17,14 @@ public:
     MemPoolAllocFailure = 8,
   };
 
-  Error() : m_type(Type::Success) {}
-  Error(const Error &other) : m_type(other.m_type) {}
-  Error(const Type type) : m_type(type) {}
+  Error() : node_type(Type::Success) {}
+  Error(const Error &other) : node_type(other.node_type) {}
+  Error(const Type type) : node_type(type) {}
 
-  Type GetType() const { return m_type; }
+  Type GetType() const { return node_type; }
 
 private:
-  Type m_type;
+  Type node_type;
 };
 
 #define RETURN_IF_FAILURE(expr)                                                \

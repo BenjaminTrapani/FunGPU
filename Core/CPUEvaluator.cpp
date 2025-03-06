@@ -1,6 +1,5 @@
 #include "Core/CPUEvaluator.hpp"
 #include <algorithm>
-
 #include <iostream>
 #include <sstream>
 
@@ -19,66 +18,68 @@ class gc_sweep;
 class gc_prepare_compact;
 class gc_compact;
 
-Error CPUEvaluator::DependencyTracker::AddActiveBlock(
+Error CPUEvaluator::DependencyTracker::add_active_block(
     const RuntimeBlock_t::SharedRuntimeBlockHandle_t &block) {
   cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
                        cl::sycl::memory_scope::device,
                        cl::sycl::access::address_space::global_space>
-      activeBlockCount(m_activeBlockCountData);
-  const auto indexToInsert = activeBlockCount.fetch_add(1U);
-  auto &destArray = m_activeBlocks[m_activeBlocksBufferIdx];
-  if (indexToInsert >= destArray.size()) {
+      active_block_count(m_active_block_count_data);
+  const auto index_to_insert = active_block_count.fetch_add(1U);
+  auto &dest_array = m_active_blocks[m_active_blocks_buffer_idx];
+  if (index_to_insert >= dest_array.size()) {
     return Error(Error::Type::EvaluatorOutOfActiveBlocks);
   }
-  destArray[indexToInsert] = block;
+  dest_array[index_to_insert] = block;
 
   return Error();
 }
 
-void CPUEvaluator::DependencyTracker::InsertActiveBlock(
+void CPUEvaluator::DependencyTracker::insert_active_block(
     const RuntimeBlock_t::SharedRuntimeBlockHandle_t &block,
     const Index_t index) {
-  m_activeBlocks[m_activeBlocksBufferIdx][index] = block;
+  m_active_blocks[m_active_blocks_buffer_idx][index] = block;
 }
 
-CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
-    : m_dependencyTracker(std::make_shared<DependencyTracker>()),
-      m_resultValue(std::make_shared<
-                    PortableMemPool::Handle<RuntimeBlock_t::RuntimeValue>>()),
-      m_garbageCollectorHandleBuff(range<1>(1)), m_memPoolBuff(memPool),
-      m_dependencyTrackerBuff(m_dependencyTracker, range<1>(1)),
-      m_resultValueBuff(m_resultValue, range<1>(1)),
-      m_errorsPerBlock(range<1>(m_dependencyTracker->m_activeBlocks[0].size())),
-      m_blockErrorIdx(range<1>(1)), m_markingsExpanded(range<1>(1)),
-      m_managedAllocdCount(range<1>(1)),
-      m_requiresGarbageCollection(range<1>(1)),
-      m_numActiveBlocksBuff(range<1>(1)), m_resultBufferOnHost(range<1>(1))
-/* m_workQueue(host_selector{})*/ {
+CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> mem_pool)
+    : m_dependency_tracker(std::make_shared<DependencyTracker>()),
+      m_result_value(std::make_shared<
+                     PortableMemPool::Handle<RuntimeBlock_t::RuntimeValue>>()),
+      m_garbage_collector_handle_buff(range<1>(1)), m_mem_pool_buff(mem_pool),
+      m_dependency_tracker_buff(m_dependency_tracker, range<1>(1)),
+      m_result_value_buff(m_result_value, range<1>(1)),
+      m_errors_per_block(
+          range<1>(m_dependency_tracker->m_active_blocks[0].size())),
+      m_block_error_idx(range<1>(1)), m_markings_expanded(range<1>(1)),
+      m_managed_allocd_count(range<1>(1)),
+      m_requires_garbage_collection(range<1>(1)),
+      m_num_active_blocks_buff(range<1>(1)),
+      m_result_buffer_on_host(range<1>(1))
+/* m_work_queue(host_selector{})*/ {
   std::cout << std::endl;
   std::cout << "Running on "
-            << m_workQueue.get_device().get_info<info::device::name>()
+            << m_work_queue.get_device().get_info<info::device::name>()
             << std::endl;
   std::cout << "Runtime block size in bytes: " << sizeof(RuntimeBlock_t)
             << std::endl;
   std::cout << "Runtime value size in bytes: "
             << sizeof(typename RuntimeBlock_t::RuntimeValue) << std::endl;
   try {
-    m_workQueue.submit([&](handler &cgh) {
-      auto memPoolWrite =
-          m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-      auto garbageCollectorHandleAcc =
-          m_garbageCollectorHandleBuff.get_access<access::mode::read_write>(
+    m_work_queue.submit([&](handler &cgh) {
+      auto mem_pool_write =
+          m_mem_pool_buff.get_access<access::mode::read_write>(cgh);
+      auto garbage_collector_handle_acc =
+          m_garbage_collector_handle_buff.get_access<access::mode::read_write>(
               cgh);
-      auto memPoolHostAcc =
-          m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-      auto resultValueWrite =
-          m_resultValueBuff.get_access<access::mode::discard_write>(cgh);
+      auto mem_pool_host_acc =
+          m_mem_pool_buff.get_access<access::mode::read_write>(cgh);
+      auto result_value_write =
+          m_result_value_buff.get_access<access::mode::discard_write>(cgh);
       cgh.single_task<class create_gc>(
-          [memPoolWrite, garbageCollectorHandleAcc, resultValueWrite]() {
-            garbageCollectorHandleAcc[0] =
-                memPoolWrite[0].Alloc<GarbageCollector_t>();
-            resultValueWrite[0] =
-                memPoolWrite[0].Alloc<RuntimeBlock_t::RuntimeValue>();
+          [mem_pool_write, garbage_collector_handle_acc, result_value_write]() {
+            garbage_collector_handle_acc[0] =
+                mem_pool_write[0].alloc<GarbageCollector_t>();
+            result_value_write[0] =
+                mem_pool_write[0].alloc<RuntimeBlock_t::RuntimeValue>();
           });
     });
   } catch (cl::sycl::exception e) {
@@ -87,60 +88,63 @@ CPUEvaluator::CPUEvaluator(cl::sycl::buffer<PortableMemPool> memPool)
 }
 
 CPUEvaluator::~CPUEvaluator() {
-  m_workQueue.submit([&](handler &cgh) {
-    auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-    auto resultValueAcc =
-        m_resultValueBuff.get_access<access::mode::read_write>(cgh);
-    auto gcHandleAcc =
-        m_garbageCollectorHandleBuff.get_access<access::mode::read_write>(cgh);
+  m_work_queue.submit([&](handler &cgh) {
+    auto mem_pool_acc =
+        m_mem_pool_buff.get_access<access::mode::read_write>(cgh);
+    auto result_value_acc =
+        m_result_value_buff.get_access<access::mode::read_write>(cgh);
+    auto gc_handle_acc =
+        m_garbage_collector_handle_buff.get_access<access::mode::read_write>(
+            cgh);
     cgh.single_task<class evaluator_dealloc>(
-        [memPoolAcc, gcHandleAcc, resultValueAcc]() {
-          memPoolAcc[0].Dealloc(resultValueAcc[0]);
-          memPoolAcc[0].Dealloc(gcHandleAcc[0]);
+        [mem_pool_acc, gc_handle_acc, result_value_acc]() {
+          mem_pool_acc[0].dealloc(result_value_acc[0]);
+          mem_pool_acc[0].dealloc(gc_handle_acc[0]);
         });
   });
 }
 
-void CPUEvaluator::CreateFirstBlock(const Compiler::ASTNodeHandle rootNode) {
+void CPUEvaluator::create_first_block(const Compiler::ASTNodeHandle root_node) {
   try {
-    cl::sycl::buffer<Error> allocGCErrorBuf(cl::sycl::range<1>(1));
-    m_workQueue.submit([&](handler &cgh) {
-      auto memPoolWrite =
-          m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-      auto dependencyTracker =
-          m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
-      auto garbageCollectorHandleAcc =
-          m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
-      auto resultValueAcc =
-          m_resultValueBuff.get_access<access::mode::read>(cgh);
-      auto allocGCErrorAcc =
-          allocGCErrorBuf.get_access<access::mode::discard_write>(cgh);
+    cl::sycl::buffer<Error> alloc_gc_error_buf(cl::sycl::range<1>(1));
+    m_work_queue.submit([&](handler &cgh) {
+      auto mem_pool_write =
+          m_mem_pool_buff.get_access<access::mode::read_write>(cgh);
+      auto dependency_tracker =
+          m_dependency_tracker_buff.get_access<access::mode::read_write>(cgh);
+      auto garbage_collector_handle_acc =
+          m_garbage_collector_handle_buff.get_access<access::mode::read>(cgh);
+      auto result_value_acc =
+          m_result_value_buff.get_access<access::mode::read>(cgh);
+      auto alloc_gc_error_acc =
+          alloc_gc_error_buf.get_access<access::mode::discard_write>(cgh);
       cgh.single_task<class init_first_block>(
-          [memPoolWrite, dependencyTracker, resultValueAcc, rootNode,
-           garbageCollectorHandleAcc, allocGCErrorAcc]() {
-            auto gcRef =
-                memPoolWrite[0].derefHandle(garbageCollectorHandleAcc[0]);
-            const RuntimeBlock_t::SharedRuntimeBlockHandle_t emptyBlock;
-            RuntimeBlock_t::SharedRuntimeBlockHandle_t sharedInitialBlock;
-            const auto allocError = gcRef->AllocManaged(
-                memPoolWrite, sharedInitialBlock, rootNode, emptyBlock,
-                emptyBlock, dependencyTracker, resultValueAcc[0], memPoolWrite,
-                garbageCollectorHandleAcc[0]);
-            allocGCErrorAcc[0] = allocError;
-            if (allocError.GetType() == Error::Type::Success) {
-              allocGCErrorAcc[0] =
-                  dependencyTracker[0].AddActiveBlock(sharedInitialBlock);
+          [mem_pool_write, dependency_tracker, result_value_acc, root_node,
+           garbage_collector_handle_acc, alloc_gc_error_acc]() {
+            auto gc_ref =
+                mem_pool_write[0].deref_handle(garbage_collector_handle_acc[0]);
+            const RuntimeBlock_t::SharedRuntimeBlockHandle_t empty_block;
+            RuntimeBlock_t::SharedRuntimeBlockHandle_t shared_initial_block;
+            const auto alloc_error = gc_ref->alloc_managed(
+                mem_pool_write, shared_initial_block, root_node, empty_block,
+                empty_block, dependency_tracker, result_value_acc[0],
+                mem_pool_write, garbage_collector_handle_acc[0]);
+            alloc_gc_error_acc[0] = alloc_error;
+            if (alloc_error.GetType() == Error::Type::Success) {
+              alloc_gc_error_acc[0] =
+                  dependency_tracker[0].add_active_block(shared_initial_block);
             }
           });
     });
-    auto allocGCErrorVal = allocGCErrorBuf.get_access<access::mode::read>()[0];
-    if (allocGCErrorVal.GetType() != Error::Type::Success) {
-      std::stringstream errorStream;
-      errorStream << "Error allocating initial block: "
-                  << static_cast<std::underlying_type_t<Error::Type>>(
-                         allocGCErrorVal.GetType())
-                  << std::endl;
-      throw std::runtime_error(errorStream.str());
+    auto alloc_gc_error_val =
+        alloc_gc_error_buf.get_access<access::mode::read>()[0];
+    if (alloc_gc_error_val.GetType() != Error::Type::Success) {
+      std::stringstream error_stream;
+      error_stream << "Error allocating initial block: "
+                   << static_cast<std::underlying_type_t<Error::Type>>(
+                          alloc_gc_error_val.GetType())
+                   << std::endl;
+      throw std::runtime_error(error_stream.str());
     }
   } catch (cl::sycl::exception e) {
     std::cerr << "Sycl exception: " << e.what() << std::endl;
@@ -148,212 +152,232 @@ void CPUEvaluator::CreateFirstBlock(const Compiler::ASTNodeHandle rootNode) {
   std::cout << "Successfully created first block" << std::endl;
 }
 
-void CPUEvaluator::CheckForBlockErrors(
-    const Index_t maxConcurrentBlocksDuringExec) {
-  auto hostBlockHasErrorAcc =
-      m_blockErrorIdx.get_access<access::mode::read_write>();
-  if (hostBlockHasErrorAcc[0] > 0) {
-    auto errorsPerBlockAcc =
-        m_errorsPerBlock.get_access<access::mode::read_write>();
+void CPUEvaluator::check_for_block_errors(
+    const Index_t max_concurrent_blocks_during_exec) {
+  auto host_block_has_error_acc =
+      m_block_error_idx.get_access<access::mode::read_write>();
+  if (host_block_has_error_acc[0] > 0) {
+    auto errors_per_block_acc =
+        m_errors_per_block.get_access<access::mode::read_write>();
     std::stringstream ss;
     ss << "Block errors in previous pass: " << std::endl;
-    for (Index_t i = 0; i < hostBlockHasErrorAcc[0]; ++i) {
-      ss << static_cast<int>(errorsPerBlockAcc[i].GetType()) << std::endl;
+    for (Index_t i = 0; i < host_block_has_error_acc[0]; ++i) {
+      ss << static_cast<int>(errors_per_block_acc[i].GetType()) << std::endl;
     }
-    ss << "Max concurrent blocks during exec: " << maxConcurrentBlocksDuringExec
-       << std::endl;
-    const auto errorString = ss.str();
-    throw std::runtime_error(errorString);
+    ss << "Max concurrent blocks during exec: "
+       << max_concurrent_blocks_during_exec << std::endl;
+    const auto error_string = ss.str();
+    throw std::runtime_error(error_string);
   }
-  hostBlockHasErrorAcc[0] = 0;
+  host_block_has_error_acc[0] = 0;
 }
 
-void CPUEvaluator::PerformGarbageCollection(const Index_t numActiveBlocks) {
-  if (numActiveBlocks > 0) {
-    m_workQueue.submit([&](handler &cgh) {
-      auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-      auto dependencyTrackerAcc =
-          m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
+void CPUEvaluator::perform_garbage_collection(const Index_t num_active_blocks) {
+  if (num_active_blocks > 0) {
+    m_work_queue.submit([&](handler &cgh) {
+      auto mem_pool_acc =
+          m_mem_pool_buff.get_access<access::mode::read_write>(cgh);
+      auto dependency_tracker_acc =
+          m_dependency_tracker_buff.get_access<access::mode::read_write>(cgh);
       cgh.parallel_for<class gc_initial_mark>(
-          cl::sycl::range<1>(numActiveBlocks),
-          [memPoolAcc, dependencyTrackerAcc](item<1> itm) {
+          cl::sycl::range<1>(num_active_blocks),
+          [mem_pool_acc, dependency_tracker_acc](item<1> itm) {
             const auto idx = itm.get_linear_id();
-            const auto derefdWorking = memPoolAcc[0].derefHandle(
-                dependencyTrackerAcc[0].GetBlockAtIndex(idx));
-            derefdWorking->SetMarked();
+            const auto derefd_working = mem_pool_acc[0].deref_handle(
+                dependency_tracker_acc[0].get_block_at_index(idx));
+            derefd_working->set_marked();
           });
     });
   }
 
-  m_workQueue.submit([&](handler &cgh) {
-    auto managedAllocdCountDevice =
-        m_managedAllocdCount.get_access<access::mode::discard_write>(cgh);
-    auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-    auto gcHandleAcc =
-        m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
+  m_work_queue.submit([&](handler &cgh) {
+    auto managed_allocd_count_device =
+        m_managed_allocd_count.get_access<access::mode::discard_write>(cgh);
+    auto mem_pool_acc =
+        m_mem_pool_buff.get_access<access::mode::read_write>(cgh);
+    auto garbage_collector_handle_acc =
+        m_garbage_collector_handle_buff.get_access<access::mode::read>(cgh);
     cgh.single_task<class get_managed_allocd_count>(
-        [managedAllocdCountDevice, memPoolAcc, gcHandleAcc] {
-          auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
-          managedAllocdCountDevice[0] = gcRef->GetManagedAllocationCount();
+        [managed_allocd_count_device, mem_pool_acc,
+         garbage_collector_handle_acc] {
+          auto gc_ref =
+              mem_pool_acc[0].deref_handle(garbage_collector_handle_acc[0]);
+          managed_allocd_count_device[0] =
+              gc_ref->get_managed_allocation_count();
         });
   });
 
-  Index_t managedAllocdSize;
+  Index_t managed_allocd_size;
   {
-    auto managedAllocdCountHost =
-        m_managedAllocdCount.get_access<access::mode::read>();
-    managedAllocdSize = managedAllocdCountHost[0];
+    auto managed_allocd_count_host =
+        m_managed_allocd_count.get_access<access::mode::read>();
+    managed_allocd_size = managed_allocd_count_host[0];
   }
-  if (managedAllocdSize > 0) {
+  if (managed_allocd_size > 0) {
     // Expand markings
-    bool wasMarkingsExpandedInLastPass = true;
-    m_markingsExpanded.get_access<access::mode::discard_write>()[0] = false;
+    bool was_markings_expanded_in_last_pass = true;
+    m_markings_expanded.get_access<access::mode::discard_write>()[0] = false;
 
-    while (wasMarkingsExpandedInLastPass) {
-      m_workQueue.submit([&](handler &cgh) {
-        auto gcHandleAcc =
-            m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
-        auto memPoolAcc =
-            m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-        auto markingsExpandedAcc =
-            m_markingsExpanded.get_access<access::mode::read_write>(cgh);
+    while (was_markings_expanded_in_last_pass) {
+      m_work_queue.submit([&](handler &cgh) {
+        auto garbage_collector_handle_acc =
+            m_garbage_collector_handle_buff.get_access<access::mode::read>(cgh);
+        auto mem_pool_acc =
+            m_mem_pool_buff.get_access<access::mode::read_write>(cgh);
+        auto markings_expanded_acc =
+            m_markings_expanded.get_access<access::mode::read_write>(cgh);
         cgh.parallel_for<class gc_mark>(
-            cl::sycl::range<1>(managedAllocdSize),
-            [gcHandleAcc, memPoolAcc, markingsExpandedAcc](item<1> itm) {
-              auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
-              const auto wereMarkingsExpandedHere = gcRef->RunMarkPass(
-                  static_cast<Index_t>(itm.get_linear_id()), memPoolAcc);
-              if (wereMarkingsExpandedHere) {
-                markingsExpandedAcc[0] = true;
+            cl::sycl::range<1>(managed_allocd_size),
+            [garbage_collector_handle_acc, mem_pool_acc,
+             markings_expanded_acc](item<1> itm) {
+              auto gc_ref =
+                  mem_pool_acc[0].deref_handle(garbage_collector_handle_acc[0]);
+              const auto were_markings_expanded_here = gc_ref->run_mark_pass(
+                  static_cast<Index_t>(itm.get_linear_id()), mem_pool_acc);
+              if (were_markings_expanded_here) {
+                markings_expanded_acc[0] = true;
               }
             });
       });
       {
-        auto markingsExpandedHostAcc =
-            m_markingsExpanded.get_access<access::mode::read_write>();
-        wasMarkingsExpandedInLastPass = markingsExpandedHostAcc[0];
-        markingsExpandedHostAcc[0] = false;
+        auto markings_expanded_host_acc =
+            m_markings_expanded.get_access<access::mode::read_write>();
+        was_markings_expanded_in_last_pass = markings_expanded_host_acc[0];
+        markings_expanded_host_acc[0] = false;
       }
     }
     // Sweep unmarked, one pass
-    m_workQueue.submit([&](handler &cgh) {
-      auto gcHandleAcc =
-          m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
-      auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+    m_work_queue.submit([&](handler &cgh) {
+      auto garbage_collector_handle_acc =
+          m_garbage_collector_handle_buff.get_access<access::mode::read>(cgh);
+      auto mem_pool_acc =
+          m_mem_pool_buff.get_access<access::mode::read_write>(cgh);
       cgh.parallel_for<class gc_sweep>(
-          cl::sycl::range<1>(managedAllocdSize),
-          [gcHandleAcc, memPoolAcc](item<1> itm) {
-            auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
-            gcRef->Sweep(static_cast<Index_t>(itm.get_linear_id()), memPoolAcc);
+          cl::sycl::range<1>(managed_allocd_size),
+          [garbage_collector_handle_acc, mem_pool_acc](item<1> itm) {
+            auto gc_ref =
+                mem_pool_acc[0].deref_handle(garbage_collector_handle_acc[0]);
+            gc_ref->sweep(static_cast<Index_t>(itm.get_linear_id()),
+                          mem_pool_acc);
           });
     });
 
-    m_workQueue.submit([&](handler &cgh) {
-      auto gcHandleAcc =
-          m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
-      auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-      cgh.single_task<class gc_prepare_compact>([gcHandleAcc, memPoolAcc]() {
-        auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
-        gcRef->ResetAllocationCount();
-      });
+    m_work_queue.submit([&](handler &cgh) {
+      auto garbage_collector_handle_acc =
+          m_garbage_collector_handle_buff.get_access<access::mode::read>(cgh);
+      auto mem_pool_acc =
+          m_mem_pool_buff.get_access<access::mode::read_write>(cgh);
+      cgh.single_task<class gc_prepare_compact>(
+          [garbage_collector_handle_acc, mem_pool_acc]() {
+            auto gc_ref =
+                mem_pool_acc[0].deref_handle(garbage_collector_handle_acc[0]);
+            gc_ref->reset_allocation_count();
+          });
     });
 
     // Compact
-    m_workQueue.submit([&](handler &cgh) {
-      auto gcHandleAcc =
-          m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
-      auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
+    m_work_queue.submit([&](handler &cgh) {
+      auto garbage_collector_handle_acc =
+          m_garbage_collector_handle_buff.get_access<access::mode::read>(cgh);
+      auto mem_pool_acc =
+          m_mem_pool_buff.get_access<access::mode::read_write>(cgh);
       cgh.parallel_for<class gc_compact>(
-          cl::sycl::range<1>(managedAllocdSize),
-          [gcHandleAcc, memPoolAcc](item<1> itm) {
-            auto gcRef = memPoolAcc[0].derefHandle(gcHandleAcc[0]);
-            gcRef->Compact(static_cast<Index_t>(itm.get_linear_id()));
+          cl::sycl::range<1>(managed_allocd_size),
+          [garbage_collector_handle_acc, mem_pool_acc](item<1> itm) {
+            auto gc_ref =
+                mem_pool_acc[0].deref_handle(garbage_collector_handle_acc[0]);
+            gc_ref->compact(static_cast<Index_t>(itm.get_linear_id()));
           });
     });
   }
 }
 
 CPUEvaluator::RuntimeBlock_t::RuntimeValue
-CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
-                              Index_t &maxConcurrentBlocksDuringExec) {
+CPUEvaluator::evaluate_program(const Compiler::ASTNodeHandle &root_node,
+                               Index_t &max_concurrent_blocks_during_exec) {
   const auto begin_time = std::chrono::high_resolution_clock::now();
-  CreateFirstBlock(rootNode);
+  create_first_block(root_node);
 
-  maxConcurrentBlocksDuringExec = 0;
-  m_blockErrorIdx.get_access<access::mode::discard_write>()[0] = 0;
-  m_requiresGarbageCollection.get_access<access::mode::discard_write>()[0] =
+  max_concurrent_blocks_during_exec = 0;
+  m_block_error_idx.get_access<access::mode::discard_write>()[0] = 0;
+  m_requires_garbage_collection.get_access<access::mode::discard_write>()[0] =
       false;
   try {
     Index_t num_steps = 0;
     while (true) {
       ++num_steps;
-      m_workQueue.submit([&](handler &cgh) {
-        auto numActiveBlocksWrite =
-            m_numActiveBlocksBuff.get_access<access::mode::discard_write>(cgh);
-        auto depTrackerAcc =
-            m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
+      m_work_queue.submit([&](handler &cgh) {
+        auto num_active_blocks_write =
+            m_num_active_blocks_buff.get_access<access::mode::discard_write>(
+                cgh);
+        auto dep_tracker_acc =
+            m_dependency_tracker_buff.get_access<access::mode::read_write>(cgh);
         cgh.single_task<class update_active_block_count>(
-            [numActiveBlocksWrite, depTrackerAcc]() {
-              numActiveBlocksWrite[0] = depTrackerAcc[0].GetActiveBlockCount();
-              depTrackerAcc[0].FlipActiveBlocksBuffer();
+            [num_active_blocks_write, dep_tracker_acc]() {
+              num_active_blocks_write[0] =
+                  dep_tracker_acc[0].get_active_block_count();
+              dep_tracker_acc[0].flip_active_blocks_buffer();
             });
       });
 
-      CheckForBlockErrors(maxConcurrentBlocksDuringExec);
+      check_for_block_errors(max_concurrent_blocks_during_exec);
 
-      const auto numActiveBlocks =
-          m_numActiveBlocksBuff.get_access<access::mode::read>()[0];
-      maxConcurrentBlocksDuringExec =
-          std::max(numActiveBlocks, maxConcurrentBlocksDuringExec);
+      const auto num_active_blocks =
+          m_num_active_blocks_buff.get_access<access::mode::read>()[0];
+      max_concurrent_blocks_during_exec =
+          std::max(num_active_blocks, max_concurrent_blocks_during_exec);
       {
-        auto requiresGarbageCollectionAcc =
-            m_requiresGarbageCollection.get_access<access::mode::read_write>();
-        if (requiresGarbageCollectionAcc[0] || numActiveBlocks == 0) {
-          PerformGarbageCollection(numActiveBlocks);
-          requiresGarbageCollectionAcc[0] = false;
+        auto requires_garbage_collection_acc =
+            m_requires_garbage_collection
+                .get_access<access::mode::read_write>();
+        if (requires_garbage_collection_acc[0] || num_active_blocks == 0) {
+          perform_garbage_collection(num_active_blocks);
+          requires_garbage_collection_acc[0] = false;
         }
       }
 
-      if (numActiveBlocks == 0) {
+      if (num_active_blocks == 0) {
         break;
       }
       // main eval pass
-      m_workQueue.submit([&](handler &cgh) {
-        auto memPoolWrite =
-            m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-        auto dependencyTracker =
-            m_dependencyTrackerBuff.get_access<access::mode::read_write>(cgh);
-        auto gcHandleAcc =
-            m_garbageCollectorHandleBuff.get_access<access::mode::read>(cgh);
+      m_work_queue.submit([&](handler &cgh) {
+        auto mem_pool_write =
+            m_mem_pool_buff.get_access<access::mode::read_write>(cgh);
+        auto dependency_tracker =
+            m_dependency_tracker_buff.get_access<access::mode::read_write>(cgh);
+        auto garbage_collector_handle_acc =
+            m_garbage_collector_handle_buff.get_access<access::mode::read>(cgh);
 
-        auto blockErrorIdxAtomicAcc =
-            m_blockErrorIdx.get_access<access::mode::read_write>(cgh);
-        auto blockErrorAcc =
-            m_errorsPerBlock.get_access<access::mode::read_write>(cgh);
-        auto requiresGarbageCollectionAcc =
-            m_requiresGarbageCollection.get_access<access::mode::discard_write>(
-                cgh);
+        auto block_error_idx_atomic_acc =
+            m_block_error_idx.get_access<access::mode::read_write>(cgh);
+        auto block_error_acc =
+            m_errors_per_block.get_access<access::mode::read_write>(cgh);
+        auto requires_garbage_collection_acc =
+            m_requires_garbage_collection
+                .get_access<access::mode::discard_write>(cgh);
         cgh.parallel_for<class run_eval_pass>(
-            cl::sycl::range<1>(numActiveBlocks),
-            [dependencyTracker, memPoolWrite, blockErrorIdxAtomicAcc,
-             blockErrorAcc, gcHandleAcc,
-             requiresGarbageCollectionAcc](item<1> itm) {
-              auto currentBlock =
-                  dependencyTracker[0].GetBlockAtIndex(itm.get_linear_id());
-              auto derefdCurrentBlock =
-                  memPoolWrite[0].derefHandle(currentBlock);
-              auto gcRef = memPoolWrite[0].derefHandle(gcHandleAcc[0]);
-              derefdCurrentBlock->SetResources(memPoolWrite, dependencyTracker);
-              const auto error = derefdCurrentBlock->PerformEvalPass();
+            cl::sycl::range<1>(num_active_blocks),
+            [dependency_tracker, mem_pool_write, block_error_idx_atomic_acc,
+             block_error_acc, garbage_collector_handle_acc,
+             requires_garbage_collection_acc](item<1> itm) {
+              auto current_block =
+                  dependency_tracker[0].get_block_at_index(itm.get_linear_id());
+              auto derefd_current_block =
+                  mem_pool_write[0].deref_handle(current_block);
+              auto gc_ref = mem_pool_write[0].deref_handle(
+                  garbage_collector_handle_acc[0]);
+              derefd_current_block->set_resources(mem_pool_write,
+                                                  dependency_tracker);
+              const auto error = derefd_current_block->PerformEvalPass();
               switch (error.GetType()) {
               case Error::Type::Success:
                 return;
               case Error::Type::GCOutOfSlots:
               case Error::Type::MemPoolAllocFailure:
-                requiresGarbageCollectionAcc[0] = true;
-                if (const auto reAppendError =
-                        dependencyTracker[0].AddActiveBlock(currentBlock);
-                    reAppendError.GetType() == Error::Type::Success) {
+                requires_garbage_collection_acc[0] = true;
+                if (const auto re_append_error =
+                        dependency_tracker[0].add_active_block(current_block);
+                    re_append_error.GetType() == Error::Type::Success) {
                   return;
                 }
                 break;
@@ -369,8 +393,8 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
                   Index_t, cl::sycl::memory_order::seq_cst,
                   cl::sycl::memory_scope::device,
                   cl::sycl::access::address_space::global_space>
-                  blockErrorIdxAtomic(blockErrorIdxAtomicAcc[0]);
-              blockErrorAcc[blockErrorIdxAtomic.fetch_add(1U)] = error;
+                  block_error_idx_atomic(block_error_idx_atomic_acc[0]);
+              block_error_acc[block_error_idx_atomic.fetch_add(1U)] = error;
             });
       });
     }
@@ -384,21 +408,23 @@ CPUEvaluator::EvaluateProgram(const Compiler::ASTNodeHandle &rootNode,
                                                                      begin_time)
                    .count()
             << std::endl;
-  m_workQueue.submit([&](handler &cgh) {
-    auto memPoolAcc = m_memPoolBuff.get_access<access::mode::read_write>(cgh);
-    auto resultOnHostAcc =
-        m_resultBufferOnHost.get_access<access::mode::discard_write>(cgh);
-    auto resultValRefAcc =
-        m_resultValueBuff.get_access<access::mode::read>(cgh);
+  m_work_queue.submit([&](handler &cgh) {
+    auto mem_pool_acc =
+        m_mem_pool_buff.get_access<access::mode::read_write>(cgh);
+    auto result_on_host_acc =
+        m_result_buffer_on_host.get_access<access::mode::discard_write>(cgh);
+    auto result_val_ref_acc =
+        m_result_value_buff.get_access<access::mode::read>(cgh);
     cgh.single_task<class fetch_result>(
-        [resultOnHostAcc, memPoolAcc, resultValRefAcc]() {
-          resultOnHostAcc[0] = *memPoolAcc[0].derefHandle(resultValRefAcc[0]);
+        [result_on_host_acc, mem_pool_acc, result_val_ref_acc]() {
+          result_on_host_acc[0] =
+              *mem_pool_acc[0].deref_handle(result_val_ref_acc[0]);
         });
   });
   {
-    auto resultOnHostAcc =
-        m_resultBufferOnHost.get_access<access::mode::read>();
-    return resultOnHostAcc[0];
+    auto result_on_host_acc =
+        m_result_buffer_on_host.get_access<access::mode::read>();
+    return result_on_host_acc[0];
   }
 }
 } // namespace FunGPU

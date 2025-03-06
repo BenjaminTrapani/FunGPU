@@ -7,24 +7,26 @@ public:
   Array(const Index_t size, PortableMemPool *pool)
       : m_size(size), m_pool(pool) {
     if (m_size != 0) {
-      m_data = m_pool->AllocArray<T>(m_size);
+      m_data = m_pool->alloc_array<T>(m_size);
     }
   }
 
   ~Array() {
     if (m_size != 0) {
-      m_pool->DeallocArray(m_data);
+      m_pool->dealloc_array(m_data);
     }
   }
 
-  T &Get(const Index_t index) {
-    auto dataRef = m_pool->derefHandle(m_data);
-    return dataRef[index];
+  T &get(const Index_t index) {
+    auto data_ref = m_pool->deref_handle(m_data);
+    return data_ref[index];
   }
-  void Set(const Index_t index, const T &val) {
-    auto dataRef = m_pool->derefHandle(m_data);
-    dataRef[index] = val;
+
+  void set(const Index_t index, const T &val) {
+    auto data_ref = m_pool->deref_handle(m_data);
+    data_ref[index] = val;
   }
+
   Index_t size() const { return m_size; }
 
 private:

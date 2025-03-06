@@ -8,23 +8,30 @@
 namespace FunGPU {
 class SExpr {
 public:
-  enum class Type { Symbol, Number, ListOfSExpr };
+  enum class Type {
+    Number,
+    Symbol,
+    ListOfSExpr,
+  };
+
   SExpr();
-  SExpr(const std::shared_ptr<std::string> &literalValue);
-  void AddChild(const std::shared_ptr<SExpr> &val);
-  void DebugPrint(Index_t indentLevel);
-  Type GetType() const { return m_type; }
-  const std::shared_ptr<std::string> GetSymbol() const { return m_stringValue; }
-  const std::shared_ptr<std::vector<std::shared_ptr<SExpr>>>
-  GetChildren() const {
-    return m_sexprValue;
+  SExpr(const std::string &literalValue);
+
+  Type get_type() const { return m_type; }
+  Float_t get_float_val() const { return m_float_val; }
+  std::shared_ptr<const std::string> get_symbol() const { return m_symbol; }
+  std::shared_ptr<const std::vector<std::shared_ptr<const SExpr>>>
+  get_children() const {
+    return m_children;
   }
-  Float_t GetfloatVal() const { return m_numValue; }
+
+  void add_child(const std::shared_ptr<const SExpr> &child);
+  void debug_print(const std::size_t indent) const;
 
 private:
   Type m_type;
-  std::shared_ptr<std::string> m_stringValue;
-  Float_t m_numValue;
-  std::shared_ptr<std::vector<std::shared_ptr<SExpr>>> m_sexprValue;
+  Float_t m_float_val;
+  std::shared_ptr<const std::string> m_symbol;
+  std::shared_ptr<std::vector<std::shared_ptr<const SExpr>>> m_children;
 };
 } // namespace FunGPU

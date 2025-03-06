@@ -19,85 +19,85 @@ using namespace FunGPU;
 
 struct Fixture {
   Fixture() {
-    if (memPoolData == nullptr) {
-      memPoolData = std::make_shared<PortableMemPool>();
-      memPoolBuff = std::make_shared<cl::sycl::buffer<PortableMemPool>>(
-          memPoolData, cl::sycl::range<1>(1));
-      evaluator = std::make_shared<CPUEvaluator>(*memPoolBuff);
+    if (mem_pool_data == nullptr) {
+      mem_pool_data = std::make_shared<PortableMemPool>();
+      mem_pool_buffer = std::make_shared<cl::sycl::buffer<PortableMemPool>>(
+          mem_pool_data, cl::sycl::range<1>(1));
+      evaluator = std::make_shared<CPUEvaluator>(*mem_pool_buffer);
     }
     BOOST_TEST_MESSAGE("setup integration test fixture");
   }
 
   ~Fixture() { BOOST_TEST_MESSAGE("teardown integration test fixture"); }
 
-  static std::shared_ptr<PortableMemPool> memPoolData;
-  static std::shared_ptr<cl::sycl::buffer<PortableMemPool>> memPoolBuff;
+  static std::shared_ptr<PortableMemPool> mem_pool_data;
+  static std::shared_ptr<cl::sycl::buffer<PortableMemPool>> mem_pool_buffer;
   static std::shared_ptr<CPUEvaluator> evaluator;
 };
 
-std::shared_ptr<PortableMemPool> Fixture::memPoolData = nullptr;
-std::shared_ptr<cl::sycl::buffer<PortableMemPool>> Fixture::memPoolBuff =
+std::shared_ptr<PortableMemPool> Fixture::mem_pool_data = nullptr;
+std::shared_ptr<cl::sycl::buffer<PortableMemPool>> Fixture::mem_pool_buffer =
     nullptr;
 std::shared_ptr<CPUEvaluator> Fixture::evaluator = nullptr;
 
 namespace {
 
-Index_t GetAllocCount(cl::sycl::buffer<PortableMemPool> memPoolBuff) {
-  auto hostAcc = memPoolBuff.get_access<cl::sycl::access::mode::read_write>();
-  return hostAcc[0].GetTotalAllocationCount();
+Index_t get_alloc_count(cl::sycl::buffer<PortableMemPool> mem_pool_buffer) {
+  auto host_acc = mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
+  return host_acc[0].get_total_allocation_count();
 }
 
 CPUEvaluator::RuntimeBlock_t::RuntimeValue
-RunProgram(const std::string &path,
+run_program(const std::string &path,
            const std::shared_ptr<CPUEvaluator> &evaluator,
-           cl::sycl::buffer<PortableMemPool> memPoolBuff,
-           const float expectedVal) {
+           cl::sycl::buffer<PortableMemPool> mem_pool_buffer,
+           const float expected_val) {
   std::cout << std::endl;
   std::cout << "Running program " << path << std::endl;
 
-  const auto initialAllocCount = GetAllocCount(memPoolBuff);
+  const auto initial_alloc_count = get_alloc_count(mem_pool_buffer);
 
   Parser parser(path);
-  auto parsedResult = parser.ParseProgram();
+  auto parsed_result = parser.parse_program();
   std::cout << "Parsed program: ";
-  parsedResult->DebugPrint(0);
+  parsed_result->debug_print(0);
   std::cout << std::endl;
 
-  Compiler compiler(parsedResult, memPoolBuff);
-  auto compiledResult = compiler.Compile();
+  Compiler compiler(parsed_result, mem_pool_buffer);
+  auto compiled_result = compiler.compile();
 
   std::cout << "Compiled program: " << std::endl;
-  compiler.DebugPrintAST(compiledResult);
+  compiler.debug_print_ast(compiled_result);
   std::cout << std::endl;
 
-  const auto checkEvalProgram = [&](const auto program) {
-    Index_t maxBlocksForExec;
-    const auto allocCountPreEval = GetAllocCount(memPoolBuff);
-    const auto programResult =
-      evaluator->EvaluateProgram(compiledResult, maxBlocksForExec);
-    const auto allocCountPostEval = GetAllocCount(memPoolBuff);
-    BOOST_CHECK_EQUAL(allocCountPreEval, allocCountPostEval);
-    std::cout << "Max concurrent blocks during exec: " << maxBlocksForExec
+  const auto check_eval_program = [&](const auto program) {
+    Index_t max_blocks_for_exec;
+    const auto alloc_count_pre_eval = get_alloc_count(mem_pool_buffer);
+    const auto program_result =
+        evaluator->evaluate_program(compiled_result, max_blocks_for_exec);
+    const auto alloc_count_post_eval = get_alloc_count(mem_pool_buffer);
+    BOOST_CHECK_EQUAL(alloc_count_pre_eval, alloc_count_post_eval);
+    std::cout << "Max concurrent blocks during exec: " << max_blocks_for_exec
               << std::endl;
-    return programResult;
+    return program_result;
   };
 
-  const auto programResult = checkEvalProgram(compiledResult);
+  const auto program_result = check_eval_program(compiled_result);
 
-  BlockPrep blockPrep(64, 32, 32, memPoolBuff);
-  compiledResult = blockPrep.PrepareForBlockGeneration(compiledResult);
+  BlockPrep block_prep(64, 32, 32, mem_pool_buffer);
+  compiled_result = block_prep.prepare_for_block_generation(compiled_result);
   std::cout << "Program after prep for block generation: " << std::endl;
-  compiler.DebugPrintAST(compiledResult);
+  compiler.debug_print_ast(compiled_result);
   std::cout << std::endl;
-  const auto compiledProgramResult = checkEvalProgram(compiledResult);
+  const auto compiled_program_result = check_eval_program(compiled_result);
 
-  compiler.DeallocateAST(compiledResult);
+  compiler.deallocate_ast(compiled_result);
 
-  const auto finalAllocCount = GetAllocCount(memPoolBuff);
-  BOOST_CHECK_EQUAL(initialAllocCount, finalAllocCount);
-  BOOST_CHECK_EQUAL(expectedVal, programResult.m_data.floatVal);
-  BOOST_CHECK_EQUAL(expectedVal, compiledProgramResult.m_data.floatVal);
-  return programResult;
+  const auto final_alloc_count = get_alloc_count(mem_pool_buffer);
+  BOOST_CHECK_EQUAL(initial_alloc_count, final_alloc_count);
+  BOOST_CHECK_EQUAL(expected_val, program_result.m_data.float_val);
+  BOOST_CHECK_EQUAL(expected_val, compiled_program_result.m_data.float_val);
+  return compiled_program_result;
 }
 } // namespace
 
@@ -106,75 +106,75 @@ BOOST_FIXTURE_TEST_SUITE(IntegrationTests, Fixture)
 // TODO memory leak in this one, fix it before enabling
 /*
 BOOST_AUTO_TEST_CASE(NumericIntegration) {
-  RunProgram("../TestPrograms/NumericIntegration.fgpu", evaluator, *memPoolBuff, -1.18747);
+  run_program("../TestPrograms/NumericIntegration.fgpu", evaluator, *memPoolBuff, -1.18747);
 }
 */
 
 BOOST_AUTO_TEST_CASE(MultiLet) {
   const auto programResult =
-      RunProgram("../TestPrograms/MultiLet.fgpu", evaluator, *memPoolBuff, 1);
+      run_program("../TestPrograms/MultiLet.fgpu", evaluator, *mem_pool_buffer, 1);
 }
 
 BOOST_AUTO_TEST_CASE(NoBindings) {
   const auto programResult =
-      RunProgram("../TestPrograms/NoBindings.fgpu", evaluator, *memPoolBuff, 14);
+      run_program("../TestPrograms/NoBindings.fgpu", evaluator, *mem_pool_buffer, 14);
 }
 
 BOOST_AUTO_TEST_CASE(SimpleCall) {
   const auto programResult =
-      RunProgram("../TestPrograms/SimpleCall.fgpu", evaluator, *memPoolBuff, 42);
+      run_program("../TestPrograms/SimpleCall.fgpu", evaluator, *mem_pool_buffer, 42);
 }
 
 BOOST_AUTO_TEST_CASE(CallMultiBindings) {
-  const auto programResult = RunProgram(
-      "../TestPrograms/CallMultiBindings.fgpu", evaluator, *memPoolBuff, 13);
+  const auto programResult = run_program(
+      "../TestPrograms/CallMultiBindings.fgpu", evaluator, *mem_pool_buffer, 13);
 }
 
 BOOST_AUTO_TEST_CASE(ListExample) {
   const auto programResult =
-      RunProgram("../TestPrograms/ListExample.fgpu", evaluator, *memPoolBuff, 6);
+      run_program("../TestPrograms/ListExample.fgpu", evaluator, *mem_pool_buffer, 6);
 }
 
 BOOST_AUTO_TEST_CASE(MultiList) {
   const auto programResult =
-      RunProgram("../TestPrograms/MultiList.fgpu", evaluator, *memPoolBuff, 3);
+      run_program("../TestPrograms/MultiList.fgpu", evaluator, *mem_pool_buffer, 3);
 }
 
 BOOST_AUTO_TEST_CASE(MultiLetRec) {
   const auto programResult =
-      RunProgram("../TestPrograms/MultiLetRec.fgpu", evaluator, *memPoolBuff, 135);
+      run_program("../TestPrograms/MultiLetRec.fgpu", evaluator, *mem_pool_buffer, 135);
 }
 
 BOOST_AUTO_TEST_CASE(MergeSort) {
   const auto programResult =
-      RunProgram("../TestPrograms/MergeSort.fgpu", evaluator, *memPoolBuff, 123456);
+      run_program("../TestPrograms/MergeSort.fgpu", evaluator, *mem_pool_buffer, 123456);
 }
 
 BOOST_AUTO_TEST_CASE(GraphColoring) {
   const auto programResult =
-      RunProgram("../TestPrograms/GraphColoring.fgpu", evaluator, *memPoolBuff, 8);
+      run_program("../TestPrograms/GraphColoring.fgpu", evaluator, *mem_pool_buffer, 8);
 }
 
 BOOST_AUTO_TEST_CASE(ComplexBindings) {
-  const auto programResult = RunProgram("../TestPrograms/ComplexBindings.fgpu", evaluator, *memPoolBuff, 13);
+  run_program("../TestPrograms/ComplexBindings.fgpu", evaluator, *mem_pool_buffer, 13);
 }
 
 BOOST_AUTO_TEST_CASE(SimpleLambda) {
-  RunProgram("../TestPrograms/SimpleLambda.fgpu", evaluator, *memPoolBuff, 5);
+  run_program("../TestPrograms/SimpleLambda.fgpu", evaluator, *mem_pool_buffer, 5);
 }
 
 BOOST_AUTO_TEST_CASE(SimpleLetRec) {
-  RunProgram("../TestPrograms/SimpleLetRec.fgpu", evaluator, *memPoolBuff, 5);
+  run_program("../TestPrograms/SimpleLetRec.fgpu", evaluator, *mem_pool_buffer, 5);
 }
 
 BOOST_AUTO_TEST_CASE(MapExample) {
-  RunProgram("../TestPrograms/MapExample.fgpu", evaluator, *memPoolBuff, 1);
+  run_program("../TestPrograms/MapExample.fgpu", evaluator, *mem_pool_buffer, 1);
 }
 
 BOOST_AUTO_TEST_CASE(CleanUpFixture) {
   evaluator = nullptr;
-  memPoolBuff = nullptr;
-  memPoolData = nullptr;
+  mem_pool_buffer = nullptr;
+  mem_pool_data = nullptr;
 }
 
 BOOST_AUTO_TEST_SUITE_END()

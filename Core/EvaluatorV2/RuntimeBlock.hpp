@@ -117,8 +117,8 @@ void RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
     deallocate_runtime_values_array_for_thread(
         PortableMemPool::DeviceAccessor_t mem_pool, const Index_t thread_idx) {
   if (const auto &prealloced_values = pre_allocated_runtime_values[thread_idx];
-      prealloced_values.GetCount() != 0) {
-    mem_pool[0].DeallocArray(prealloced_values);
+      prealloced_values.get_count() != 0) {
+    mem_pool[0].dealloc_array(prealloced_values);
   }
 }
 
@@ -192,17 +192,17 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
 
     const auto allocate_arg_values = [&](const auto &call_indirect) {
       const auto arg_indices_handle = call_indirect.arg_indices.unpack();
-      if (arg_indices_handle.GetCount() == 0) {
+      if (arg_indices_handle.get_count() == 0) {
         ++local_pre_allocated_runtime_values_idx;
         return PortableMemPool::ArrayHandle<RuntimeValue>();
       }
-      const auto *arg_indices = mem_pool[0].derefHandle(arg_indices_handle);
+      const auto *arg_indices = mem_pool[0].deref_handle(arg_indices_handle);
       auto *pre_allocated_runtime_values_data =
-          mem_pool[0].derefHandle(pre_allocated_rvs);
+          mem_pool[0].deref_handle(pre_allocated_rvs);
       auto arg_values = pre_allocated_runtime_values_data
           [local_pre_allocated_runtime_values_idx++];
-      auto *arg_values_data = mem_pool[0].derefHandle(arg_values);
-      for (Index_t i = 0; i < arg_indices_handle.GetCount(); ++i) {
+      auto *arg_values_data = mem_pool[0].deref_handle(arg_values);
+      for (Index_t i = 0; i < arg_indices_handle.get_count(); ++i) {
         arg_values_data[i] = register_set[arg_indices[i]];
       }
       return arg_values;
@@ -212,12 +212,12 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
         [&](const OneOf<CallIndirect, BlockingCallIndirect, CreateLambda> auto
                 &op_with_rvs) {
           auto *pre_allocated_runtime_values_data =
-              mem_pool[0].derefHandle(pre_allocated_rvs);
+              mem_pool[0].deref_handle(pre_allocated_rvs);
           if (const auto &pre_allocated_runtime_values =
                   pre_allocated_runtime_values_data
                       [local_pre_allocated_runtime_values_idx];
-              pre_allocated_runtime_values.GetCount() != 0) {
-            mem_pool[0].DeallocArray(pre_allocated_runtime_values);
+              pre_allocated_runtime_values.get_count() != 0) {
+            mem_pool[0].dealloc_array(pre_allocated_runtime_values);
           }
           return true;
         },
@@ -266,17 +266,17 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
           const auto captured_indices_handle =
               create_lambda.captured_indices.unpack();
           auto &target_register = register_set[create_lambda.target_register];
-          auto *rv_data = mem_pool[0].derefHandle(pre_allocated_rvs);
+          auto *rv_data = mem_pool[0].deref_handle(pre_allocated_rvs);
           const auto captured_values =
               rv_data[local_pre_allocated_runtime_values_idx++];
           target_register.data.function_val =
               FunctionValue(create_lambda.block_idx, captured_values);
-          if (captured_indices_handle.GetCount() != 0) {
+          if (captured_indices_handle.get_count() != 0) {
             auto *captured_values_data =
-                mem_pool[0].derefHandle(captured_values);
+                mem_pool[0].deref_handle(captured_values);
             auto *captured_indices =
-                mem_pool[0].derefHandle(captured_indices_handle);
-            for (Index_t i = 0; i < captured_indices_handle.GetCount(); ++i) {
+                mem_pool[0].deref_handle(captured_indices_handle);
+            for (Index_t i = 0; i < captured_indices_handle.get_count(); ++i) {
               captured_values_data[i] = register_set[captured_indices[i]];
             }
           }
@@ -323,7 +323,7 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::evaluate(
           status = Status::COMPLETE;
           continue;
         }
-        auto &target_block = *mem_pool[0].derefHandle(target.block);
+        auto &target_block = *mem_pool[0].deref_handle(target.block);
         const auto last_write_loc_for_fill = last_write_location(
             block_idx, thread, all_instructions, num_instructions);
         target_block.fill_dependency(target.thread, target.register_idx,
@@ -415,24 +415,24 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
         const Program program,
         const Index_t lambda_idx) -> PreAllocatedRuntimeValuesPerThread {
   const auto &instructions_data =
-      mem_pool_acc[0].derefHandle(program)[lambda_idx];
+      mem_pool_acc[0].deref_handle(program)[lambda_idx];
 
   PreAllocatedRuntimeValuesPerThread pre_allocated_rvs;
 
   for (Index_t thread_idx = 0; thread_idx < num_threads; ++thread_idx) {
     pre_allocated_rvs[thread_idx] =
         mem_pool_acc[0]
-            .template AllocArray<PortableMemPool::ArrayHandle<RuntimeValue>>(
+            .template alloc_array<PortableMemPool::ArrayHandle<RuntimeValue>>(
                 instructions_data.instruction_properties
-                    .num_runtime_values_per_op.GetCount());
-    const auto *num_rvs_per_op = mem_pool_acc[0].derefHandle(
+                    .num_runtime_values_per_op.get_count());
+    const auto *num_rvs_per_op = mem_pool_acc[0].deref_handle(
         instructions_data.instruction_properties.num_runtime_values_per_op);
     auto *pre_allocated_rv_data =
-        mem_pool_acc[0].derefHandle(pre_allocated_rvs[thread_idx]);
-    for (Index_t op_idx = 0; op_idx < pre_allocated_rvs[thread_idx].GetCount();
+        mem_pool_acc[0].deref_handle(pre_allocated_rvs[thread_idx]);
+    for (Index_t op_idx = 0; op_idx < pre_allocated_rvs[thread_idx].get_count();
          ++op_idx) {
       pre_allocated_rv_data[op_idx] =
-          mem_pool_acc[0].template AllocArray<RuntimeValue>(
+          mem_pool_acc[0].template alloc_array<RuntimeValue>(
               num_rvs_per_op[op_idx]);
     }
   }

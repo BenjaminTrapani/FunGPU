@@ -23,8 +23,8 @@ Instruction::print(PortableMemPool::HostAccessor_t mem_pool_acc) const {
     result << "CallIndirect: reg " << call_indirect.target_register
            << " = call reg " << call_indirect.lambda_idx << ", arg registers ";
     const auto *arg_regs =
-        mem_pool_acc[0].derefHandle(call_indirect.arg_indices.unpack());
-    for (Index_t i = 0; i < call_indirect.arg_indices.unpack().GetCount();
+        mem_pool_acc[0].deref_handle(call_indirect.arg_indices.unpack());
+    for (Index_t i = 0; i < call_indirect.arg_indices.unpack().get_count();
          ++i) {
       result << arg_regs[i] << ", ";
     }
@@ -35,14 +35,14 @@ Instruction::print(PortableMemPool::HostAccessor_t mem_pool_acc) const {
             [&](const CreateLambda &create_lambda) {
               result << "CreateLambda: reg " << create_lambda.target_register
                      << " = " << create_lambda.block_idx;
-              if (create_lambda.captured_indices.unpack().GetCount() == 0) {
+              if (create_lambda.captured_indices.unpack().get_count() == 0) {
                 return;
               }
               result << ", capture registers ";
-              const auto *captured_indices = mem_pool_acc[0].derefHandle(
+              const auto *captured_indices = mem_pool_acc[0].deref_handle(
                   create_lambda.captured_indices.unpack());
               for (Index_t i = 0;
-                   i < create_lambda.captured_indices.unpack().GetCount();
+                   i < create_lambda.captured_indices.unpack().get_count();
                    ++i) {
                 result << captured_indices[i] << ", ";
               }
@@ -93,13 +93,13 @@ template <typename T>
 bool array_handles_equal(const PortableMemPool::ArrayHandle<T> lhs,
                          const PortableMemPool::ArrayHandle<T> rhs,
                          PortableMemPool::HostAccessor_t &mem_pool_acc) {
-  if (lhs.GetCount() != rhs.GetCount()) {
+  if (lhs.get_count() != rhs.get_count()) {
     return false;
   }
 
-  const auto *lhs_data = mem_pool_acc[0].derefHandle(lhs);
-  const auto *rhs_data = mem_pool_acc[0].derefHandle(rhs);
-  return std::equal(lhs_data, lhs_data + lhs.GetCount(), rhs_data);
+  const auto *lhs_data = mem_pool_acc[0].deref_handle(lhs);
+  const auto *rhs_data = mem_pool_acc[0].deref_handle(rhs);
+  return std::equal(lhs_data, lhs_data + lhs.get_count(), rhs_data);
 }
 
 bool call_indirect_common_equals(PortableMemPool::HostAccessor_t &mem_pool_acc,
@@ -184,14 +184,14 @@ void Instruction::deallocate(PortableMemPool::HostAccessor_t mem_pool_acc) {
   visit(*this,
         Visitor{
             [&](const CreateLambda &create_lambda) {
-              mem_pool_acc[0].DeallocArray(
+              mem_pool_acc[0].dealloc_array(
                   create_lambda.captured_indices.unpack());
             },
             [&](const CallIndirect &call_indirect) {
-              mem_pool_acc[0].DeallocArray(call_indirect.arg_indices.unpack());
+              mem_pool_acc[0].dealloc_array(call_indirect.arg_indices.unpack());
             },
             [&](const BlockingCallIndirect &blocking_call_indirect) {
-              mem_pool_acc[0].DeallocArray(
+              mem_pool_acc[0].dealloc_array(
                   blocking_call_indirect.arg_indices.unpack());
             },
             [](const auto &) {},
