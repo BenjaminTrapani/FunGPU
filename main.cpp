@@ -1,8 +1,8 @@
-#include "Core/BlockPrep.hpp"
-#include "Core/CPUEvaluator.hpp"
-#include "Core/Compiler.hpp"
-#include "Core/Parser.hpp"
-#include "Core/PortableMemPool.hpp"
+#include "Core/block_prep.hpp"
+#include "Core/compiler.hpp"
+#include "Core/cpu_evaluator.hpp"
+#include "Core/parser.hpp"
+#include "Core/portable_mem_pool.hpp"
 #include <iostream>
 
 using namespace FunGPU;

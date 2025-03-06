@@ -1,4 +1,4 @@
-add_executable(IntegrationTestsExe IntegrationTests.cpp)
-add_test(NAME IntegrationTests COMMAND IntegrationTestsExe)
-target_compile_definitions(IntegrationTestsExe PRIVATE "BOOST_TEST_DYN_LINK=1")
-target_link_libraries(IntegrationTestsExe FunGPUEvaluator ${Boost_UNIT_TEST_FRAMEWORK_LIBRARY})
+add_executable(integration_tests_exe integration_tests.cpp)
+add_test(NAME integration_tests COMMAND integration_tests_exe)
+target_compile_definitions(integration_tests_exe PRIVATE "BOOST_TEST_DYN_LINK=1")
+target_link_libraries(integration_tests_exe fungpu_evaluator ${Boost_UNIT_TEST_FRAMEWORK_LIBRARY})
