@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Core/EvaluatorV2/Instruction.h"
+#include "Core/EvaluatorV2/Instruction.hpp"
 #include "Core/PortableMemPool.hpp"
 #include "Core/Types.hpp"
 #include <string>

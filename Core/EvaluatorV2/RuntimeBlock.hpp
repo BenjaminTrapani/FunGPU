@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Core/Concepts.h"
-#include "Core/EvaluatorV2/Instruction.h"
+#include "Core/Concepts.hpp"
+#include "Core/EvaluatorV2/Instruction.hpp"
 #include "Core/EvaluatorV2/Program.hpp"
-#include "Core/EvaluatorV2/RuntimeValue.h"
+#include "Core/EvaluatorV2/RuntimeValue.hpp"
 #include "Core/PortableMemPool.hpp"
 #include "Core/Types.hpp"
 #include "Core/Visitor.hpp"

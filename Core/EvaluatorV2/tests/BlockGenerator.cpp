@@ -1,6 +1,6 @@
 #define BOOST_TEST_MODULE BlockGeneratorTestsModule
 
-#include "Core/EvaluatorV2/BlockGenerator.h"
+#include "Core/EvaluatorV2/BlockGenerator.hpp"
 #include "Core/BlockPrep.hpp"
 #include "Core/EvaluatorV2/CompileProgram.hpp"
 #include "Core/Visitor.hpp"
