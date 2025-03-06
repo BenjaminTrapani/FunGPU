@@ -18,23 +18,24 @@ struct Fixture {
   Index_t get_alloc_count() {
     auto hostAcc =
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
-    return hostAcc[0].GetTotalAllocationCount();
+    return hostAcc[0].get_total_allocation_count();
   }
 
   bool program_contains_lambdas_with_captures(
       const PortableMemPool::ArrayHandle<Lambda> &program) {
     auto mem_pool_acc =
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
-    const auto *lambdas = mem_pool_acc[0].derefHandle(program);
-    for (Index_t i = 0; i < program.GetCount(); ++i) {
+    const auto *lambdas = mem_pool_acc[0].deref_handle(program);
+    for (Index_t i = 0; i < program.get_count(); ++i) {
       const auto *instructions =
-          mem_pool_acc[0].derefHandle(lambdas[i].instructions);
-      for (Index_t j = 0; j < lambdas[i].instructions.GetCount(); ++j) {
+          mem_pool_acc[0].deref_handle(lambdas[i].instructions);
+      for (Index_t j = 0; j < lambdas[i].instructions.get_count(); ++j) {
         const auto contains_captures = visit(
             instructions[j],
             Visitor{
                 [&](const CreateLambda &create_lambda) {
-                  return create_lambda.captured_indices.unpack().GetCount() > 0;
+                  return create_lambda.captured_indices.unpack().get_count() >
+                         0;
                 },
                 [](const auto &) { return false; }},
             [](const auto &) -> bool {

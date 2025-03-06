@@ -33,7 +33,9 @@ public:
       *this = other;
     }
 
-    Index_t GetDistFromMemPoolBase() const { return m_distFromMemPoolBase; }
+    Index_t get_dist_from_mem_pool_base() const {
+      return m_distFromMemPoolBase;
+    }
 
     bool operator==(const Handle &other) const {
       return m_distFromMemPoolBase == other.m_distFromMemPoolBase;
@@ -47,7 +49,7 @@ public:
       static_assert(std::is_base_of<T, OtherT>::value ||
                         std::is_base_of<OtherT, T>::value,
                     "Cannot assign handle to handle of unrelated type");
-      m_distFromMemPoolBase = other.GetDistFromMemPoolBase();
+      m_distFromMemPoolBase = other.get_dist_from_mem_pool_base();
     }
 
   private:
@@ -58,10 +60,10 @@ public:
   public:
     TrivialHandle() = default;
     TrivialHandle(const Handle<T> other)
-        : m_distFromMemPoolBase(other.GetDistFromMemPoolBase()) {}
+        : m_distFromMemPoolBase(other.get_dist_from_mem_pool_base()) {}
 
     TrivialHandle &operator=(const Handle<T> other) {
-      m_distFromMemPoolBase = other.GetDistFromMemPoolBase();
+      m_distFromMemPoolBase = other.get_dist_from_mem_pool_base();
       return *this;
     }
 
@@ -79,12 +81,13 @@ public:
     ArrayHandle(const Index_t distFromMemPoolBase, const Index_t count)
         : m_handle(distFromMemPoolBase), m_count(count) {}
 
-    Index_t GetCount() const { return m_count; }
+    Index_t get_count() const { return m_count; }
 
     // Do not free the handle returned from this function, that will break the
     // allocator.
-    Handle<T> ElementHandle(const Index_t elemIdx) const {
-      return Handle<T>(m_handle.GetDistFromMemPoolBase() + elemIdx * sizeof(T));
+    Handle<T> element_handle(const Index_t elemIdx) const {
+      return Handle<T>(m_handle.get_dist_from_mem_pool_base() +
+                       elemIdx * sizeof(T));
     }
 
     bool operator==(const ArrayHandle<T> &other) const {
@@ -104,16 +107,16 @@ public:
   public:
     TrivialArrayHandle() = default;
     TrivialArrayHandle(const ArrayHandle<T> &handle)
-        : m_handle(handle.ElementHandle(0)), m_count(handle.GetCount()) {}
+        : m_handle(handle.element_handle(0)), m_count(handle.get_count()) {}
 
     TrivialArrayHandle &operator=(const ArrayHandle<T> &other) {
-      m_handle = other.m_handle;
-      m_count = other.m_count;
+      m_handle = other.element_handle(0);
+      m_count = other.get_count();
       return *this;
     }
 
     ArrayHandle<T> unpack() const {
-      return ArrayHandle<T>(m_handle.unpack().GetDistFromMemPoolBase(),
+      return ArrayHandle<T>(m_handle.unpack().get_dist_from_mem_pool_base(),
                             m_count);
     }
 
@@ -129,14 +132,14 @@ public:
     // Handle<T> m_handle;
   };
 
-  template <class T, class... Args_t> Handle<T> Alloc(const Args_t &...args) {
+  template <class T, class... Args_t> Handle<T> alloc(const Args_t &...args) {
     const auto handle =
         AllocImpl<T>(m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
     if (handle == Handle<T>()) {
       return handle;
     }
 
-    auto *derefdAllocd = derefHandle(handle);
+    auto *derefdAllocd = deref_handle(handle);
     // invoke T's constructor via placement new on allocated bytes
     auto allocdT = new (derefdAllocd) T(args...);
 
@@ -149,41 +152,41 @@ public:
   }
 
   template <class T>
-  ArrayHandle<T> AllocArray(const Index_t arraySize,
-                            const T &initialValue = T()) {
+  ArrayHandle<T> alloc_array(const Index_t arraySize,
+                             const T &initialValue = T()) {
     if (arraySize == 0) {
       return ArrayHandle<T>();
     }
-    return AllocArrayImpl<T>(arraySize, initialValue, m_smallBin, m_mediumBin,
-                             m_largeBin, m_extraLargeBin);
+    return alloc_arrayImpl<T>(arraySize, initialValue, m_smallBin, m_mediumBin,
+                              m_largeBin, m_extraLargeBin);
   }
 
-  template <class T> void Dealloc(const Handle<T> &handle) {
+  template <class T> void dealloc(const Handle<T> &handle) {
     DeallocImpl(handle, m_smallBin, m_mediumBin, m_largeBin, m_extraLargeBin);
   }
 
-  template <class T> void DeallocArray(const ArrayHandle<T> &arrayHandle) {
+  template <class T> void dealloc_array(const ArrayHandle<T> &arrayHandle) {
     DeallocArrayImpl(arrayHandle, m_smallBin, m_mediumBin, m_largeBin,
                      m_extraLargeBin);
   }
 
-  template <class T> T *derefHandle(const Handle<T> &handle) {
+  template <class T> T *deref_handle(const Handle<T> &handle) {
     return reinterpret_cast<T *>(reinterpret_cast<std::byte *>(this) +
-                                 handle.GetDistFromMemPoolBase());
+                                 handle.get_dist_from_mem_pool_base());
   }
 
-  template <class T> T *derefHandle(const ArrayHandle<T> &handle) {
-    return derefHandle(handle.m_handle);
+  template <class T> T *deref_handle(const ArrayHandle<T> &handle) {
+    return deref_handle(handle.m_handle);
   }
 
-  Index_t GetTotalAllocationCount() {
-    return GetTotalAllocationCountImpl(m_smallBin, m_mediumBin, m_largeBin,
-                                       m_extraLargeBin);
+  Index_t get_total_allocation_count() {
+    return get_total_allocation_count_impl(m_smallBin, m_mediumBin, m_largeBin,
+                                           m_extraLargeBin);
   }
 
-  template <class T> Index_t GetNumFree() {
-    return GetNumFreeImpl<T>(m_smallBin, m_mediumBin, m_largeBin,
-                             m_extraLargeBin);
+  template <class T> Index_t get_num_free() {
+    return get_num_free_impl<T>(m_smallBin, m_mediumBin, m_largeBin,
+                                m_extraLargeBin);
   }
 
 private:
@@ -204,7 +207,7 @@ private:
       }
     }
 
-    std::byte *AllocFromArena() {
+    std::byte *alloc_from_arena() {
       cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
                            cl::sycl::memory_scope::device,
                            cl::sycl::access::address_space::global_space>
@@ -222,12 +225,12 @@ private:
       return &m_storage[m_allocBeginIndices[allocdIndex]];
     }
 
-    bool OwnsData(const std::byte *data) const {
+    bool owns_data(const std::byte *data) const {
       return data >= &m_storage[0] &&
              data < &m_storage[TotalBytes_i - AllocSize_i];
     }
 
-    void FreeFromArena(std::byte *data) {
+    void free_from_arena(std::byte *data) {
       cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
                            cl::sycl::memory_scope::device,
                            cl::sycl::access::address_space::global_space>
@@ -299,7 +302,7 @@ private:
 
     template <class DispatchedArena>
     Handle<T> operator()(DispatchedArena &arena) {
-      const auto *data = arena.AllocFromArena();
+      const auto *data = arena.alloc_from_arena();
       if (data == nullptr) {
         return Handle<T>();
       }
@@ -315,8 +318,8 @@ private:
     return WithArena<T>(AllocPred<T>(), AllocHandler<T>(*this), arenas...);
   }
 
-  template <class T> struct AllocArrayPred {
-    AllocArrayPred(const Index_t arraySize) : m_arraySize(arraySize) {}
+  template <class T> struct alloc_arrayPred {
+    alloc_arrayPred(const Index_t arraySize) : m_arraySize(arraySize) {}
 
     template <Index_t allocSize, Index_t totalSize>
     bool operator()(const Arena<allocSize, totalSize> &arena) {
@@ -326,9 +329,9 @@ private:
     const Index_t m_arraySize;
   };
 
-  template <class T> struct AllocArrayHandler {
-    AllocArrayHandler(const Index_t arraySize, const T &initialValue,
-                      PortableMemPool &memPool)
+  template <class T> struct alloc_arrayHandler {
+    alloc_arrayHandler(const Index_t arraySize, const T &initialValue,
+                       PortableMemPool &memPool)
         : m_arraySize(arraySize), m_initialValue(initialValue),
           m_memPool(memPool) {}
 
@@ -336,7 +339,7 @@ private:
 
     template <class DispatchedArena>
     ArrayHandle<T> operator()(DispatchedArena &arena) {
-      auto *data = arena.AllocFromArena();
+      auto *data = arena.alloc_from_arena();
       if (data == nullptr) {
         return ArrayHandle<T>();
       }
@@ -356,10 +359,10 @@ private:
   };
 
   template <class T, Index_t... allocSizes, Index_t... totalSizes>
-  ArrayHandle<T> AllocArrayImpl(const Index_t arraySize, const T &initialValue,
-                                Arena<allocSizes, totalSizes> &...arenas) {
-    return WithArena<T>(AllocArrayPred<T>(arraySize),
-                        AllocArrayHandler<T>(arraySize, initialValue, *this),
+  ArrayHandle<T> alloc_arrayImpl(const Index_t arraySize, const T &initialValue,
+                                 Arena<allocSizes, totalSizes> &...arenas) {
+    return WithArena<T>(alloc_arrayPred<T>(arraySize),
+                        alloc_arrayHandler<T>(arraySize, initialValue, *this),
                         arenas...);
   }
 
@@ -370,8 +373,8 @@ private:
 
     template <Index_t allocSize, Index_t totalSize>
     bool operator()(const Arena<allocSize, totalSize> &arena) {
-      return arena.OwnsData(reinterpret_cast<const std::byte *>(&m_memPool) +
-                            m_distFromMemPoolBase);
+      return arena.owns_data(reinterpret_cast<const std::byte *>(&m_memPool) +
+                             m_distFromMemPoolBase);
     }
 
     const Index_t m_distFromMemPoolBase;
@@ -384,10 +387,10 @@ private:
     void operator()() {}
 
     template <class DispatchedArena> void operator()(DispatchedArena &arena) {
-      auto derefdForHandle = m_memPool.derefHandle(m_handle);
+      auto derefdForHandle = m_memPool.deref_handle(m_handle);
       // Explicitly call destructor
       derefdForHandle->~T();
-      arena.FreeFromArena(reinterpret_cast<std::byte *>(derefdForHandle));
+      arena.free_from_arena(reinterpret_cast<std::byte *>(derefdForHandle));
     }
 
     Handle<T> m_handle;
@@ -397,8 +400,9 @@ private:
   template <class T, Index_t... allocSizes, Index_t... totalSizes>
   void DeallocImpl(const Handle<T> &handle,
                    Arena<allocSizes, totalSizes> &...arenas) {
-    WithArena<T>(MatchArenaOffset<T>(*this, handle.GetDistFromMemPoolBase()),
-                 DeallocHandler<T>(handle, *this), arenas...);
+    WithArena<T>(
+        MatchArenaOffset<T>(*this, handle.get_dist_from_mem_pool_base()),
+        DeallocHandler<T>(handle, *this), arenas...);
   }
 
   template <class T> struct DeallocArrayHandler {
@@ -410,12 +414,12 @@ private:
 
     template <class DispatchedArena> void operator()(DispatchedArena &arena) {
       const auto &handle = m_arrayHandle.m_handle;
-      auto derefdHandle = m_memPool.derefHandle(handle);
-      for (Index_t i = 0; i < m_arrayHandle.GetCount(); ++i) {
+      auto derefdHandle = m_memPool.deref_handle(handle);
+      for (Index_t i = 0; i < m_arrayHandle.get_count(); ++i) {
         (derefdHandle[i]).~T();
       }
 
-      arena.FreeFromArena(reinterpret_cast<std::byte *>(derefdHandle));
+      arena.free_from_arena(reinterpret_cast<std::byte *>(derefdHandle));
     }
 
     const ArrayHandle<T> &m_arrayHandle;
@@ -426,15 +430,15 @@ private:
   void DeallocArrayImpl(const ArrayHandle<T> &arrayHandle,
                         Arena<allocSizes, totalSizes> &...arenas) {
     WithArena<T>(MatchArenaOffset<T>(
-                     *this, arrayHandle.m_handle.GetDistFromMemPoolBase()),
+                     *this, arrayHandle.m_handle.get_dist_from_mem_pool_base()),
                  DeallocArrayHandler<T>(arrayHandle, *this), arenas...);
   }
 
   template <Index_t allocSize, Index_t totalSize, Index_t... allocSizes,
             Index_t... totalSizes>
   Index_t
-  GetTotalAllocationCountImpl(Arena<allocSize, totalSize> &arena,
-                              Arena<allocSizes, totalSizes> &...arenas) {
+  get_total_allocation_count_impl(Arena<allocSize, totalSize> &arena,
+                                  Arena<allocSizes, totalSizes> &...arenas) {
     Index_t totalAllocCount = 0;
 
     cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
@@ -442,13 +446,13 @@ private:
                          cl::sycl::access::address_space::global_space>
         totalAllocations(arena.m_totalAllocations);
     totalAllocCount += totalAllocations.load();
-    totalAllocCount += GetTotalAllocationCountImpl(arenas...);
+    totalAllocCount += get_total_allocation_count_impl(arenas...);
 
     return totalAllocCount;
   }
 
   template <Index_t allocSize, Index_t totalSize>
-  Index_t GetTotalAllocationCountImpl(Arena<allocSize, totalSize> &arena) {
+  Index_t get_total_allocation_count_impl(Arena<allocSize, totalSize> &arena) {
     cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
                          cl::sycl::memory_scope::device,
                          cl::sycl::access::address_space::global_space>
@@ -458,8 +462,8 @@ private:
 
   template <class T, Index_t allocSize, Index_t totalSize,
             Index_t... allocSizes, Index_t... totalSizes>
-  Index_t GetNumFreeImpl(Arena<allocSize, totalSize> &arena,
-                         Arena<allocSizes, totalSizes> &...arenas) {
+  Index_t get_num_free_impl(Arena<allocSize, totalSize> &arena,
+                            Arena<allocSizes, totalSizes> &...arenas) {
     if (allocSize >= sizeof(T)) {
       cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
                            cl::sycl::memory_scope::device,
@@ -467,12 +471,12 @@ private:
           totalAllocations(arena.m_totalAllocations);
       return (totalSize / allocSize) - totalAllocations.load();
     } else {
-      return GetNumFreeImpl<T>(arenas...);
+      return get_num_free_impl<T>(arenas...);
     }
   }
 
   template <class T, Index_t allocSize, Index_t totalSize>
-  Index_t GetNumFreeImpl(Arena<allocSize, totalSize> &arena) {
+  Index_t get_num_free_impl(Arena<allocSize, totalSize> &arena) {
     if (allocSize >= sizeof(T)) {
       cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
                            cl::sycl::memory_scope::device,

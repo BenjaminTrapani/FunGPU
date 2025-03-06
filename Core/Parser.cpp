@@ -3,148 +3,152 @@
 #include <stack>
 
 namespace FunGPU {
-void Parser::ParenthesizedExpr::DebugPrint() {
+void Parser::ParenthesizedExpr::debug_print() {
   std::cout << "(";
-  for (auto subExpr : *m_childExprs) {
-    subExpr->DebugPrint();
+  for (const auto &child_expr : *m_child_exprs) {
+    child_expr->debug_print();
+    std::cout << " ";
   }
   std::cout << ")";
 }
 
-void Parser::StringExpr::DebugPrint() { std::cout << " " << m_value << " "; }
+void Parser::StringExpr::debug_print() { std::cout << m_value; }
 
-Parser::Parser(const std::string &fileName)
-    : m_fileToRead(fileName, std::ios::binary) {}
-
-std::shared_ptr<SExpr> Parser::ParseProgram() {
-  auto stringExprs = GetStringExprs();
-  return GetSExprFromStringExprs(stringExprs);
+Parser::Parser(const std::string &file_name) : m_file_to_read(file_name) {
+  if (!m_file_to_read.is_open()) {
+    throw std::invalid_argument("Failed to open file " + file_name);
+  }
 }
 
-std::shared_ptr<Parser::ParsedExpr> Parser::GetStringExprs() {
-  auto rootOfResult = std::make_shared<ParenthesizedExpr>();
-  std::stack<std::shared_ptr<ParenthesizedExpr>> exprStack;
-  exprStack.push(rootOfResult);
+std::shared_ptr<Parser::ParsedExpr> Parser::get_string_exprs() {
+  auto root_of_result = std::make_shared<ParenthesizedExpr>();
+  std::stack<std::shared_ptr<ParenthesizedExpr>> expr_stack;
+  expr_stack.push(root_of_result);
 
-  bool startNewString = true;
-  while (m_fileToRead.good()) {
-    const char curChar = m_fileToRead.get();
-    auto &workingExpr = exprStack.top();
-    switch (curChar) {
+  bool start_new_string = true;
+  while (m_file_to_read.good()) {
+    const char cur_char = m_file_to_read.get();
+    auto &working_expr = expr_stack.top();
+    switch (cur_char) {
     case '(': {
-      auto subExpr = std::make_shared<ParenthesizedExpr>();
-      workingExpr->m_childExprs->push_back(subExpr);
-      exprStack.push(subExpr);
-      startNewString = true;
+      auto sub_expr = std::make_shared<ParenthesizedExpr>();
+      working_expr->m_child_exprs->push_back(sub_expr);
+      expr_stack.push(sub_expr);
+      start_new_string = true;
       break;
     }
     case ')':
-      exprStack.pop();
+      expr_stack.pop();
       break;
     case '\n':
     case '\t':
     case ' ':
     case '\r': {
-      startNewString = true;
+      start_new_string = true;
       break;
     }
     case -1:
       break;
     default:
-      if (startNewString) {
-        auto newString = std::make_shared<StringExpr>();
-        workingExpr->m_childExprs->push_back(newString);
-        startNewString = false;
+      if (start_new_string) {
+        auto new_string = std::make_shared<StringExpr>();
+        working_expr->m_child_exprs->push_back(new_string);
+        start_new_string = false;
       }
-      auto mostRecentChildExpr =
-          workingExpr->m_childExprs->at(workingExpr->m_childExprs->size() - 1);
-      auto curString =
-          std::dynamic_pointer_cast<StringExpr>(mostRecentChildExpr);
-      if (curString == nullptr) {
+      auto most_recent_child_expr = working_expr->m_child_exprs->at(
+          working_expr->m_child_exprs->size() - 1);
+      auto cur_string =
+          std::dynamic_pointer_cast<StringExpr>(most_recent_child_expr);
+      if (cur_string == nullptr) {
         throw std::invalid_argument("Expected to be appending to an "
                                     "in-progress string expr, but that was not "
                                     "the case");
       }
-      curString->m_value += curChar;
+      cur_string->m_value += cur_char;
       break;
     }
   }
 
-  if (rootOfResult->m_childExprs->size() != 1) {
+  if (root_of_result->m_child_exprs->size() != 1) {
     throw std::invalid_argument(
         "Expected exactly one top-level expression for input program");
   }
 
-  return rootOfResult->m_childExprs->at(0);
+  return root_of_result->m_child_exprs->at(0);
 }
 
-std::shared_ptr<SExpr> Parser::GetSExprFromStringExprs(
-    const std::shared_ptr<ParsedExpr> &parenthesizedExprs) {
+std::shared_ptr<SExpr> Parser::get_sexpr_from_string_exprs(
+    const std::shared_ptr<ParsedExpr> &parenthesized_exprs) {
   struct ParsedToSExprState {
-    std::shared_ptr<SExpr> m_workingExpr;
-    std::shared_ptr<ParsedExpr> m_parsedForWorking;
+    std::shared_ptr<SExpr> working_expr;
+    std::shared_ptr<ParsedExpr> parsed_for_working;
   };
 
-  std::stack<ParsedToSExprState> workingStack;
-  ParsedToSExprState initialState;
-  initialState.m_parsedForWorking = parenthesizedExprs;
-  workingStack.push(initialState);
+  std::stack<ParsedToSExprState> working_stack;
+  ParsedToSExprState initial_state;
+  initial_state.parsed_for_working = parenthesized_exprs;
+  working_stack.push(initial_state);
 
-  std::shared_ptr<SExpr> resultRoot;
-  while (!workingStack.empty()) {
-    auto &curState = workingStack.top();
-    auto strExprHere =
-        std::dynamic_pointer_cast<StringExpr>(curState.m_parsedForWorking);
-    if (strExprHere) {
-      auto newSexpr = std::make_shared<SExpr>(
-          std::make_shared<std::string>(strExprHere->m_value));
-      if (curState.m_workingExpr) {
-        curState.m_workingExpr->AddChild(newSexpr);
+  std::shared_ptr<SExpr> result_root;
+  while (!working_stack.empty()) {
+    auto &cur_state = working_stack.top();
+    auto str_expr_here =
+        std::dynamic_pointer_cast<StringExpr>(cur_state.parsed_for_working);
+    if (str_expr_here) {
+      auto new_sexpr = std::make_shared<SExpr>(str_expr_here->m_value);
+      if (cur_state.working_expr) {
+        cur_state.working_expr->add_child(new_sexpr);
       }
 
-      if (resultRoot == nullptr) {
-        resultRoot = newSexpr;
+      if (result_root == nullptr) {
+        result_root = new_sexpr;
       }
-      workingStack.pop();
+      working_stack.pop();
     } else {
-      auto parenExpr = std::dynamic_pointer_cast<ParenthesizedExpr>(
-          curState.m_parsedForWorking);
-      std::shared_ptr<SExpr> sexprForThisNode;
-      if (parenExpr->m_currentChildIndex == 0) {
-        ParsedToSExprState stateForThisNode;
-        stateForThisNode.m_parsedForWorking = curState.m_parsedForWorking;
-        stateForThisNode.m_workingExpr = std::make_shared<SExpr>();
-        if (curState.m_workingExpr) {
-          curState.m_workingExpr->AddChild(stateForThisNode.m_workingExpr);
+      auto paren_expr = std::dynamic_pointer_cast<ParenthesizedExpr>(
+          cur_state.parsed_for_working);
+      std::shared_ptr<SExpr> sexpr_for_this_node;
+      if (paren_expr->m_current_child_index == 0) {
+        ParsedToSExprState state_for_this_node;
+        state_for_this_node.parsed_for_working = cur_state.parsed_for_working;
+        state_for_this_node.working_expr = std::make_shared<SExpr>();
+        if (cur_state.working_expr) {
+          cur_state.working_expr->add_child(state_for_this_node.working_expr);
         }
-        if (!resultRoot) {
-          resultRoot = stateForThisNode.m_workingExpr;
+        if (!result_root) {
+          result_root = state_for_this_node.working_expr;
         }
-        sexprForThisNode = stateForThisNode.m_workingExpr;
-        workingStack.push(stateForThisNode);
+        sexpr_for_this_node = state_for_this_node.working_expr;
+        working_stack.push(state_for_this_node);
       } else {
-        sexprForThisNode = curState.m_workingExpr;
+        sexpr_for_this_node = cur_state.working_expr;
       }
 
-      if (parenExpr->m_currentChildIndex >= parenExpr->m_childExprs->size()) {
-        if (parenExpr->m_currentChildIndex == 0) {
-          workingStack.pop();
+      if (paren_expr->m_current_child_index >=
+          paren_expr->m_child_exprs->size()) {
+        if (paren_expr->m_current_child_index == 0) {
+          working_stack.pop();
         }
-        workingStack.pop();
+        working_stack.pop();
       } else {
-        auto curChildParsedExpr =
-            parenExpr->m_childExprs->at(parenExpr->m_currentChildIndex);
+        auto cur_child_parsed_expr =
+            paren_expr->m_child_exprs->at(paren_expr->m_current_child_index);
 
-        ParsedToSExprState childState;
-        childState.m_parsedForWorking = curChildParsedExpr;
-        childState.m_workingExpr = sexprForThisNode;
-        workingStack.push(childState);
+        ParsedToSExprState child_state;
+        child_state.parsed_for_working = cur_child_parsed_expr;
+        child_state.working_expr = sexpr_for_this_node;
+        working_stack.push(child_state);
 
-        ++parenExpr->m_currentChildIndex;
+        ++paren_expr->m_current_child_index;
       }
     }
   }
 
-  return resultRoot;
+  return result_root;
+}
+
+std::shared_ptr<SExpr> Parser::parse_program() {
+  const auto string_exprs = get_string_exprs();
+  return get_sexpr_from_string_exprs(string_exprs);
 }
 } // namespace FunGPU

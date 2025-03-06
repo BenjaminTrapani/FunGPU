@@ -135,11 +135,11 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
       (indirect_call_reqs.num_indirect_call_reqs + num_threads_per_block - 1) /
       num_threads_per_block;
   const auto block_meta_handle =
-      mem_pool_acc[0].AllocArray<typename RuntimeBlockType::BlockMetadata>(
+      mem_pool_acc[0].alloc_array<typename RuntimeBlockType::BlockMetadata>(
           num_blocks_required);
   const auto &instructions_data =
-      mem_pool_acc[0].derefHandle(program)[lambda_idx];
-  auto *block_metadata = mem_pool_acc[0].derefHandle(block_meta_handle);
+      mem_pool_acc[0].deref_handle(program)[lambda_idx];
+  auto *block_metadata = mem_pool_acc[0].deref_handle(block_meta_handle);
   Index_t max_num_instructions = 0;
   Index_t num_calls_remaining = indirect_call_reqs.num_indirect_call_reqs;
   for (Index_t i = 0; i < num_blocks_required; ++i) {
@@ -151,12 +151,12 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
         RuntimeBlockType::template pre_allocate_runtime_values<
             cl::sycl::access::target::device>(num_threads, mem_pool_acc,
                                               program, lambda_idx);
-    const auto runtime_block_handle = mem_pool_acc[0].Alloc<RuntimeBlockType>(
+    const auto runtime_block_handle = mem_pool_acc[0].alloc<RuntimeBlockType>(
         instructions_data.instructions, pre_allocated_rvs, num_threads);
     block_metadata[i] = typename RuntimeBlockType::BlockMetadata(
         runtime_block_handle, instructions_data.instructions, num_threads);
     max_num_instructions = std::max(max_num_instructions,
-                                    instructions_data.instructions.GetCount());
+                                    instructions_data.instructions.get_count());
     num_calls_remaining -= num_threads;
   }
   return typename RuntimeBlockType::BlockExecGroup(block_meta_handle,
@@ -171,15 +171,15 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
     setup_block_for_reactivation(
         PortableMemPool::DeviceAccessor_t mem_pool_acc) const {
   const auto block_meta_handle =
-      mem_pool_acc[0].AllocArray<typename RuntimeBlockType::BlockMetadata>(
+      mem_pool_acc[0].alloc_array<typename RuntimeBlockType::BlockMetadata>(
           block_reactivation_requests_by_block.num_runtime_blocks_reactivated);
   Index_t max_num_instructions = 0;
-  auto *block_meta_data = mem_pool_acc[0].derefHandle(block_meta_handle);
-  for (Index_t i = 0; i < block_meta_handle.GetCount(); ++i) {
+  auto *block_meta_data = mem_pool_acc[0].deref_handle(block_meta_handle);
+  for (Index_t i = 0; i < block_meta_handle.get_count(); ++i) {
     block_meta_data[i] =
         block_reactivation_requests_by_block.runtime_blocks_reactivated[i];
-    max_num_instructions = std::max(max_num_instructions,
-                                    block_meta_data[i].instructions.GetCount());
+    max_num_instructions = std::max(
+        max_num_instructions, block_meta_data[i].instructions.get_count());
   }
   return typename RuntimeBlockType::BlockExecGroup(block_meta_handle,
                                                    max_num_instructions);
@@ -203,20 +203,20 @@ void IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
   const auto block_idx = thread_idx / RuntimeBlockType::NumThreadsPerBlock;
   const auto thread_idx_in_block =
       thread_idx % RuntimeBlockType::NumThreadsPerBlock;
-  auto &target_block = *mem_pool_acc[0].derefHandle(
+  auto &target_block = *mem_pool_acc[0].deref_handle(
       mem_pool_acc[0]
-          .derefHandle(block_exec_acc[lambda_idx].block_descs)[block_idx]
+          .deref_handle(block_exec_acc[lambda_idx].block_descs)[block_idx]
           .block);
   // captures first, then args.
   auto &register_set = target_block.registers[thread_idx_in_block];
   const auto *capture_data =
-      mem_pool_acc[0].derefHandle(indirect_call_req.captures);
+      mem_pool_acc[0].deref_handle(indirect_call_req.captures);
   auto it = std::copy(capture_data,
-                      capture_data + indirect_call_req.captures.GetCount(),
+                      capture_data + indirect_call_req.captures.get_count(),
                       register_set.begin());
-  const auto *arg_data = mem_pool_acc[0].derefHandle(indirect_call_req.args);
-  std::copy(arg_data, arg_data + indirect_call_req.args.GetCount(), it);
-  mem_pool_acc[0].DeallocArray(indirect_call_req.args);
+  const auto *arg_data = mem_pool_acc[0].deref_handle(indirect_call_req.args);
+  std::copy(arg_data, arg_data + indirect_call_req.args.get_count(), it);
+  mem_pool_acc[0].dealloc_array(indirect_call_req.args);
 
   auto &target_address_data = target_block.target_data[thread_idx_in_block];
   target_address_data.block = indirect_call_req.caller;
@@ -249,7 +249,7 @@ void IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
       count(num_runtime_blocks_reactivated);
   const auto target_idx = count.fetch_add(1U);
   runtime_blocks_reactivated[target_idx] =
-      mem_pool_acc[0].derefHandle(block)->block_metadata();
+      mem_pool_acc[0].deref_handle(block)->block_metadata();
 }
 
 template <typename RuntimeBlockType, Index_t MaxNumIndirectCalls,
@@ -342,13 +342,13 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
         buffers.indirect_call_requests_by_block
             .template get_access<cl::sycl::access::mode::read_write>(cgh);
     cgh.parallel_for<class BlockGroupsPerLambda>(
-        cl::sycl::range<1>(program.GetCount() + 1),
+        cl::sycl::range<1>(program.get_count() + 1),
         [mem_pool_write, block_exec_group_per_lambda_acc,
          indirect_call_handler_acc, program, atomic_max_threads_per_lambda,
          total_num_blocks_acc,
          indirect_call_requests_by_block_acc](cl::sycl::item<1> itm) {
           const auto lambda_idx = itm.get_linear_id();
-          if (lambda_idx < program.GetCount()) {
+          if (lambda_idx < program.get_count()) {
             block_exec_group_per_lambda_acc[lambda_idx] =
                 indirect_call_handler_acc[0].setup_block_for_lambda(
                     mem_pool_write, indirect_call_requests_by_block_acc,
@@ -364,7 +364,7 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
               max_num_threads_per_lambda(atomic_max_threads_per_lambda[0]);
           const auto num_blocks_in_lambda =
               block_exec_group_per_lambda_acc[lambda_idx]
-                  .block_descs.GetCount();
+                  .block_descs.get_count();
           max_num_threads_per_lambda.fetch_max(
               num_blocks_in_lambda * RuntimeBlockType::NumThreadsPerBlock);
           cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
@@ -394,7 +394,7 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
         buffers.indirect_call_requests_by_block
             .template get_access<cl::sycl::access::mode::read_write>(cgh);
     cgh.parallel_for<class InitBlocksPerThread>(
-        cl::sycl::range<2>(program.GetCount(), max_num_threads_per_lambda_val),
+        cl::sycl::range<2>(program.get_count(), max_num_threads_per_lambda_val),
         [mem_pool_write, block_exec_group_per_lambda_acc,
          indirect_call_handler_acc,
          indirect_call_requests_by_block_acc](const cl::sycl::item<2> itm) {
@@ -417,7 +417,7 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
                                        result_acc] {
       const auto all_block_descs =
           mem_pool_write[0]
-              .template AllocArray<typename RuntimeBlockType::BlockMetadata>(
+              .template alloc_array<typename RuntimeBlockType::BlockMetadata>(
                   total_num_blocks_acc[0]);
       result_acc[0] =
           typename RuntimeBlockType::BlockExecGroup(all_block_descs, 0);
@@ -438,14 +438,14 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
         buffers.copy_begin_idx
             .template get_access<cl::sycl::access::mode::read_write>(cgh);
     cgh.parallel_for<class MergeIntoResult>(
-        cl::sycl::range<2>(program.GetCount() + 1,
+        cl::sycl::range<2>(program.get_count() + 1,
                            (max_num_threads_per_lambda_val +
                             RuntimeBlockType::NumThreadsPerBlock - 1) /
                                RuntimeBlockType::NumThreadsPerBlock),
         [mem_pool_write, result_acc, block_exec_group_per_lambda_acc,
          copy_begin_atomic_acc](cl::sycl::item<2> itm) {
           auto *target_block_descs =
-              mem_pool_write[0].derefHandle(result_acc[0].block_descs);
+              mem_pool_write[0].deref_handle(result_acc[0].block_descs);
           cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
                                cl::sycl::memory_scope::device,
                                cl::sycl::access::address_space::global_space>
@@ -458,8 +458,8 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
             return;
           }
           const auto *source_data =
-              mem_pool_write[0].derefHandle(source_block_descs);
-          if (itm.get_id(1) < source_block_descs.GetCount()) {
+              mem_pool_write[0].deref_handle(source_block_descs);
+          if (itm.get_id(1) < source_block_descs.get_count()) {
             target_block_descs[copy_begin_atomic.fetch_add(1U)] =
                 source_data[itm.get_id(1)];
           }
@@ -488,12 +488,12 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
         buffers.indirect_call_requests_by_block
             .template get_access<cl::sycl::access::mode::read_write>(cgh);
     cgh.parallel_for<class ResetBuffersAfterIndirectCallSchedule>(
-        cl::sycl::range<1>(program.GetCount() + 1),
+        cl::sycl::range<1>(program.get_count() + 1),
         [indirect_call_handler_acc, mem_pool_acc, program,
          block_exec_group_per_lambda_acc,
          indirect_call_requests_by_block_acc](cl::sycl::item<1> itm) {
           const auto tid = static_cast<Index_t>(itm.get_linear_id());
-          if (tid >= program.GetCount()) {
+          if (tid >= program.get_count()) {
             indirect_call_handler_acc[0].reset_reactivations_buffer();
           } else {
             indirect_call_handler_acc[0].reset_indirect_call_buffers(
@@ -501,7 +501,7 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
           }
           const auto source_block_descs =
               block_exec_group_per_lambda_acc[itm.get_linear_id()].block_descs;
-          mem_pool_acc[0].DeallocArray(source_block_descs);
+          mem_pool_acc[0].dealloc_array(source_block_descs);
         });
   });
 

@@ -15,25 +15,25 @@ public:
       : m_managedAllocationsCountData(0), m_managedHandlesIdx(0) {}
 
   template <class... Args_t>
-  Error AllocManaged(const PortableMemPool::DeviceAccessor_t &memPoolAcc,
-                     PortableMemPool::Handle<T> &result, Args_t &&...args) {
+  Error alloc_managed(const PortableMemPool::DeviceAccessor_t &mem_pool_acc,
+                      PortableMemPool::Handle<T> &result, Args_t &&...args) {
     cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
                          cl::sycl::memory_scope::device,
                          cl::sycl::access::address_space::global_space>
         allocCount(m_managedAllocationsCountData);
-    result = memPoolAcc[0].template Alloc<T>(std::forward<Args_t>(args)...);
+    result = mem_pool_acc[0].template alloc<T>(std::forward<Args_t>(args)...);
     if (result == PortableMemPool::Handle<T>()) {
       return Error(Error::Type::MemPoolAllocFailure);
     }
-    auto derefdResult = memPoolAcc[0].derefHandle(result);
-    if (const auto error = derefdResult->Init();
+    auto derefdResult = mem_pool_acc[0].deref_handle(result);
+    if (const auto error = derefdResult->init();
         error.GetType() != Error::Type::Success) {
-      memPoolAcc[0].Dealloc(result);
+      mem_pool_acc[0].dealloc(result);
       return error;
     }
     const auto indexToAlloc = allocCount.fetch_add(1U);
     if (indexToAlloc >= maxManagedAllocationsCount) {
-      memPoolAcc[0].Dealloc(result);
+      mem_pool_acc[0].dealloc(result);
       return Error(Error::Type::GCOutOfSlots);
     }
 
@@ -41,7 +41,7 @@ public:
     return Error();
   }
 
-  Index_t GetManagedAllocationCount() {
+  Index_t get_managed_allocation_count() {
     cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
                          cl::sycl::memory_scope::device,
                          cl::sycl::access::address_space::global_space>
@@ -49,32 +49,32 @@ public:
     return std::min(allocCount.load(), maxManagedAllocationsCount);
   }
 
-  bool RunMarkPass(const Index_t idx,
-                   const PortableMemPool::DeviceAccessor_t &memPoolAcc) {
+  bool run_mark_pass(const Index_t idx,
+                     const PortableMemPool::DeviceAccessor_t &mem_pool_acc) {
     const auto &handleForIdx = m_managedHandles[m_managedHandlesIdx][idx];
-    auto derefdForHandle = memPoolAcc[0].derefHandle(handleForIdx);
-    return derefdForHandle->ExpandMarkings();
+    auto derefdForHandle = mem_pool_acc[0].deref_handle(handleForIdx);
+    return derefdForHandle->expand_markings();
   }
 
-  void Sweep(const Index_t idx,
-             const PortableMemPool::DeviceAccessor_t &memPoolAcc) {
-    auto &handleForIdx = m_managedHandles[m_managedHandlesIdx][idx];
-    auto derefdForHandle = memPoolAcc[0].derefHandle(handleForIdx);
-    if (!derefdForHandle->GetIsMarked()) {
-      memPoolAcc[0].Dealloc(handleForIdx);
-      handleForIdx = PortableMemPool::Handle<T>();
+  void sweep(const Index_t idx,
+             const PortableMemPool::DeviceAccessor_t &mem_pool_acc) {
+    auto &handle_for_idx = m_managedHandles[m_managedHandlesIdx][idx];
+    auto derefd_for_handle = mem_pool_acc[0].deref_handle(handle_for_idx);
+    if (!derefd_for_handle->get_is_marked()) {
+      mem_pool_acc[0].dealloc(handle_for_idx);
+      handle_for_idx = PortableMemPool::Handle<T>();
     } else {
-      derefdForHandle->ClearMarking();
+      derefd_for_handle->clear_marking();
     }
   }
 
-  void ResetAllocationCount() {
+  void reset_allocation_count() {
     m_managedAllocationsCountData = 0;
     m_prevManagedHandlesIdx = m_managedHandlesIdx;
     m_managedHandlesIdx = (m_managedHandlesIdx + 1) % m_managedHandles.size();
   }
 
-  void Compact(const Index_t idx) {
+  void compact(const Index_t idx) {
     const auto &handleForIdx = m_managedHandles[m_prevManagedHandlesIdx][idx];
     if (handleForIdx != PortableMemPool::Handle<T>()) {
       cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,

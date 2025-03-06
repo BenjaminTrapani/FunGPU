@@ -21,20 +21,20 @@ struct Fixture {
     auto mem_pool_acc =
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
 
-    BOOST_REQUIRE_EQUAL(instructions.size(), program.GetCount());
-    for (Index_t lambda_idx = 0; lambda_idx < program.GetCount();
+    BOOST_REQUIRE_EQUAL(instructions.size(), program.get_count());
+    for (Index_t lambda_idx = 0; lambda_idx < program.get_count();
          ++lambda_idx) {
-      const auto &lambda = mem_pool_acc[0].derefHandle(program)[lambda_idx];
+      const auto &lambda = mem_pool_acc[0].deref_handle(program)[lambda_idx];
       BOOST_REQUIRE_EQUAL(instructions[lambda_idx].size(),
-                          lambda.instructions.GetCount());
+                          lambda.instructions.get_count());
       for (Index_t instruction_idx = 0;
-           instruction_idx < lambda.instructions.GetCount();
+           instruction_idx < lambda.instructions.get_count();
            ++instruction_idx) {
         BOOST_TEST_INFO_SCOPE("lambda_idx: " << lambda_idx
                                              << ", instruction_idx: "
                                              << instruction_idx);
         BOOST_CHECK(instructions[lambda_idx][instruction_idx].equals(
-            mem_pool_acc[0].derefHandle(lambda.instructions)[instruction_idx],
+            mem_pool_acc[0].deref_handle(lambda.instructions)[instruction_idx],
             mem_pool_acc));
       }
     }
@@ -44,8 +44,8 @@ struct Fixture {
   portable_index_array_from_vector(const std::vector<Index_t> &vec) {
     auto mem_pool_acc =
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
-    auto array_handle = mem_pool_acc[0].AllocArray<Index_t>(vec.size());
-    auto *captured_registers_data = mem_pool_acc[0].derefHandle(array_handle);
+    auto array_handle = mem_pool_acc[0].alloc_array<Index_t>(vec.size());
+    auto *captured_registers_data = mem_pool_acc[0].deref_handle(array_handle);
     std::copy(vec.begin(), vec.end(), captured_registers_data);
     return array_handle;
   }
