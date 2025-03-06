@@ -2,7 +2,7 @@
 #include "Core/EvaluatorV2/RuntimeBlock.hpp"
 #include "Core/BlockPrep.hpp"
 #include "Core/Compiler.hpp"
-#include "Core/EvaluatorV2/BlockGenerator.h"
+#include "Core/EvaluatorV2/BlockGenerator.hpp"
 #include "Core/EvaluatorV2/CompileProgram.hpp"
 #include "Core/Parser.hpp"
 #include "Core/Visitor.hpp"

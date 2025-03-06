@@ -2,7 +2,7 @@
 
 #include "Core/EvaluatorV2/Evaluator.hpp"
 #include "Core/EvaluatorV2/CompileProgram.hpp"
-#include "Core/EvaluatorV2/Instruction.h"
+#include "Core/EvaluatorV2/Instruction.hpp"
 #include <boost/test/tools/old/interface.hpp>
 #include <boost/test/unit_test.hpp>
 #include <stdexcept>

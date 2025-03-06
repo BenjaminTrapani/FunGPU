@@ -1,6 +1,6 @@
-#include "Core/EvaluatorV2/BlockGenerator.h"
+#include "Core/EvaluatorV2/BlockGenerator.hpp"
 #include "Core/CollectAllASTNodes.hpp"
-#include "Core/EvaluatorV2/Instruction.h"
+#include "Core/EvaluatorV2/Instruction.hpp"
 #include "Core/Visitor.hpp"
 #include <deque>
 #include <iostream>
