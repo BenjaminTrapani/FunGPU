@@ -9,11 +9,11 @@
 #undef max
 #undef min
 
-#include "core/cpu_evaluator.hpp"
+#include "core/block_prep.hpp"
 #include "core/compiler.hpp"
+#include "core/cpu_evaluator.hpp"
 #include "core/parser.hpp"
 #include "core/portable_mem_pool.hpp"
-#include "core/block_prep.hpp"
 
 using namespace FunGPU;
 
@@ -43,15 +43,16 @@ std::shared_ptr<CPUEvaluator> Fixture::evaluator = nullptr;
 namespace {
 
 Index_t get_alloc_count(cl::sycl::buffer<PortableMemPool> mem_pool_buffer) {
-  auto host_acc = mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
+  auto host_acc =
+      mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
   return host_acc[0].get_total_allocation_count();
 }
 
 CPUEvaluator::RuntimeBlock_t::RuntimeValue
 run_program(const std::string &path,
-           const std::shared_ptr<CPUEvaluator> &evaluator,
-           cl::sycl::buffer<PortableMemPool> mem_pool_buffer,
-           const float expected_val) {
+            const std::shared_ptr<CPUEvaluator> &evaluator,
+            cl::sycl::buffer<PortableMemPool> mem_pool_buffer,
+            const float expected_val) {
   std::cout << std::endl;
   std::cout << "Running program " << path << std::endl;
 
@@ -106,69 +107,75 @@ BOOST_FIXTURE_TEST_SUITE(IntegrationTests, Fixture)
 // TODO memory leak in this one, fix it before enabling
 /*
 BOOST_AUTO_TEST_CASE(NumericIntegration) {
-  run_program("../test_programs/NumericIntegration.fgpu", evaluator, *memPoolBuff, -1.18747);
+  run_program("../test_programs/NumericIntegration.fgpu", evaluator,
+*memPoolBuff, -1.18747);
 }
 */
 
 BOOST_AUTO_TEST_CASE(MultiLet) {
-  const auto programResult =
-      run_program("../test_programs/MultiLet.fgpu", evaluator, *mem_pool_buffer, 1);
+  const auto programResult = run_program("../test_programs/MultiLet.fgpu",
+                                         evaluator, *mem_pool_buffer, 1);
 }
 
 BOOST_AUTO_TEST_CASE(NoBindings) {
-  const auto programResult =
-      run_program("../test_programs/NoBindings.fgpu", evaluator, *mem_pool_buffer, 14);
+  const auto programResult = run_program("../test_programs/NoBindings.fgpu",
+                                         evaluator, *mem_pool_buffer, 14);
 }
 
 BOOST_AUTO_TEST_CASE(SimpleCall) {
-  const auto programResult =
-      run_program("../test_programs/SimpleCall.fgpu", evaluator, *mem_pool_buffer, 42);
+  const auto programResult = run_program("../test_programs/SimpleCall.fgpu",
+                                         evaluator, *mem_pool_buffer, 42);
 }
 
 BOOST_AUTO_TEST_CASE(CallMultiBindings) {
-  const auto programResult = run_program(
-      "../test_programs/CallMultiBindings.fgpu", evaluator, *mem_pool_buffer, 13);
+  const auto programResult =
+      run_program("../test_programs/CallMultiBindings.fgpu", evaluator,
+                  *mem_pool_buffer, 13);
 }
 
 BOOST_AUTO_TEST_CASE(ListExample) {
-  const auto programResult =
-      run_program("../test_programs/ListExample.fgpu", evaluator, *mem_pool_buffer, 6);
+  const auto programResult = run_program("../test_programs/ListExample.fgpu",
+                                         evaluator, *mem_pool_buffer, 6);
 }
 
 BOOST_AUTO_TEST_CASE(MultiList) {
-  const auto programResult =
-      run_program("../test_programs/MultiList.fgpu", evaluator, *mem_pool_buffer, 3);
+  const auto programResult = run_program("../test_programs/MultiList.fgpu",
+                                         evaluator, *mem_pool_buffer, 3);
 }
 
 BOOST_AUTO_TEST_CASE(MultiLetRec) {
-  const auto programResult =
-      run_program("../test_programs/MultiLetRec.fgpu", evaluator, *mem_pool_buffer, 135);
+  const auto programResult = run_program("../test_programs/MultiLetRec.fgpu",
+                                         evaluator, *mem_pool_buffer, 135);
 }
 
 BOOST_AUTO_TEST_CASE(MergeSort) {
-  const auto programResult =
-      run_program("../test_programs/MergeSort.fgpu", evaluator, *mem_pool_buffer, 123456);
+  const auto programResult = run_program("../test_programs/MergeSort.fgpu",
+                                         evaluator, *mem_pool_buffer, 123456);
 }
 
 BOOST_AUTO_TEST_CASE(GraphColoring) {
-  const auto programResult =
-      run_program("../test_programs/GraphColoring.fgpu", evaluator, *mem_pool_buffer, 8);
+  const auto programResult = run_program("../test_programs/GraphColoring.fgpu",
+                                         evaluator, *mem_pool_buffer, 8);
 }
 
 BOOST_AUTO_TEST_CASE(ComplexBindings) {
-  run_program("../test_programs/ComplexBindings.fgpu", evaluator, *mem_pool_buffer, 13);
+  run_program("../test_programs/ComplexBindings.fgpu", evaluator,
+              *mem_pool_buffer, 13);
 }
 
 BOOST_AUTO_TEST_CASE(SimpleLambda) {
-  run_program("../test_programs/SimpleLambda.fgpu", evaluator, *mem_pool_buffer, 5);
+  run_program("../test_programs/SimpleLambda.fgpu", evaluator, *mem_pool_buffer,
+              5);
 }
 
 BOOST_AUTO_TEST_CASE(SimpleLetRec) {
-  run_program("../test_programs/SimpleLetRec.fgpu", evaluator, *mem_pool_buffer, 5);
+  run_program("../test_programs/SimpleLetRec.fgpu", evaluator, *mem_pool_buffer,
+              5);
 }
 
 BOOST_AUTO_TEST_CASE(MapExample) {
-  run_program("../test_programs/MapExample.fgpu", evaluator, *mem_pool_buffer, 1);
+  run_program("../test_programs/MapExample.fgpu", evaluator, *mem_pool_buffer,
+              1);
 }
 
 BOOST_AUTO_TEST_CASE(CleanUpFixture) {

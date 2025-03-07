@@ -1,9 +1,9 @@
 #pragma once
 
+#include "core/concepts.hpp"
 #include "core/evaluator_v2/instruction.hpp"
 #include "core/evaluator_v2/program.hpp"
 #include "core/evaluator_v2/runtime_value.hpp"
-#include "core/concepts.hpp"
 #include "core/portable_mem_pool.hpp"
 #include "core/types.hpp"
 #include "core/visitor.hpp"

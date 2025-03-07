@@ -8,175 +8,173 @@ Compiler::ASTNodeHandle
 Compiler::compile_list_of_sexpr(std::shared_ptr<const SExpr> sexpr,
                                 std::list<std::string> bound_identifiers,
                                 PortableMemPool::HostAccessor_t mem_pool_acc) {
-  auto sexpr_children = sexpr->get_children();
-  if (sexpr_children->size() < 1) {
+  const auto &sexpr_children = sexpr->get_children();
+  if (sexpr_children.size() < 1) {
     throw CompileException("List of sexpr is less than 1, invalid expr");
   }
 
-  auto first_child = sexpr_children->at(0);
+  auto first_child = sexpr_children.at(0);
   ASTNodeHandle result;
   if (first_child->get_type() == SExpr::Type::Symbol) {
-    const auto first_child_sym = *first_child->get_symbol();
+    const auto &first_child_sym = first_child->get_symbol();
     if (first_child_sym == "+") {
-      if (sexpr_children->size() != 3) {
+      if (sexpr_children.size() != 3) {
         throw CompileException("Expected + to have 2 args");
       }
       result = mem_pool_acc[0].template alloc<BinaryOpNode>(
           ASTNode::Type::Add,
-          compile(sexpr_children->at(1), bound_identifiers, mem_pool_acc),
-          compile(sexpr_children->at(2), bound_identifiers, mem_pool_acc));
+          compile(sexpr_children.at(1), bound_identifiers, mem_pool_acc),
+          compile(sexpr_children.at(2), bound_identifiers, mem_pool_acc));
     } else if (first_child_sym == "-") {
-      if (sexpr_children->size() != 3) {
+      if (sexpr_children.size() != 3) {
         throw CompileException("Expected - to have 2 args");
       }
       result = mem_pool_acc[0].template alloc<BinaryOpNode>(
           ASTNode::Type::Sub,
-          compile(sexpr_children->at(1), bound_identifiers, mem_pool_acc),
-          compile(sexpr_children->at(2), bound_identifiers, mem_pool_acc));
+          compile(sexpr_children.at(1), bound_identifiers, mem_pool_acc),
+          compile(sexpr_children.at(2), bound_identifiers, mem_pool_acc));
     } else if (first_child_sym == "*") {
-      if (sexpr_children->size() != 3) {
+      if (sexpr_children.size() != 3) {
         throw CompileException("Expected * to have 2 args");
       }
       result = mem_pool_acc[0].template alloc<BinaryOpNode>(
           ASTNode::Type::Mul,
-          compile(sexpr_children->at(1), bound_identifiers, mem_pool_acc),
-          compile(sexpr_children->at(2), bound_identifiers, mem_pool_acc));
+          compile(sexpr_children.at(1), bound_identifiers, mem_pool_acc),
+          compile(sexpr_children.at(2), bound_identifiers, mem_pool_acc));
     } else if (first_child_sym == "/") {
-      if (sexpr_children->size() != 3) {
+      if (sexpr_children.size() != 3) {
         throw CompileException("Expected / to have 2 args");
       }
       result = mem_pool_acc[0].template alloc<BinaryOpNode>(
           ASTNode::Type::Div,
-          compile(sexpr_children->at(1), bound_identifiers, mem_pool_acc),
-          compile(sexpr_children->at(2), bound_identifiers, mem_pool_acc));
+          compile(sexpr_children.at(1), bound_identifiers, mem_pool_acc),
+          compile(sexpr_children.at(2), bound_identifiers, mem_pool_acc));
     } else if (first_child_sym == "=" || first_child_sym == "eq?") {
-      if (sexpr_children->size() != 3) {
+      if (sexpr_children.size() != 3) {
         throw CompileException("Expected = to have 2 args");
       }
       result = mem_pool_acc[0].template alloc<BinaryOpNode>(
           ASTNode::Type::Equal,
-          compile(sexpr_children->at(1), bound_identifiers, mem_pool_acc),
-          compile(sexpr_children->at(2), bound_identifiers, mem_pool_acc));
+          compile(sexpr_children.at(1), bound_identifiers, mem_pool_acc),
+          compile(sexpr_children.at(2), bound_identifiers, mem_pool_acc));
     } else if (first_child_sym == ">") {
-      if (sexpr_children->size() != 3) {
+      if (sexpr_children.size() != 3) {
         throw CompileException("Expected > to have 2 args");
       }
       result = mem_pool_acc[0].template alloc<BinaryOpNode>(
           ASTNode::Type::GreaterThan,
-          compile(sexpr_children->at(1), bound_identifiers, mem_pool_acc),
-          compile(sexpr_children->at(2), bound_identifiers, mem_pool_acc));
+          compile(sexpr_children.at(1), bound_identifiers, mem_pool_acc),
+          compile(sexpr_children.at(2), bound_identifiers, mem_pool_acc));
     } else if (first_child_sym == "remainder") {
-      if (sexpr_children->size() != 3) {
+      if (sexpr_children.size() != 3) {
         throw CompileException("Expected remainder to have 2 args");
       }
       result = mem_pool_acc[0].template alloc<BinaryOpNode>(
           ASTNode::Type::Remainder,
-          compile(sexpr_children->at(1), bound_identifiers, mem_pool_acc),
-          compile(sexpr_children->at(2), bound_identifiers, mem_pool_acc));
+          compile(sexpr_children.at(1), bound_identifiers, mem_pool_acc),
+          compile(sexpr_children.at(2), bound_identifiers, mem_pool_acc));
     } else if (first_child_sym == "expt") {
-      if (sexpr_children->size() != 3) {
+      if (sexpr_children.size() != 3) {
         throw CompileException("Expected expt to have 2 args");
       }
       result = mem_pool_acc[0].template alloc<BinaryOpNode>(
           ASTNode::Type::Expt,
-          compile(sexpr_children->at(1), bound_identifiers, mem_pool_acc),
-          compile(sexpr_children->at(2), bound_identifiers, mem_pool_acc));
+          compile(sexpr_children.at(1), bound_identifiers, mem_pool_acc),
+          compile(sexpr_children.at(2), bound_identifiers, mem_pool_acc));
     } else if (first_child_sym == "let" || first_child_sym == "letrec") {
-      if (sexpr_children->size() != 3) {
+      if (sexpr_children.size() != 3) {
         throw CompileException("Expected let to have 2 args");
       }
       const bool is_rec = first_child_sym == "letrec";
 
-      auto binding_exprs = sexpr_children->at(1)->get_children();
-      auto expr_to_eval_in_binding_env = sexpr_children->at(2);
+      const auto &binding_exprs = sexpr_children.at(1)->get_children();
+      auto expr_to_eval_in_binding_env = sexpr_children.at(2);
       const auto bind_node_handle = mem_pool_acc[0].template alloc<BindNode>(
-          static_cast<Index_t>(binding_exprs->size()), is_rec, mem_pool_acc);
+          static_cast<Index_t>(binding_exprs.size()), is_rec, mem_pool_acc);
       auto bind_node = mem_pool_acc[0].deref_handle(bind_node_handle);
 
       auto updated_bindings = bound_identifiers;
-      for (const auto &bind_expr : *binding_exprs) {
-        auto bind_expr_children = bind_expr->get_children();
-        if (bind_expr_children->size() != 2) {
+      for (const auto &bind_expr : binding_exprs) {
+        const auto &bind_expr_children = bind_expr->get_children();
+        if (bind_expr_children.size() != 2) {
           throw CompileException("Expected binding expr to have 2 elements "
                                  "(identifier, value expr)");
         }
-        auto ident_expr = bind_expr_children->at(0);
+        auto ident_expr = bind_expr_children.at(0);
         if (ident_expr->get_type() != SExpr::Type::Symbol) {
           throw CompileException(
               "Expected first component of bind expr to be an identifier");
         }
-
-        const auto ident_string = ident_expr->get_symbol();
-        updated_bindings.push_front(*ident_string);
+        updated_bindings.push_front(ident_expr->get_symbol());
       }
 
       auto bindings_data = mem_pool_acc[0].deref_handle(bind_node->m_bindings);
-      for (Index_t i = 0; i < binding_exprs->size(); ++i) {
-        auto bind_expr = binding_exprs->at(i);
-        auto bind_expr_children = bind_expr->get_children();
+      for (Index_t i = 0; i < binding_exprs.size(); ++i) {
+        auto bind_expr = binding_exprs.at(i);
+        const auto &bind_expr_children = bind_expr->get_children();
         bindings_data[i] = compile(
-            bind_expr_children->at(1),
+            bind_expr_children.at(1),
             is_rec ? updated_bindings : bound_identifiers, mem_pool_acc);
       }
 
       bind_node->m_child_expr =
-          compile(sexpr_children->at(2), updated_bindings, mem_pool_acc);
+          compile(sexpr_children.at(2), updated_bindings, mem_pool_acc);
       result = bind_node_handle;
     } else if (first_child_sym == "lambda") {
-      if (sexpr_children->size() != 3) {
+      if (sexpr_children.size() != 3) {
         throw CompileException("Expected lambda to have 2 child exprs");
       }
-      auto identifier_list = sexpr_children->at(1);
+      auto identifier_list = sexpr_children.at(1);
       if (identifier_list->get_type() != SExpr::Type::ListOfSExpr) {
         throw CompileException("Lambda arg list expected to be list of sexpr");
       }
-      auto identifier_list_children = identifier_list->get_children();
-      for (auto identifier : *identifier_list_children) {
+      const auto &identifier_list_children = identifier_list->get_children();
+      for (const auto &identifier : identifier_list_children) {
         if (identifier->get_type() != SExpr::Type::Symbol) {
           throw CompileException(
               "Expected arguments in lambda expression to be symbols");
         }
-        bound_identifiers.push_front(*identifier->get_symbol());
+        bound_identifiers.push_front(identifier->get_symbol());
       }
-      auto expr_to_eval = sexpr_children->at(2);
+      auto expr_to_eval = sexpr_children.at(2);
       auto compiled_ast_node =
           compile(expr_to_eval, bound_identifiers, mem_pool_acc);
       result = mem_pool_acc[0].template alloc<LambdaNode>(
-          static_cast<Index_t>(identifier_list_children->size()),
+          static_cast<Index_t>(identifier_list_children.size()),
           compiled_ast_node);
     } else if (first_child_sym == "if") {
-      if (sexpr_children->size() != 4) {
+      if (sexpr_children.size() != 4) {
         throw CompileException("Expected if expr to have 3 arguments");
       }
-      auto pred_child = sexpr_children->at(1);
-      auto then_child = sexpr_children->at(2);
-      auto else_child = sexpr_children->at(3);
+      auto pred_child = sexpr_children.at(1);
+      auto then_child = sexpr_children.at(2);
+      auto else_child = sexpr_children.at(3);
       result = mem_pool_acc[0].template alloc<IfNode>(
           compile(pred_child, bound_identifiers, mem_pool_acc),
           compile(then_child, bound_identifiers, mem_pool_acc),
           compile(else_child, bound_identifiers, mem_pool_acc));
     } else if (first_child_sym == "floor") {
-      if (sexpr_children->size() != 2) {
+      if (sexpr_children.size() != 2) {
         throw CompileException("Expected floor to get 1 argument");
       }
       result = mem_pool_acc[0].template alloc<UnaryOpNode>(
           ASTNode::Type::Floor,
-          compile(sexpr_children->at(1), bound_identifiers, mem_pool_acc));
+          compile(sexpr_children.at(1), bound_identifiers, mem_pool_acc));
     }
   }
   if (result ==
       ASTNodeHandle()) // This is hopefully a call to user-defined function.
   {
-    auto arg_count = sexpr_children->size() - 1;
-    auto target_lambda_expr = sexpr_children->at(0);
+    auto arg_count = sexpr_children.size() - 1;
+    auto target_lambda_expr = sexpr_children.at(0);
     const auto call_node_handle = mem_pool_acc[0].template alloc<CallNode>(
         static_cast<Index_t>(arg_count),
         compile(target_lambda_expr, bound_identifiers, mem_pool_acc),
         mem_pool_acc);
     auto call_node = mem_pool_acc[0].deref_handle(call_node_handle);
     auto args_data = mem_pool_acc[0].deref_handle(call_node->m_args);
-    for (Index_t i = 1; i < sexpr_children->size(); ++i) {
-      auto cur_arg = sexpr_children->at(i);
+    for (Index_t i = 1; i < sexpr_children.size(); ++i) {
+      auto cur_arg = sexpr_children.at(i);
       args_data[i - 1] = compile(cur_arg, bound_identifiers, mem_pool_acc);
     }
     result = call_node_handle;
@@ -197,10 +195,10 @@ Compiler::compile(std::shared_ptr<const SExpr> sexpr,
   switch (sexpr->get_type()) {
   case SExpr::Type::Symbol: {
     auto ident_pos = std::find(bound_identifiers.begin(),
-                               bound_identifiers.end(), *sexpr->get_symbol());
+                               bound_identifiers.end(), sexpr->get_symbol());
     if (ident_pos == bound_identifiers.end()) {
       std::stringstream sstream;
-      sstream << "Unbound identifier " << *sexpr->get_symbol() << std::endl;
+      sstream << "Unbound identifier " << sexpr->get_symbol() << std::endl;
       throw CompileException(sstream.str());
     }
     result =

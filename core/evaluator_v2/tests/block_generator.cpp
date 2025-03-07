@@ -1,8 +1,8 @@
 #define BOOST_TEST_MODULE BlockGeneratorTestsModule
 
 #include "core/evaluator_v2/block_generator.hpp"
-#include "core/evaluator_v2/compile_program.hpp"
 #include "core/block_prep.hpp"
+#include "core/evaluator_v2/compile_program.hpp"
 #include "core/visitor.hpp"
 #include <boost/test/tools/context.hpp>
 #include <boost/test/unit_test.hpp>

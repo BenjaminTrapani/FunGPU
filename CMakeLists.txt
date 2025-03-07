@@ -29,12 +29,3 @@ add_subdirectory(test_programs)
 add_subdirectory(integration_tests)
 
 target_link_libraries(fungpu fungpu_evaluator)
-
-file(GLOB_RECURSE ALL_SOURCE_FILES core/*.cpp core/*.h core/*.hpp main.cpp)
-find_program (CLANGFORMAT_CMD clang-format "/usr/lib/llvm-18/bin/")
-
-add_custom_target(clangformat
-    COMMAND ${CLANGFORMAT_CMD}
-    -i
-    ${ALL_SOURCE_FILES}
-	-style=file)
