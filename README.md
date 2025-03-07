@@ -51,7 +51,7 @@ In step 3, the sequence of simple instructions is converted into a sequence of s
 per lambda. When a lambda appears in the body of another, an instruction to copy all captured values into the heap is performed. The lambda value contains a pointer
 to these values. On any invocations of the lambda value, the captured values are copied into the first registers, followed by the function args. Register allocation is performed by identifying the last position at which an identifier is read in the current scope and freeing the mapped register idx after the last read. Identifiers are allocated a register after they are bound.
 
-The example below is for https://github.com/BenjaminTrapani/FunGPU/blob/master/TestPrograms/SimpleLetRec.fgpu:
+The example below is for https://github.com/BenjaminTrapani/FunGPU/blob/master/test_programs/SimpleLetRec.fgpu:
 ```
 Parsed program (step 1): 
 ( letrec 
@@ -123,10 +123,10 @@ The VM takes an array of lambdas and produces a numeric result from the program.
 
 
 ## Performance ##
-Numeric integration (https://github.com/BenjaminTrapani/FunGPU/blob/master/TestPrograms/NumericIntegrationV2.fgpu) obtains a 3x performance improvement over the Racket implementation. Profiling indicates that the GPU has plenty of available compute power and is limited by the amount of on-chip memory. Using a device with a higher ratio of on-chip memory to compute resources or reducing the shared memory requirement will enable orders of magnitude performance improvements. Infinite tail recursion is supported. The best performance is obtained by authoring programs such that a high branching factor is used to fan out work initially and then tail recursion is used at the leaves of the tree once a high degree of parallelism has been achieved.
+Numeric integration (https://github.com/BenjaminTrapani/FunGPU/blob/master/test_programs/NumericIntegrationV2.fgpu) obtains a 3x performance improvement over the Racket implementation. Profiling indicates that the GPU has plenty of available compute power and is limited by the amount of on-chip memory. Using a device with a higher ratio of on-chip memory to compute resources or reducing the shared memory requirement will enable orders of magnitude performance improvements. Infinite tail recursion is supported. The best performance is obtained by authoring programs such that a high branching factor is used to fan out work initially and then tail recursion is used at the leaves of the tree once a high degree of parallelism has been achieved.
 
 ## Current state ##
-The current implementation has two versions: an initial interpreter (binary fungpu) that evaluates the AST directly. Warp divergence is high and execution efficiency is low, but it contains a garbage collector and is very stable. The more recent and fastest version (./Core/EvaluatorV2/FunGPUV2) uses the compilation pipeline above and outperforms the racket implementation on all non-trivial programs (performance gains increase as the number of program subtrees increases, think embarrassingly parallel problems with divide and conquer solutions). The evaluator at ./Core/EvaluatorV2/FunGPUV2 does not have a garbage collector yet, which is required to correctly deallocate lambda captures. Lambda captures are leaked in that implementation. The remaining work consists of adding a garbage collector for the V2 evaluator, improving GPU utilization by reducing shared memory requirements and adding optimization steps to the compilation pipeline.
+The current implementation has two versions: an initial interpreter (binary fungpu) that evaluates the AST directly. Warp divergence is high and execution efficiency is low, but it contains a garbage collector and is very stable. The more recent and fastest version (./Core/evaluator_v2/FunGPUV2) uses the compilation pipeline above and outperforms the racket implementation on all non-trivial programs (performance gains increase as the number of program subtrees increases, think embarrassingly parallel problems with divide and conquer solutions). The evaluator at ./Core/evaluator_v2/FunGPUV2 does not have a garbage collector yet, which is required to correctly deallocate lambda captures. Lambda captures are leaked in that implementation. The remaining work consists of adding a garbage collector for the V2 evaluator, improving GPU utilization by reducing shared memory requirements and adding optimization steps to the compilation pipeline.
 
 ## Building ##
 1. Install AdaptiveCpp by following the instructions at https://github.com/AdaptiveCpp/AdaptiveCpp/blob/develop/doc/installing.md
@@ -135,7 +135,7 @@ The current implementation has two versions: an initial interpreter (binary fung
 3. cmake -DCMAKE_CXX_COMPILER=acpp -DCMAKE_BUILD_TYPE=Release ../
 6. make
 
-The built binary can be run as ./Core/EvaluatorV2/fungpu_v2 ../TestPrograms/MergeSort.fgpu
+The built binary can be run as ./Core/evaluator_v2/fungpu_v2 ../test_programs/MergeSort.fgpu
 
 ## Build ##
 [![Build Status](http://gpuandai.com:8081/job/FunGPU/job/master/badge/icon)](http://gpuandai.com:8081/job/FunGPU/job/master/)
