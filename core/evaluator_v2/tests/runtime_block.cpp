@@ -1,9 +1,9 @@
 #define BOOST_TEST_MODULE RuntimeBlockTestsModule
 #include "core/evaluator_v2/runtime_block.hpp"
-#include "core/evaluator_v2/block_generator.hpp"
-#include "core/evaluator_v2/compile_program.hpp"
 #include "core/block_prep.hpp"
 #include "core/compiler.hpp"
+#include "core/evaluator_v2/block_generator.hpp"
+#include "core/evaluator_v2/compile_program.hpp"
 #include "core/parser.hpp"
 #include "core/visitor.hpp"
 #include <boost/test/tools/old/interface.hpp>
@@ -193,7 +193,8 @@ BOOST_FIXTURE_TEST_CASE(EvaluateFalseBranchInTailPos, Fixture) {
 }
 
 BOOST_FIXTURE_TEST_CASE(EvaluateTrueBranchInTailPos, Fixture) {
-  check_first_lambda_evaluates_to(4, "./test_programs/TrueBranchInTailPos.fgpu");
+  check_first_lambda_evaluates_to(4,
+                                  "./test_programs/TrueBranchInTailPos.fgpu");
 }
 
 BOOST_FIXTURE_TEST_CASE(EvaluateBranchBlocksInParallelBasic, Fixture) {

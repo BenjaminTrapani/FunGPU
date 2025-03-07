@@ -3,10 +3,7 @@
 #include <iostream>
 
 namespace FunGPU {
-SExpr::SExpr()
-    : m_type(Type::ListOfSExpr), m_float_val(0),
-      m_children(
-          std::make_shared<std::vector<std::shared_ptr<const SExpr>>>()) {}
+SExpr::SExpr() : m_type(Type::ListOfSExpr), m_float_val(0) {}
 
 SExpr::SExpr(const std::string &symbol) {
   try {
@@ -16,12 +13,12 @@ SExpr::SExpr(const std::string &symbol) {
     m_float_val = temp_float_val;
   } catch (const std::exception &) {
     m_type = Type::Symbol;
-    m_symbol = std::make_shared<std::string>(symbol);
+    m_symbol = symbol;
   }
 }
 
 void SExpr::add_child(const std::shared_ptr<const SExpr> &child) {
-  m_children->push_back(child);
+  m_children.push_back(child);
 }
 
 void SExpr::debug_print(const std::size_t indent) const {
@@ -37,11 +34,11 @@ void SExpr::debug_print(const std::size_t indent) const {
     std::cout << m_float_val << std::endl;
     break;
   case Type::Symbol:
-    std::cout << *m_symbol << std::endl;
+    std::cout << m_symbol << std::endl;
     break;
   case Type::ListOfSExpr:
     std::cout << "(" << std::endl;
-    for (const auto &child : *m_children) {
+    for (const auto &child : m_children) {
       child->debug_print(indent + 1);
     }
     print_indent();

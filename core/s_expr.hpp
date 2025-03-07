@@ -17,11 +17,11 @@ public:
   SExpr();
   SExpr(const std::string &literalValue);
 
-  Type get_type() const { return m_type; }
-  Float_t get_float_val() const { return m_float_val; }
-  std::shared_ptr<const std::string> get_symbol() const { return m_symbol; }
-  std::shared_ptr<const std::vector<std::shared_ptr<const SExpr>>>
-  get_children() const {
+  Type get_type() const noexcept { return m_type; }
+  Float_t get_float_val() const noexcept { return m_float_val; }
+  const std::string &get_symbol() const noexcept { return m_symbol; }
+  const std::vector<std::shared_ptr<const SExpr>> &
+  get_children() const noexcept {
     return m_children;
   }
 
@@ -31,7 +31,7 @@ public:
 private:
   Type m_type;
   Float_t m_float_val;
-  std::shared_ptr<const std::string> m_symbol;
-  std::shared_ptr<std::vector<std::shared_ptr<const SExpr>>> m_children;
+  std::string m_symbol;
+  std::vector<std::shared_ptr<const SExpr>> m_children;
 };
 } // namespace FunGPU
