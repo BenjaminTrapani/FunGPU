@@ -24,13 +24,13 @@ find_package(Boost 1.58 REQUIRED COMPONENTS unit_test_framework)
 
 add_executable(fungpu main.cpp)
 
-add_subdirectory(Core)
-add_subdirectory(TestPrograms)
-add_subdirectory(IntegrationTests)
+add_subdirectory(core)
+add_subdirectory(test_programs)
+add_subdirectory(integration_tests)
 
 target_link_libraries(fungpu fungpu_evaluator)
 
-file(GLOB_RECURSE ALL_SOURCE_FILES Core/*.cpp Core/*.h Core/*.hpp main.cpp)
+file(GLOB_RECURSE ALL_SOURCE_FILES core/*.cpp core/*.h core/*.hpp main.cpp)
 find_program (CLANGFORMAT_CMD clang-format "/usr/lib/llvm-18/bin/")
 
 add_custom_target(clangformat

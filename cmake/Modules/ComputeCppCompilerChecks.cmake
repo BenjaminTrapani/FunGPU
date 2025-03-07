@@ -13,7 +13,7 @@ endif()
 if(MSVC)
   set(ComputeCpp_STL_CHECK_SRC __STL_check)
   file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${ComputeCpp_STL_CHECK_SRC}.cpp
-    "#include "Core/sycl.hpp"  \n"
+    "#include "core/sycl.hpp"  \n"
     "int main() { return 0; }\n")
   set(_stl_test_command ${ComputeCpp_DEVICE_COMPILER_EXECUTABLE}
                         -sycl
