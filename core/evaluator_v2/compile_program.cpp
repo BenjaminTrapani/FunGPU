@@ -23,7 +23,7 @@ Program compile_program(const std::string &path,
   Compiler compiler(parsed_result, mem_pool_buffer);
   Compiler::ASTNodeHandle compiled_result;
   try {
-    compiled_result = compiler.compile();
+    compiled_result = compiler.compile().ast_root;
   } catch (const Compiler::CompileException &e) {
     std::cerr << "Failed to compile " << path << ": " << e.what() << std::endl;
     throw std::runtime_error("Compilation failure");

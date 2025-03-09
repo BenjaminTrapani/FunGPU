@@ -1,10 +1,15 @@
 #define BOOST_TEST_MODULE EvaluatorTestModule
 
 #include "core/evaluator_v2/evaluator.hpp"
+#include "core/compiler.hpp"
 #include "core/evaluator_v2/compile_program.hpp"
 #include "core/evaluator_v2/instruction.hpp"
+#include "core/parser.hpp"
+#include "core/serialize_ast_as_fgpu_program.hpp"
+#include "core/temporary_directory.h"
 #include <boost/test/tools/old/interface.hpp>
 #include <boost/test/unit_test.hpp>
+#include <filesystem>
 #include <stdexcept>
 
 namespace FunGPU::EvaluatorV2 {
@@ -82,6 +87,29 @@ struct Fixture {
     std::cout << "initial_alloc_count=" << initial_alloc_count
               << ", final_alloc_count=" << final_alloc_count << std::endl;
   }
+
+  void check_roundtripped_program_yields_same_result(
+      const Float_t expected_val, const std::string &program_path) {
+    Parser parser(program_path);
+    auto parsed_result = parser.parse_program();
+
+    Compiler compiler(parsed_result, mem_pool_buffer);
+    const auto [compiled_result, all_identifiers] = compiler.compile();
+    const auto temp_path = std::filesystem::temp_directory_path() /
+                           std::filesystem::path(program_path).filename();
+    const TemporaryDirectory temp_dir;
+    const auto updated_program_path =
+        temp_dir.path() / std::filesystem::path(program_path).filename();
+    std::fstream fgpu_program_file(updated_program_path, std::ios::out);
+    const auto fgpu_program = serialize_ast_as_fgpu_program(
+        compiled_result, all_identifiers, mem_pool_buffer);
+    fgpu_program_file << fgpu_program;
+    fgpu_program_file.close();
+    compiler.deallocate_ast(compiled_result);
+
+    check_program_yields_result(expected_val, program_path);
+    check_program_yields_result(expected_val, updated_program_path);
+  }
 };
 
 namespace {
@@ -110,10 +138,12 @@ BOOST_FIXTURE_TEST_CASE(MultiList, Fixture) {
   check_program_yields_result(3, "./test_programs/MultiList.fgpu");
 }
 BOOST_FIXTURE_TEST_CASE(MapExample, Fixture) {
-  check_program_yields_result(1, "./test_programs/MapExample.fgpu");
+  check_roundtripped_program_yields_same_result(
+      1, "./test_programs/MapExample.fgpu");
 }
 BOOST_FIXTURE_TEST_CASE(MergeSort, Fixture) {
-  check_program_yields_result(123456, "./test_programs/MergeSort.fgpu");
+  check_roundtripped_program_yields_same_result(
+      123456, "./test_programs/MergeSort.fgpu");
 }
 BOOST_FIXTURE_TEST_CASE(BranchInBinding, Fixture) {
   check_program_yields_result(130, "./test_programs/BranchInBinding.fgpu");
