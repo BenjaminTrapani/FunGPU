@@ -59,7 +59,6 @@ void serialize_ast_as_fgpu_program(
               bound_identifiers.pop_back();
             }
             os << ")";
-            // os << "\n" << indent_str << ")";
           },
           [&](const Compiler::LambdaNode &node) {
             os << "(lambda (";
