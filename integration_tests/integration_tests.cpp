@@ -65,7 +65,7 @@ run_program(const std::string &path,
   std::cout << std::endl;
 
   Compiler compiler(parsed_result, mem_pool_buffer);
-  auto compiled_result = compiler.compile();
+  auto compiled_result = compiler.compile().ast_root;
 
   std::cout << "Compiled program: " << std::endl;
   compiler.debug_print_ast(compiled_result);

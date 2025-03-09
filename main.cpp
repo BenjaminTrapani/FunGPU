@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
       Compiler compiler(parsed_result, mem_pool_buff);
       Compiler::ASTNodeHandle compiled_result;
       try {
-        compiled_result = compiler.compile();
+        compiled_result = compiler.compile().ast_root;
       } catch (const Compiler::CompileException &e) {
         std::cerr << "Failed to compile " << *program_path << ": " << e.what()
                   << std::endl;

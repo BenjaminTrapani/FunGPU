@@ -207,15 +207,23 @@ public:
     std::string m_what;
   };
 
+  struct CompileResult {
+    ASTNodeHandle ast_root;
+    std::vector<std::string> all_identifiers;
+  };
+
   Compiler(std::shared_ptr<const SExpr> sexpr,
            cl::sycl::buffer<PortableMemPool> pool)
       : m_sexpr(sexpr), m_mem_pool(pool) {}
 
-  ASTNodeHandle compile() {
+  CompileResult compile() {
     std::list<std::string> initial_bound;
     auto mem_pool_acc =
         m_mem_pool.get_access<cl::sycl::access::mode::read_write>();
-    return compile(m_sexpr, initial_bound, mem_pool_acc);
+    std::vector<std::string> all_identifiers;
+    const auto ast_root =
+        compile(m_sexpr, initial_bound, all_identifiers, mem_pool_acc);
+    return CompileResult(ast_root, all_identifiers);
   }
 
   void debug_print_ast(ASTNodeHandle root_of_ast);
@@ -230,10 +238,12 @@ private:
 
   static ASTNodeHandle compile(std::shared_ptr<const SExpr> sexpr,
                                std::list<std::string> bound_identifiers,
+                               std::vector<std::string> &all_identifiers,
                                PortableMemPool::HostAccessor_t mem_pool_acc);
   static ASTNodeHandle
   compile_list_of_sexpr(std::shared_ptr<const SExpr> sexpr,
                         std::list<std::string> bound_identifiers,
+                        std::vector<std::string> &all_identifiers,
                         PortableMemPool::HostAccessor_t mem_pool_acc);
 
   std::shared_ptr<const SExpr> m_sexpr;
