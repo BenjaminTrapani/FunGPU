@@ -106,7 +106,7 @@ struct Fixture {
     fgpu_program_file << fgpu_program;
     fgpu_program_file.close();
     compiler.deallocate_ast(compiled_result);
-    // check_program_yields_result(expected_val, program_path);
+    check_program_yields_result(expected_val, program_path);
     check_program_yields_result(expected_val, updated_program_path);
   }
 };

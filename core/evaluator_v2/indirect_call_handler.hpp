@@ -47,17 +47,12 @@ public:
           max_num_threads_per_lambda(cl::sycl::range<1>(1)),
           total_num_blocks(cl::sycl::range<1>(1)),
           result(cl::sycl::range<1>(1)), copy_begin_idx(cl::sycl::range<1>(1)),
-          indirect_call_requests_by_block(cl::sycl::range<1>(program_count)) {}
-
-    void update_for_num_lambdas(const std::size_t program_count) {
-      indirect_call_requests_by_block_data =
-          std::shared_ptr<IndirectCallRequestBuffer[]>(
-              new IndirectCallRequestBuffer[program_count]);
-      indirect_call_requests_by_block =
-          cl::sycl::buffer<IndirectCallRequestBuffer>(
+          indirect_call_requests_by_block_data(
+              std::shared_ptr<IndirectCallRequestBuffer[]>(
+                  new IndirectCallRequestBuffer[program_count])),
+          indirect_call_requests_by_block(
               indirect_call_requests_by_block_data.get(),
-              cl::sycl::range<1>(program_count));
-    }
+              cl::sycl::range<1>(program_count)) {}
 
     using IndirectCallAccessorType =
         cl::sycl::accessor<IndirectCallRequestBuffer, 1,

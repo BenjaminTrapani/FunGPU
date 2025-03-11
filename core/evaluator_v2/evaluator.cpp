@@ -7,7 +7,7 @@
 
 namespace FunGPU::EvaluatorV2 {
 Evaluator::Evaluator(cl::sycl::buffer<PortableMemPool> buffer)
-    : mem_pool_buffer_(buffer), indirect_call_handler_buffers_(4) {
+    : mem_pool_buffer_(buffer) {
   std::cout << "Running on "
             << work_queue_.get_device().get_info<cl::sycl::info::device::name>()
             << ", block size: " << sizeof(RuntimeBlockType)
@@ -17,18 +17,17 @@ Evaluator::Evaluator(cl::sycl::buffer<PortableMemPool> buffer)
 }
 
 RuntimeValue Evaluator::compute(const Program program) {
-  indirect_call_handler_buffers_ =
-      IndirectCallHandlerType::Buffers(program.get_count());
+  IndirectCallHandlerType::Buffers indirect_call_handler_buffers(
+      program.get_count());
   const auto begin_time = std::chrono::high_resolution_clock::now();
   first_block_ = construct_initial_block(program);
-  indirect_call_handler_buffers_.update_for_num_lambdas(program.get_count());
   work_queue_.submit([&](cl::sycl::handler &cgh) {
     auto indirect_call_acc =
         indirect_call_handler_buffer_
             .get_access<cl::sycl::access::mode::read_write>(cgh);
     const auto first_block_tmp = first_block_;
     auto indirect_call_buffer_acc =
-        indirect_call_handler_buffers_.indirect_call_requests_by_block
+        indirect_call_handler_buffers.indirect_call_requests_by_block
             .get_access<cl::sycl::access::mode::read_write>(cgh);
     cgh.single_task([indirect_call_acc, first_block_tmp, program,
                      indirect_call_buffer_acc] {
@@ -43,12 +42,13 @@ RuntimeValue Evaluator::compute(const Program program) {
 
   Index_t num_steps = 0;
   while (true) {
-    const auto maybe_next_batch = schedule_next_batch(program);
+    const auto maybe_next_batch =
+        schedule_next_batch(program, indirect_call_handler_buffers);
     if (!maybe_next_batch.has_value()) {
       break;
     }
     ++num_steps;
-    run_eval_step(*maybe_next_batch);
+    run_eval_step(*maybe_next_batch, indirect_call_handler_buffers);
     cleanup(*maybe_next_batch);
   }
   const auto end_time = std::chrono::high_resolution_clock::now();
@@ -114,11 +114,13 @@ RuntimeValue Evaluator::read_result(
   return result.get_access<cl::sycl::access::mode::read>()[0];
 }
 
-auto Evaluator::schedule_next_batch(const Program program)
+auto Evaluator::schedule_next_batch(
+    const Program program,
+    IndirectCallHandlerType::Buffers &indirect_call_handler_buffers)
     -> std::optional<RuntimeBlockType::BlockExecGroup> {
   const auto next_batch = IndirectCallHandlerType::create_block_exec_group(
       work_queue_, mem_pool_buffer_, indirect_call_handler_buffer_,
-      indirect_call_handler_buffers_, program);
+      indirect_call_handler_buffers, program);
   if (next_batch.block_descs.get_count() > 1) {
     return next_batch;
   }
@@ -147,7 +149,8 @@ auto Evaluator::schedule_next_batch(const Program program)
 }
 
 void Evaluator::run_eval_step(
-    const RuntimeBlockType::BlockExecGroup block_group) {
+    const RuntimeBlockType::BlockExecGroup block_group,
+    IndirectCallHandlerType::Buffers &indirect_call_handler_buffers) {
   constexpr Index_t MAX_NUM_BLOCKS_PER_LAUNCH = 64;
   // TODO: Even though max number of blocks per kernel launch is constrained,
   // the buffers in the memory pool and indirect call handler are shared across
@@ -162,14 +165,15 @@ void Evaluator::run_eval_step(
                  MAX_NUM_BLOCKS_PER_LAUNCH);
     const auto tmp_num_launched = num_launched;
     work_queue_.submit([num_blocks_for_this_launch, block_group,
-                        tmp_num_launched, this](cl::sycl::handler &cgh) {
+                        tmp_num_launched, &indirect_call_handler_buffers,
+                        this](cl::sycl::handler &cgh) {
       auto mem_pool_write =
           mem_pool_buffer_.get_access<cl::sycl::access::mode::read_write>(cgh);
       auto indirect_call_handler_acc =
           indirect_call_handler_buffer_
               .get_access<cl::sycl::access::mode::read_write>(cgh);
       auto indirect_all_acc =
-          indirect_call_handler_buffers_.indirect_call_requests_by_block
+          indirect_call_handler_buffers.indirect_call_requests_by_block
               .get_access<cl::sycl::access::mode::read_write>(cgh);
       cl::sycl::accessor<RuntimeBlockType, 1,
                          cl::sycl::access::mode::read_write,

@@ -22,7 +22,6 @@ struct Fixture {
         << "Running on "
         << work_queue.get_device().get_info<cl::sycl::info::device::name>()
         << ", block size: " << sizeof(RuntimeBlockType) << std::endl;
-    buffers.update_for_num_lambdas(program.get_count());
   }
 
   std::shared_ptr<PortableMemPool> mem_pool_data =

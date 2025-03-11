@@ -25,13 +25,14 @@ private:
   PortableMemPool::Handle<RuntimeBlockType> construct_initial_block(Program);
   RuntimeValue read_result(PortableMemPool::Handle<RuntimeBlockType>);
 
-  void run_eval_step(RuntimeBlockType::BlockExecGroup);
-  std::optional<RuntimeBlockType::BlockExecGroup> schedule_next_batch(Program);
+  void run_eval_step(RuntimeBlockType::BlockExecGroup,
+                     IndirectCallHandlerType::Buffers &);
+  std::optional<RuntimeBlockType::BlockExecGroup>
+  schedule_next_batch(Program, IndirectCallHandlerType::Buffers &);
   void cleanup(RuntimeBlockType::BlockExecGroup);
 
   cl::sycl::buffer<PortableMemPool> mem_pool_buffer_;
   cl::sycl::buffer<bool> is_initial_block_ready_again_{cl::sycl::range<1>(1)};
-  IndirectCallHandlerType::Buffers indirect_call_handler_buffers_;
   std::shared_ptr<IndirectCallHandlerType> indirect_call_handler_data_ =
       std::make_shared<IndirectCallHandlerType>();
   cl::sycl::buffer<IndirectCallHandlerType> indirect_call_handler_buffer_{
