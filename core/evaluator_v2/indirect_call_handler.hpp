@@ -94,6 +94,10 @@ public:
                                    Index_t lambda_idx);
   void reset_reactivations_buffer();
 
+  static Index_t num_blocks_for_lambda(
+      Index_t lambda_idx,
+      typename Buffers::IndirectCallAccessorType indirect_call_acc);
+
   typename RuntimeBlockType::BlockExecGroup
   setup_block_for_lambda(PortableMemPool::DeviceAccessor_t,
                          typename Buffers::IndirectCallAccessorType,
@@ -108,6 +112,18 @@ public:
 
   BlockReactivationRequestBuffer block_reactivation_requests_by_block;
 };
+
+template <typename RuntimeBlockType, Index_t MaxNumIndirectCalls,
+          Index_t MaxNumReactivations>
+Index_t IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
+                            MaxNumReactivations>::
+    num_blocks_for_lambda(
+        Index_t lambda_idx,
+        typename Buffers::IndirectCallAccessorType indirect_call_acc) {
+  return (indirect_call_acc[lambda_idx].num_indirect_call_reqs +
+          RuntimeBlockType::NumThreadsPerBlock - 1) /
+         RuntimeBlockType::NumThreadsPerBlock;
+}
 
 template <typename RuntimeBlockType, Index_t MaxNumIndirectCalls,
           Index_t MaxNumReactivations>
@@ -127,8 +143,7 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
   }
   const auto num_threads_per_block = RuntimeBlockType::NumThreadsPerBlock;
   const auto num_blocks_required =
-      (indirect_call_reqs.num_indirect_call_reqs + num_threads_per_block - 1) /
-      num_threads_per_block;
+      num_blocks_for_lambda(lambda_idx, indirect_call_acc);
   const auto block_meta_handle =
       mem_pool_acc[0].alloc_array<typename RuntimeBlockType::BlockMetadata>(
           num_blocks_required);
@@ -142,12 +157,15 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
         std::min(num_threads_per_block, num_calls_remaining);
     // TODO fan out pre allocated runtime value allocation across blocks in
     // separate kernel
-    const auto pre_allocated_rvs =
+    const auto maybe_pre_allocated_rvs =
         RuntimeBlockType::template pre_allocate_runtime_values<
             cl::sycl::access::target::device>(num_threads, mem_pool_acc,
                                               program, lambda_idx);
+    if (!maybe_pre_allocated_rvs.has_value()) {
+      return {};
+    }
     const auto runtime_block_handle = mem_pool_acc[0].alloc<RuntimeBlockType>(
-        instructions_data.instructions, pre_allocated_rvs, num_threads);
+        instructions_data.instructions, *maybe_pre_allocated_rvs, num_threads);
     block_metadata[i] = typename RuntimeBlockType::BlockMetadata(
         runtime_block_handle, instructions_data.instructions, num_threads);
     max_num_instructions = std::max(max_num_instructions,
@@ -318,6 +336,61 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
     });
   });
 
+  // Calculate total number of blocks across all lambdas. Allocate the result
+  // array.
+  work_queue.submit([&](cl::sycl::handler &cgh) {
+    auto mem_pool_write =
+        mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
+    auto indirect_call_handler_acc =
+        indirect_call_handler
+            .template get_access<cl::sycl::access::mode::read_write>(cgh);
+    auto total_num_blocks_acc =
+        buffers.total_num_blocks
+            .template get_access<cl::sycl::access::mode::discard_write>(cgh);
+    auto indirect_call_requests_by_block_acc =
+        buffers.indirect_call_requests_by_block
+            .template get_access<cl::sycl::access::mode::read_write>(cgh);
+    cgh.parallel_for<class BlockGroupsPerLambda>(
+        cl::sycl::range<1>(program.get_count() + 1),
+        [mem_pool_write, indirect_call_handler_acc, program,
+         total_num_blocks_acc,
+         indirect_call_requests_by_block_acc](cl::sycl::item<1> itm) {
+          const auto lambda_idx = itm.get_linear_id();
+          const Index_t num_blocks_in_lambda =
+              lambda_idx < program.get_count()
+                  ? num_blocks_for_lambda(lambda_idx,
+                                          indirect_call_requests_by_block_acc)
+                  : indirect_call_handler_acc[0]
+                        .block_reactivation_requests_by_block
+                        .num_runtime_blocks_reactivated;
+          cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
+                               cl::sycl::memory_scope::device,
+                               cl::sycl::access::address_space::global_space>
+              total_num_blocks_atomic(total_num_blocks_acc[0]);
+          total_num_blocks_atomic.fetch_add(num_blocks_in_lambda);
+        });
+  });
+
+  work_queue.submit([&](cl::sycl::handler &cgh) {
+    auto mem_pool_write =
+        mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
+    auto total_num_blocks_acc =
+        buffers.total_num_blocks
+            .template get_access<cl::sycl::access::mode::read>(cgh);
+    auto result_acc =
+        buffers.result
+            .template get_access<cl::sycl::access::mode::discard_write>(cgh);
+    cgh.single_task<class InitResult>(
+        [mem_pool_write, total_num_blocks_acc, result_acc] {
+          const auto all_block_descs =
+              mem_pool_write[0]
+                  .alloc_array<typename RuntimeBlockType::BlockMetadata>(
+                      total_num_blocks_acc[0]);
+          result_acc[0] =
+              typename RuntimeBlockType::BlockExecGroup(all_block_descs, 0);
+        });
+  });
+
   work_queue.submit([&](cl::sycl::handler &cgh) {
     auto mem_pool_write =
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
@@ -330,9 +403,6 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
     auto atomic_max_threads_per_lambda =
         buffers.max_num_threads_per_lambda
             .template get_access<cl::sycl::access::mode::read_write>(cgh);
-    auto total_num_blocks_acc =
-        buffers.total_num_blocks
-            .template get_access<cl::sycl::access::mode::read_write>(cgh);
     auto indirect_call_requests_by_block_acc =
         buffers.indirect_call_requests_by_block
             .template get_access<cl::sycl::access::mode::read_write>(cgh);
@@ -340,7 +410,6 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
         cl::sycl::range<1>(program.get_count() + 1),
         [mem_pool_write, block_exec_group_per_lambda_acc,
          indirect_call_handler_acc, program, atomic_max_threads_per_lambda,
-         total_num_blocks_acc,
          indirect_call_requests_by_block_acc](cl::sycl::item<1> itm) {
           const auto lambda_idx = itm.get_linear_id();
           if (lambda_idx < program.get_count()) {
@@ -362,11 +431,6 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
                   .block_descs.get_count();
           max_num_threads_per_lambda.fetch_max(
               num_blocks_in_lambda * RuntimeBlockType::NumThreadsPerBlock);
-          cl::sycl::atomic_ref<Index_t, cl::sycl::memory_order::seq_cst,
-                               cl::sycl::memory_scope::device,
-                               cl::sycl::access::address_space::global_space>
-              total_num_blocks_atomic(total_num_blocks_acc[0]);
-          total_num_blocks_atomic.fetch_add(num_blocks_in_lambda);
         });
   });
   // Fill indirect call request blocks
@@ -397,26 +461,6 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
               mem_pool_write, indirect_call_requests_by_block_acc,
               block_exec_group_per_lambda_acc, itm.get_id(0), itm.get_id(1));
         });
-  });
-
-  work_queue.submit([&](cl::sycl::handler &cgh) {
-    auto mem_pool_write =
-        mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
-    auto total_num_blocks_acc =
-        buffers.total_num_blocks
-            .template get_access<cl::sycl::access::mode::read>(cgh);
-    auto result_acc =
-        buffers.result
-            .template get_access<cl::sycl::access::mode::discard_write>(cgh);
-    cgh.single_task<class InitResult>([mem_pool_write, total_num_blocks_acc,
-                                       result_acc] {
-      const auto all_block_descs =
-          mem_pool_write[0]
-              .template alloc_array<typename RuntimeBlockType::BlockMetadata>(
-                  total_num_blocks_acc[0]);
-      result_acc[0] =
-          typename RuntimeBlockType::BlockExecGroup(all_block_descs, 0);
-    });
   });
 
   // Merge block exec groups into one.

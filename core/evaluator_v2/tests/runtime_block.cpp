@@ -111,8 +111,9 @@ struct Fixture {
       const auto pre_allocated_rvs =
           RuntimeBlockType::pre_allocate_runtime_values(
               THREADS_PER_BLOCK, mem_pool_acc, no_bindings_program, 0);
+      BOOST_REQUIRE(pre_allocated_rvs.has_value());
       const auto block_handle = mem_pool_acc[0].alloc<RuntimeBlockType>(
-          lambdas[0].instructions, pre_allocated_rvs, THREADS_PER_BLOCK);
+          lambdas[0].instructions, *pre_allocated_rvs, THREADS_PER_BLOCK);
       const auto block_metadata_array =
           mem_pool_acc[0].alloc_array<RuntimeBlockType::BlockMetadata>(1);
       auto *block_meta_array_data =
@@ -146,8 +147,9 @@ struct Fixture {
         const auto pre_allocate_runtime_values =
             RuntimeBlockType::pre_allocate_runtime_values(
                 THREADS_PER_BLOCK, mem_pool_acc, no_bindings_program, 0);
+        BOOST_REQUIRE(pre_allocate_runtime_values.has_value());
         const auto block_handle = mem_pool_acc[0].alloc<RuntimeBlockType>(
-            lambdas[0].instructions, pre_allocate_runtime_values,
+            lambdas[0].instructions, *pre_allocate_runtime_values,
             THREADS_PER_BLOCK);
         BOOST_REQUIRE(block_handle !=
                       PortableMemPool::Handle<RuntimeBlockType>());
