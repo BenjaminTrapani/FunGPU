@@ -1,10 +1,10 @@
 #include "core/collect_all_ast_nodes.hpp"
 
 namespace FunGPU {
-void collect_all_ast_nodes(Compiler::ASTNodeHandle &root,
+void collect_all_ast_nodes(ASTNodeHandle &root,
                            PortableMemPool::HostAccessor_t mem_pool_acc,
-                           const std::set<Compiler::ASTNode::Type> &types,
-                           std::set<Compiler::ASTNodeHandle *> &result) {
+                           const std::set<ASTNode::Type> &types,
+                           std::set<ASTNodeHandle *> &result) {
   visit(
       *mem_pool_acc[0].deref_handle(root),
       [&](auto &node) {
@@ -21,13 +21,13 @@ void collect_all_ast_nodes(Compiler::ASTNodeHandle &root,
       });
 }
 
-void collect_all_ast_nodes(const Compiler::ASTNodeHandle &root,
+void collect_all_ast_nodes(const ASTNodeHandle &root,
                            PortableMemPool::HostAccessor_t mem_pool_acc,
-                           const std::set<Compiler::ASTNode::Type> &types,
-                           std::set<const Compiler::ASTNodeHandle *> &result) {
-  std::set<Compiler::ASTNodeHandle *> mutable_result;
-  collect_all_ast_nodes(const_cast<Compiler::ASTNodeHandle &>(root),
-                        mem_pool_acc, types, mutable_result);
+                           const std::set<ASTNode::Type> &types,
+                           std::set<const ASTNodeHandle *> &result) {
+  std::set<ASTNodeHandle *> mutable_result;
+  collect_all_ast_nodes(const_cast<ASTNodeHandle &>(root), mem_pool_acc, types,
+                        mutable_result);
   for (const auto handle : mutable_result) {
     result.emplace(handle);
   }

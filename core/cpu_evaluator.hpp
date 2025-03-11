@@ -1,4 +1,4 @@
-#include "core/compiler.hpp"
+#include "core/ast_node.hpp"
 #include "core/error.hpp"
 #include "core/portable_mem_pool.hpp"
 #include "core/runtime_block.hpp"
@@ -55,15 +55,14 @@ public:
 
   CPUEvaluator(cl::sycl::buffer<PortableMemPool> mem_pool);
   ~CPUEvaluator();
-  RuntimeBlock_t::RuntimeValue
-  evaluate_program(const Compiler::ASTNodeHandle &root_node,
-                   Index_t &max_concurrent_blocks);
+  RuntimeBlock_t::RuntimeValue evaluate_program(const ASTNodeHandle &root_node,
+                                                Index_t &max_concurrent_blocks);
   cl::sycl::buffer<PortableMemPool> get_mem_pool_buffer() const {
     return m_mem_pool_buff;
   }
 
 private:
-  void create_first_block(Compiler::ASTNodeHandle root_node);
+  void create_first_block(ASTNodeHandle root_node);
   void check_for_block_errors(Index_t max_concurrent_blocks);
   void perform_garbage_collection(Index_t num_active_blocks);
 

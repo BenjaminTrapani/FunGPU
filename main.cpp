@@ -36,7 +36,7 @@ int main(int argc, char **argv) {
       auto parsed_result = parser.parse_program();
 
       Compiler compiler(parsed_result, mem_pool_buff);
-      Compiler::ASTNodeHandle compiled_result;
+      ASTNodeHandle compiled_result;
       try {
         compiled_result = compiler.compile().ast_root;
       } catch (const Compiler::CompileException &e) {

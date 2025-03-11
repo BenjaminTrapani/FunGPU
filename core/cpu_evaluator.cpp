@@ -104,7 +104,7 @@ CPUEvaluator::~CPUEvaluator() {
   });
 }
 
-void CPUEvaluator::create_first_block(const Compiler::ASTNodeHandle root_node) {
+void CPUEvaluator::create_first_block(const ASTNodeHandle root_node) {
   try {
     cl::sycl::buffer<Error> alloc_gc_error_buf(cl::sycl::range<1>(1));
     m_work_queue.submit([&](handler &cgh) {
@@ -293,7 +293,7 @@ void CPUEvaluator::perform_garbage_collection(const Index_t num_active_blocks) {
 }
 
 CPUEvaluator::RuntimeBlock_t::RuntimeValue
-CPUEvaluator::evaluate_program(const Compiler::ASTNodeHandle &root_node,
+CPUEvaluator::evaluate_program(const ASTNodeHandle &root_node,
                                Index_t &max_concurrent_blocks_during_exec) {
   const auto begin_time = std::chrono::high_resolution_clock::now();
   create_first_block(root_node);

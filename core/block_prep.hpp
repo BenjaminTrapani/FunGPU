@@ -1,4 +1,4 @@
-#include "core/compiler.hpp"
+#include "core/ast_node.hpp"
 #include "core/portable_mem_pool.hpp"
 #include "core/types.hpp"
 #include <set>
@@ -10,42 +10,39 @@ public:
   BlockPrep(Index_t registers_per_block, Index_t instructions_per_cycle,
             Index_t cycles_per_block, cl::sycl::buffer<PortableMemPool> pool);
 
-  Compiler::ASTNodeHandle
-  prepare_for_block_generation(Compiler::ASTNodeHandle root);
+  ASTNodeHandle prepare_for_block_generation(ASTNodeHandle root);
 
 private:
-  Compiler::ASTNodeHandle
-  prepare_for_block_generation(Compiler::ASTNodeHandle root,
+  ASTNodeHandle
+  prepare_for_block_generation(ASTNodeHandle root,
                                PortableMemPool::HostAccessor_t mem_pool_acc);
-  static Compiler::ASTNodeHandle
-  rewrite_as_prim_ops(Compiler::ASTNodeHandle root,
+  static ASTNodeHandle
+  rewrite_as_prim_ops(ASTNodeHandle root,
                       PortableMemPool::HostAccessor_t mem_pool_acc);
 
-  static void get_prim_ops(Compiler::ASTNodeHandle &root,
+  static void get_prim_ops(ASTNodeHandle &root,
                            PortableMemPool::HostAccessor_t mem_pool_acc,
-                           std::vector<Compiler::ASTNodeHandle *> &out);
+                           std::vector<ASTNodeHandle *> &out);
   static void increase_binding_ref_indices(
-      Compiler::ASTNodeHandle node, std::size_t increment,
+      ASTNodeHandle node, std::size_t increment,
       PortableMemPool::HostAccessor_t mem_pool_acc,
       std::size_t min_ref_for_increment,
-      const std::set<Compiler::ASTNodeHandle> &idents_to_exclude);
-  static Compiler::ASTNodeHandle
-  wrap_in_no_arg_lambda(Compiler::ASTNodeHandle root,
-                        PortableMemPool::HostAccessor_t &);
-  static Compiler::ASTNodeHandle
-  rewrite_letrec_as_let(Compiler::ASTNodeHandle root,
+      const std::set<ASTNodeHandle> &idents_to_exclude);
+  static ASTNodeHandle wrap_in_no_arg_lambda(ASTNodeHandle root,
+                                             PortableMemPool::HostAccessor_t &);
+  static ASTNodeHandle
+  rewrite_letrec_as_let(ASTNodeHandle root,
                         PortableMemPool::HostAccessor_t &mem_pool_acc);
-  static Compiler::ASTNodeHandle substitute_identifiers_in_range_with_call(
-      Compiler::ASTNodeHandle root, const Index_t start, const Index_t end,
+  static ASTNodeHandle substitute_identifiers_in_range_with_call(
+      ASTNodeHandle root, const Index_t start, const Index_t end,
       PortableMemPool::HostAccessor_t &mem_pool_acc);
-  static Compiler::ASTNodeHandle rewrite_recursive_lambdas_with_self_args(
-      Compiler::ASTNodeHandle root,
-      PortableMemPool::HostAccessor_t &mem_pool_acc);
+  static ASTNodeHandle rewrite_recursive_lambdas_with_self_args(
+      ASTNodeHandle root, PortableMemPool::HostAccessor_t &mem_pool_acc);
   static bool all_idents_in_range_direct_calls(
-      const Compiler::ASTNodeHandle node_handle, Index_t start_idx,
-      Index_t end_idx, PortableMemPool::HostAccessor_t &mem_pool_acc);
-  static Compiler::ASTNodeHandle extend_call_args_with_binding_identifiers(
-      Compiler::ASTNodeHandle root, Index_t start_idx, Index_t end_index,
+      const ASTNodeHandle node_handle, Index_t start_idx, Index_t end_idx,
+      PortableMemPool::HostAccessor_t &mem_pool_acc);
+  static ASTNodeHandle extend_call_args_with_binding_identifiers(
+      ASTNodeHandle root, Index_t start_idx, Index_t end_index,
       PortableMemPool::HostAccessor_t &mem_pool_acc);
   /*
     Output of this whole process:

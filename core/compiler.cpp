@@ -4,7 +4,7 @@
 #include <sstream>
 
 namespace FunGPU {
-Compiler::ASTNodeHandle
+ASTNodeHandle
 Compiler::compile_list_of_sexpr(std::shared_ptr<const SExpr> sexpr,
                                 std::list<std::string> bound_identifiers,
                                 std::vector<std::string> &all_identifiers,
@@ -210,11 +210,10 @@ Compiler::compile_list_of_sexpr(std::shared_ptr<const SExpr> sexpr,
   return result;
 }
 
-Compiler::ASTNodeHandle
-Compiler::compile(std::shared_ptr<const SExpr> sexpr,
-                  std::list<std::string> bound_identifiers,
-                  std::vector<std::string> &all_identifiers,
-                  PortableMemPool::HostAccessor_t mem_pool_acc) {
+ASTNodeHandle Compiler::compile(std::shared_ptr<const SExpr> sexpr,
+                                std::list<std::string> bound_identifiers,
+                                std::vector<std::string> &all_identifiers,
+                                PortableMemPool::HostAccessor_t mem_pool_acc) {
   ASTNodeHandle result;
   switch (sexpr->get_type()) {
   case SExpr::Type::Symbol: {

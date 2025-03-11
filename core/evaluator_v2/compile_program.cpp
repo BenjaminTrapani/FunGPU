@@ -21,7 +21,7 @@ Program compile_program(const std::string &path,
   BlockGenerator block_generator(mem_pool_buffer, registers_per_thread);
 
   Compiler compiler(parsed_result, mem_pool_buffer);
-  Compiler::ASTNodeHandle compiled_result;
+  ASTNodeHandle compiled_result;
   try {
     compiled_result = compiler.compile().ast_root;
   } catch (const Compiler::CompileException &e) {
