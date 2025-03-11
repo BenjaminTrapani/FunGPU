@@ -1,5 +1,5 @@
 #include "core/serialize_ast_as_fgpu_program.hpp"
-#include "core/compiler.hpp"
+#include "core/ast_node.hpp"
 #include "core/visitor.hpp"
 #include <deque>
 #include <ostream>
@@ -10,9 +10,9 @@ namespace {
 constexpr std::size_t INDENT_SIZE = 2;
 
 void serialize_ast_as_fgpu_program(
-    const Compiler::ASTNodeHandle &ast,
-    PortableMemPool::HostAccessor_t mem_pool_acc, std::ostream &os,
-    const std::size_t indent, const std::vector<std::string> &all_identifiers,
+    const ASTNodeHandle &ast, PortableMemPool::HostAccessor_t mem_pool_acc,
+    std::ostream &os, const std::size_t indent,
+    const std::vector<std::string> &all_identifiers,
     std::size_t &identifier_index, std::deque<std::string> &bound_identifiers) {
   const auto &ast_node = *mem_pool_acc[0].deref_handle(ast);
   const auto newline_str = "\n" + std::string(indent, ' ');
@@ -20,11 +20,11 @@ void serialize_ast_as_fgpu_program(
   visit(
       ast_node,
       Visitor{
-          [&](const Compiler::BindNode &node) {
+          [&](const BindNode &node) {
             os << (node.is_rec() ? "(letrec " : "(let ") << "( ";
             const auto *binding_data =
                 mem_pool_acc[0].deref_handle(node.m_bindings);
-            const std::span<const Compiler::ASTNodeHandle> bindings_span(
+            const std::span<const ASTNodeHandle> bindings_span(
                 binding_data, node.m_bindings.get_count());
             const auto original_identifier_index = identifier_index;
             const auto push_all_bound_identifiers = [&] {
@@ -60,7 +60,7 @@ void serialize_ast_as_fgpu_program(
             }
             os << ")";
           },
-          [&](const Compiler::LambdaNode &node) {
+          [&](const LambdaNode &node) {
             os << "(lambda (";
             for (std::size_t i = 0; i < node.m_arg_count; ++i) {
               const auto &bound_identifier =
@@ -81,8 +81,8 @@ void serialize_ast_as_fgpu_program(
             }
             os << ")";
           },
-          [&](const Compiler::NumberNode &node) { os << node.m_value; },
-          [&](const Compiler::IdentifierNode &node) {
+          [&](const NumberNode &node) { os << node.m_value; },
+          [&](const IdentifierNode &node) {
             const auto ident_index = bound_identifiers.size() -
                                      static_cast<std::size_t>(node.m_index) -
                                      1UZ;
@@ -94,13 +94,13 @@ void serialize_ast_as_fgpu_program(
             }
             os << bound_identifiers.at(ident_index);
           },
-          [&](const Compiler::CallNode &node) {
+          [&](const CallNode &node) {
             os << "(";
             serialize_ast_as_fgpu_program(node.m_target, mem_pool_acc, os,
                                           indent, all_identifiers,
                                           identifier_index, bound_identifiers);
             const auto *arg_data = mem_pool_acc[0].deref_handle(node.m_args);
-            const std::span<const Compiler::ASTNodeHandle> args_span(
+            const std::span<const ASTNodeHandle> args_span(
                 arg_data, node.m_args.get_count());
             for (const auto &arg : args_span) {
               os << " ";
@@ -110,7 +110,7 @@ void serialize_ast_as_fgpu_program(
             }
             os << ")";
           },
-          [&](const Compiler::IfNode &node) {
+          [&](const IfNode &node) {
             os << "(if ";
             serialize_ast_as_fgpu_program(node.m_pred, mem_pool_acc, os, indent,
                                           all_identifiers, identifier_index,
@@ -125,10 +125,10 @@ void serialize_ast_as_fgpu_program(
                                           identifier_index, bound_identifiers);
             os << ")";
           },
-          [&](const Compiler::UnaryOpNode &node) {
+          [&](const UnaryOpNode &node) {
             os << "(";
             switch (node.node_type) {
-            case Compiler::ASTNode::Type::Floor:
+            case ASTNode::Type::Floor:
               os << "floor ";
               break;
             default:
@@ -141,34 +141,34 @@ void serialize_ast_as_fgpu_program(
                                           bound_identifiers);
             os << ")";
           },
-          [&](const Compiler::BinaryOpNode &node) {
+          [&](const BinaryOpNode &node) {
             os << "(";
             const std::string_view op_str = [&] -> std::string_view {
               switch (node.node_type) {
-              case Compiler::ASTNode::Type::Add:
+              case ASTNode::Type::Add:
                 return "+";
-              case Compiler::ASTNode::Type::Sub:
+              case ASTNode::Type::Sub:
                 return "-";
-              case Compiler::ASTNode::Type::Mul:
+              case ASTNode::Type::Mul:
                 return "*";
-              case Compiler::ASTNode::Type::Div:
+              case ASTNode::Type::Div:
                 return "/";
-              case Compiler::ASTNode::Type::Equal:
+              case ASTNode::Type::Equal:
                 return "=";
-              case Compiler::ASTNode::Type::GreaterThan:
+              case ASTNode::Type::GreaterThan:
                 return ">";
-              case Compiler::ASTNode::Type::Remainder:
+              case ASTNode::Type::Remainder:
                 return "remainder";
-              case Compiler::ASTNode::Type::Expt:
+              case ASTNode::Type::Expt:
                 return "expt";
-              case Compiler::ASTNode::Type::Bind:
-              case Compiler::ASTNode::Type::BindRec:
-              case Compiler::ASTNode::Type::Call:
-              case Compiler::ASTNode::Type::If:
-              case Compiler::ASTNode::Type::Lambda:
-              case Compiler::ASTNode::Type::Number:
-              case Compiler::ASTNode::Type::Identifier:
-              case Compiler::ASTNode::Type::Floor:
+              case ASTNode::Type::Bind:
+              case ASTNode::Type::BindRec:
+              case ASTNode::Type::Call:
+              case ASTNode::Type::If:
+              case ASTNode::Type::Lambda:
+              case ASTNode::Type::Number:
+              case ASTNode::Type::Identifier:
+              case ASTNode::Type::Floor:
                 break;
               }
               throw std::runtime_error(
@@ -195,7 +195,7 @@ void serialize_ast_as_fgpu_program(
 } // namespace
 
 std::string
-serialize_ast_as_fgpu_program(const Compiler::ASTNodeHandle &ast,
+serialize_ast_as_fgpu_program(const ASTNodeHandle &ast,
                               const std::vector<std::string> &all_identifiers,
                               PortableMemPool::HostAccessor_t mem_pool_acc) {
   std::stringstream ss;

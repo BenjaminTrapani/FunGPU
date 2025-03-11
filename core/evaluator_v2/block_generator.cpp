@@ -13,11 +13,10 @@ BlockGenerator::BlockGenerator(cl::sycl::buffer<PortableMemPool> pool,
     : pool_(pool), registers_per_block_(registers_per_block) {}
 
 void BlockGenerator::assign_lambdas_block_indices(
-    PortableMemPool::HostAccessor_t &mem_pool_acc,
-    const Compiler::ASTNodeHandle root,
-    std::map<Compiler::ASTNodeHandle, Index_t> &result, Index_t &cur_index) {
+    PortableMemPool::HostAccessor_t &mem_pool_acc, const ASTNodeHandle root,
+    std::map<ASTNodeHandle, Index_t> &result, Index_t &cur_index) {
   visit(*mem_pool_acc[0].deref_handle(root),
-        Visitor{[&](const Compiler::LambdaNode &bind_node) {
+        Visitor{[&](const LambdaNode &bind_node) {
                   if (!result.emplace(root, cur_index++).second) {
                     throw std::invalid_argument(
                         "Multiple paths to the same lambda node in tree");
@@ -36,19 +35,19 @@ void BlockGenerator::assign_lambdas_block_indices(
 }
 
 void BlockGenerator::compute_lambda_space_ident_to_use_count(
-    const Compiler::ASTNodeHandle &node, Index_t num_bound_so_far,
+    const ASTNodeHandle &node, Index_t num_bound_so_far,
     PortableMemPool::HostAccessor_t &mem_pool_acc,
     std::unordered_map<Index_t, Index_t>
         &lambda_space_ident_to_remaining_count) {
   visit(
       *mem_pool_acc[0].deref_handle(node),
       Visitor{
-          [&](const Compiler::BindNode &bind_node) {
+          [&](const BindNode &bind_node) {
             for (auto idx = 0; idx < bind_node.m_bindings.get_count(); ++idx) {
               lambda_space_ident_to_remaining_count[num_bound_so_far++] = 0;
             }
             const auto num_bound_for_bound_expr =
-                bind_node.node_type == Compiler::ASTNode::Type::BindRec
+                bind_node.node_type == ASTNode::Type::BindRec
                     ? num_bound_so_far
                     : num_bound_so_far - bind_node.m_bindings.get_count();
             const auto *binding_data =
@@ -62,7 +61,7 @@ void BlockGenerator::compute_lambda_space_ident_to_use_count(
                 bind_node.m_child_expr, num_bound_so_far, mem_pool_acc,
                 lambda_space_ident_to_remaining_count);
           },
-          [&](const Compiler::LambdaNode &lambda_node) {
+          [&](const LambdaNode &lambda_node) {
             std::set<Index_t> captured_indices;
             extract_lambda_space_captured_indices(node, 0, mem_pool_acc,
                                                   captured_indices);
@@ -79,7 +78,7 @@ void BlockGenerator::compute_lambda_space_ident_to_use_count(
               }
             }
           },
-          [&](const Compiler::IdentifierNode &ident) {
+          [&](const IdentifierNode &ident) {
             const auto lambda_space_ident =
                 num_bound_so_far - ident.m_index - 1;
             auto iter =
@@ -102,7 +101,7 @@ void BlockGenerator::compute_lambda_space_ident_to_use_count(
 }
 
 void BlockGenerator::extract_lambda_space_captured_indices(
-    const Compiler::ASTNodeHandle &node, Index_t num_bound_so_far,
+    const ASTNodeHandle &node, Index_t num_bound_so_far,
     PortableMemPool::HostAccessor_t &mem_pool_acc,
     std::set<Index_t> &captured_indices) {
   const auto recurse_on_subexprs = [&](const auto &sub_expr) {
@@ -113,14 +112,14 @@ void BlockGenerator::extract_lambda_space_captured_indices(
   };
 
   visit(*mem_pool_acc[0].deref_handle(node),
-        Visitor{[&](const Compiler::BindNode &bind_node) {
+        Visitor{[&](const BindNode &bind_node) {
                   const auto is_rec =
-                      bind_node.node_type == Compiler::ASTNode::Type::BindRec;
+                      bind_node.node_type == ASTNode::Type::BindRec;
                   if (is_rec) {
                     num_bound_so_far += bind_node.m_bindings.get_count();
                   }
                   if (bind_node.m_bindings !=
-                      PortableMemPool::ArrayHandle<Compiler::ASTNodeHandle>()) {
+                      PortableMemPool::ArrayHandle<ASTNodeHandle>()) {
                     const auto *binding_data =
                         mem_pool_acc[0].deref_handle(bind_node.m_bindings);
                     for (Index_t i = 0; i < bind_node.m_bindings.get_count();
@@ -137,11 +136,11 @@ void BlockGenerator::extract_lambda_space_captured_indices(
                       bind_node.m_child_expr, num_bound_so_far, mem_pool_acc,
                       captured_indices);
                 },
-                [&](const Compiler::LambdaNode &lambda_node) {
+                [&](const LambdaNode &lambda_node) {
                   num_bound_so_far += lambda_node.m_arg_count;
                   recurse_on_subexprs(lambda_node);
                 },
-                [&](const Compiler::IdentifierNode &ident_node) {
+                [&](const IdentifierNode &ident_node) {
                   if (ident_node.m_index >= num_bound_so_far) {
                     captured_indices.emplace(num_bound_so_far -
                                              ident_node.m_index - 1);
@@ -152,8 +151,8 @@ void BlockGenerator::extract_lambda_space_captured_indices(
 }
 
 Lambda BlockGenerator::construct_block(
-    const Compiler::ASTNodeHandle &lambda, const Compiler::ASTNodeHandle root,
-    const std::map<Compiler::ASTNodeHandle, Index_t> &lambdas_to_blocks,
+    const ASTNodeHandle &lambda, const ASTNodeHandle root,
+    const std::map<ASTNodeHandle, Index_t> &lambdas_to_blocks,
     PortableMemPool::HostAccessor_t &mem_pool_acc) {
   std::deque<Index_t> free_indices;
   for (Index_t i = 0; i < registers_per_block_; ++i) {
@@ -162,10 +161,10 @@ Lambda BlockGenerator::construct_block(
 
   const auto lambda_node = [&] {
     const auto &derefd_node = *mem_pool_acc[0].deref_handle(lambda);
-    if (derefd_node.node_type != Compiler::ASTNode::Type::Lambda) {
+    if (derefd_node.node_type != ASTNode::Type::Lambda) {
       throw std::invalid_argument("Unexpected node type, not a lambda");
     }
-    return static_cast<const Compiler::LambdaNode &>(derefd_node);
+    return static_cast<const LambdaNode &>(derefd_node);
   }();
 
   std::unordered_map<Index_t, Index_t> lambda_space_ident_to_register;
@@ -197,13 +196,12 @@ Lambda BlockGenerator::construct_block(
   };
 
   const auto lookup_register_for_ident = [&](const auto &maybe_ident) {
-    if (maybe_ident.node_type != Compiler::ASTNode::Type::Identifier) {
+    if (maybe_ident.node_type != ASTNode::Type::Identifier) {
       throw std::invalid_argument(
           "Cannot generate indirect call for target which is not an "
           "identifier. Indicates a bug in block preparation layer.");
     }
-    const auto &ident_node =
-        static_cast<const Compiler::IdentifierNode &>(maybe_ident);
+    const auto &ident_node = static_cast<const IdentifierNode &>(maybe_ident);
     const auto ident_in_lambda_space =
         convert_to_lambda_space_index(ident_node.m_index);
     const auto register_idx_iter =
@@ -236,7 +234,7 @@ Lambda BlockGenerator::construct_block(
 
   std::vector<Instruction> result_instructions;
   const auto primitive_expression_to_instruction =
-      [&](const Compiler::ASTNodeHandle ast_node,
+      [&](const ASTNodeHandle ast_node,
           const std::optional<Index_t> pre_allocated_register,
           bool is_tail_instruction) {
         Instruction result;
@@ -249,7 +247,7 @@ Lambda BlockGenerator::construct_block(
         visit(
             *mem_pool_acc[0].deref_handle(ast_node),
             Visitor{
-                [&](const Compiler::CallNode &call_node) {
+                [&](const CallNode &call_node) {
                   result.type = is_tail_instruction
                                     ? InstructionType::BLOCKING_CALL_INDIRECT
                                     : InstructionType::CALL_INDIRECT;
@@ -291,7 +289,7 @@ Lambda BlockGenerator::construct_block(
                           throw std::invalid_argument("Unexpected");
                         });
                 },
-                [&](const Compiler::LambdaNode &) {
+                [&](const LambdaNode &) {
                   result.type = InstructionType::CREATE_LAMBDA;
                   const auto lambda_to_block_idx_iter =
                       lambdas_to_blocks.find(ast_node);
@@ -334,7 +332,7 @@ Lambda BlockGenerator::construct_block(
                   result.data.create_lambda.target_register =
                       allocate_register_or_use_pre_allocated();
                 },
-                [&](const Compiler::IfNode &if_node) {
+                [&](const IfNode &if_node) {
                   result.type = InstructionType::IF;
                   const auto &predicate_node =
                       *mem_pool_acc[0].deref_handle(if_node.m_pred);
@@ -344,39 +342,39 @@ Lambda BlockGenerator::construct_block(
                   result.data.if_val.goto_false =
                       result_instructions.size() + 2;
                 },
-                [&](const Compiler::NumberNode &number_node) {
+                [&](const NumberNode &number_node) {
                   result.type = InstructionType::ASSIGN_CONSTANT;
                   result.data.assign_constant.constant = number_node.m_value;
                   result.data.assign_constant.target_register =
                       allocate_register_or_use_pre_allocated();
                 },
-                [&](const Compiler::BinaryOpNode &binary_op_node) {
+                [&](const BinaryOpNode &binary_op_node) {
                   result.type = [&]() -> InstructionType {
                     switch (binary_op_node.node_type) {
-                    case Compiler::ASTNode::Type::Add:
+                    case ASTNode::Type::Add:
                       return InstructionType::ADD;
-                    case Compiler::ASTNode::Type::Sub:
+                    case ASTNode::Type::Sub:
                       return InstructionType::SUB;
-                    case Compiler::ASTNode::Type::Mul:
+                    case ASTNode::Type::Mul:
                       return InstructionType::MUL;
-                    case Compiler::ASTNode::Type::Div:
+                    case ASTNode::Type::Div:
                       return InstructionType::DIV;
-                    case Compiler::ASTNode::Type::Equal:
+                    case ASTNode::Type::Equal:
                       return InstructionType::EQUAL;
-                    case Compiler::ASTNode::Type::GreaterThan:
+                    case ASTNode::Type::GreaterThan:
                       return InstructionType::GREATER_THAN;
-                    case Compiler::ASTNode::Type::Remainder:
+                    case ASTNode::Type::Remainder:
                       return InstructionType::REMAINDER;
-                    case Compiler::ASTNode::Type::Expt:
+                    case ASTNode::Type::Expt:
                       return InstructionType::EXPT;
-                    case Compiler::ASTNode::Type::Bind:
-                    case Compiler::ASTNode::Type::BindRec:
-                    case Compiler::ASTNode::Type::Call:
-                    case Compiler::ASTNode::Type::If:
-                    case Compiler::ASTNode::Type::Floor:
-                    case Compiler::ASTNode::Type::Number:
-                    case Compiler::ASTNode::Type::Identifier:
-                    case Compiler::ASTNode::Type::Lambda:
+                    case ASTNode::Type::Bind:
+                    case ASTNode::Type::BindRec:
+                    case ASTNode::Type::Call:
+                    case ASTNode::Type::If:
+                    case ASTNode::Type::Floor:
+                    case ASTNode::Type::Number:
+                    case ASTNode::Type::Identifier:
+                    case ASTNode::Type::Lambda:
                       throw std::invalid_argument(
                           "Unexpected AST node type for binary op");
                     }
@@ -406,10 +404,10 @@ Lambda BlockGenerator::construct_block(
                               "Unexpected instruction type");
                         });
                 },
-                [&](const Compiler::UnaryOpNode &unary_op_node) {
+                [&](const UnaryOpNode &unary_op_node) {
                   result.type = [&]() -> InstructionType {
                     switch (unary_op_node.node_type) {
-                    case Compiler::ASTNode::Type::Floor:
+                    case ASTNode::Type::Floor:
                       return InstructionType::FLOOR;
                     default:
                       throw std::invalid_argument("Unexpected unary op node");
@@ -432,11 +430,11 @@ Lambda BlockGenerator::construct_block(
                               "Unexpected instruction type");
                         });
                 },
-                [&](const Compiler::BindNode &) {
+                [&](const BindNode &) {
                   throw std::invalid_argument(
                       "Should not generate instructions for bind nodes");
                 },
-                [&](const Compiler::IdentifierNode &ident_node) {
+                [&](const IdentifierNode &ident_node) {
                   result.type = InstructionType::ASSIGN;
                   result.data.assign.target_register =
                       allocate_register_or_use_pre_allocated();
@@ -449,7 +447,7 @@ Lambda BlockGenerator::construct_block(
 
         auto idents_in_most_recent_expression = [&] {
           const auto &derefd_ast_node = *mem_pool_acc[0].deref_handle(ast_node);
-          if (derefd_ast_node.node_type == Compiler::ASTNode::Type::Lambda) {
+          if (derefd_ast_node.node_type == ASTNode::Type::Lambda) {
             std::set<Index_t> captured_indices_set;
             extract_lambda_space_captured_indices(ast_node, 0, mem_pool_acc,
                                                   captured_indices_set);
@@ -460,27 +458,24 @@ Lambda BlockGenerator::construct_block(
             return result;
           }
           const auto ast_node_to_obtain_idents_from = [&] {
-            if (derefd_ast_node.node_type != Compiler::ASTNode::Type::If) {
+            if (derefd_ast_node.node_type != ASTNode::Type::If) {
               return ast_node;
             }
-            const auto &if_node =
-                static_cast<const Compiler::IfNode &>(derefd_ast_node);
+            const auto &if_node = static_cast<const IfNode &>(derefd_ast_node);
             return if_node.m_pred;
           }();
-          std::set<const Compiler::ASTNodeHandle *> identifiers;
+          std::set<const ASTNodeHandle *> identifiers;
           collect_all_ast_nodes(ast_node_to_obtain_idents_from, mem_pool_acc,
-                                {Compiler::ASTNode::Type::Identifier},
-                                identifiers);
+                                {ASTNode::Type::Identifier}, identifiers);
           std::set<Index_t> result;
           for (const auto ident : identifiers) {
             const auto &ident_node = *mem_pool_acc[0].deref_handle(*ident);
-            if (ident_node.node_type != Compiler::ASTNode::Type::Identifier) {
+            if (ident_node.node_type != ASTNode::Type::Identifier) {
               throw std::invalid_argument("Expected only identifiers in "
                                           "collection from CollectAllASTNodes");
             }
             result.emplace(convert_to_lambda_space_index(
-                static_cast<const Compiler::IdentifierNode &>(ident_node)
-                    .m_index));
+                static_cast<const IdentifierNode &>(ident_node).m_index));
           }
           return result;
         }();
@@ -510,18 +505,16 @@ Lambda BlockGenerator::construct_block(
         return result;
       };
 
-  Compiler::ASTNodeHandle pending_generation = lambda_node.m_child_expr;
-  while (pending_generation != Compiler::ASTNodeHandle()) {
+  ASTNodeHandle pending_generation = lambda_node.m_child_expr;
+  while (pending_generation != ASTNodeHandle()) {
     const auto *child_expr = mem_pool_acc[0].deref_handle(pending_generation);
     switch (child_expr->node_type) {
-    case Compiler::ASTNode::Type::Bind:
-    case Compiler::ASTNode::Type::BindRec: {
-      const auto &bind_node =
-          static_cast<const Compiler::BindNode &>(*child_expr);
+    case ASTNode::Type::Bind:
+    case ASTNode::Type::BindRec: {
+      const auto &bind_node = static_cast<const BindNode &>(*child_expr);
       const auto *bound_expr_data =
           mem_pool_acc[0].deref_handle(bind_node.m_bindings);
-      const auto is_rec =
-          child_expr->node_type == Compiler::ASTNode::Type::BindRec;
+      const auto is_rec = child_expr->node_type == ASTNode::Type::BindRec;
       std::deque<Index_t> pre_allocated_registers;
       if (is_rec) {
         for (Index_t i = 0; i < bind_node.m_bindings.get_count(); ++i) {
@@ -552,8 +545,8 @@ Lambda BlockGenerator::construct_block(
       }
       break;
     }
-    case Compiler::ASTNode::Type::If: {
-      const auto &if_node = static_cast<const Compiler::IfNode &>(*child_expr);
+    case ASTNode::Type::If: {
+      const auto &if_node = static_cast<const IfNode &>(*child_expr);
       result_instructions.emplace_back(primitive_expression_to_instruction(
           pending_generation, std::nullopt, false));
       result_instructions.emplace_back(primitive_expression_to_instruction(
@@ -561,7 +554,7 @@ Lambda BlockGenerator::construct_block(
       result_instructions.emplace_back(primitive_expression_to_instruction(
           if_node.m_else, std::nullopt, true));
       // If exprs are always in tail position
-      pending_generation = Compiler::ASTNodeHandle();
+      pending_generation = ASTNodeHandle();
       break;
     }
     default:
@@ -569,7 +562,7 @@ Lambda BlockGenerator::construct_block(
       auto &tail_instruction =
           result_instructions.emplace_back(primitive_expression_to_instruction(
               pending_generation, std::nullopt, true));
-      pending_generation = Compiler::ASTNodeHandle();
+      pending_generation = ASTNodeHandle();
       break;
     }
   }
@@ -582,14 +575,14 @@ Lambda BlockGenerator::construct_block(
   return Lambda(instructions_handle, mem_pool_acc);
 }
 
-Program BlockGenerator::construct_blocks(const Compiler::ASTNodeHandle root) {
+Program BlockGenerator::construct_blocks(const ASTNodeHandle root) {
   auto mem_pool_acc =
       pool_.template get_access<cl::sycl::access::mode::read_write>();
   Index_t initial_index = 0;
   // TODO this construction makes all lambdas recursive. Maybe only make
   // the lambda index available in the map after the block has been generated if
   // the lambda was not bound recursively.
-  std::map<Compiler::ASTNodeHandle, Index_t> lambdas_to_blocks;
+  std::map<ASTNodeHandle, Index_t> lambdas_to_blocks;
   assign_lambdas_block_indices(mem_pool_acc, root, lambdas_to_blocks,
                                initial_index);
   const auto all_lambdas_handle =

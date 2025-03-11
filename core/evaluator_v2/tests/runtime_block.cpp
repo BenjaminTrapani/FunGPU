@@ -1,7 +1,7 @@
 #define BOOST_TEST_MODULE RuntimeBlockTestsModule
 #include "core/evaluator_v2/runtime_block.hpp"
+#include "core/ast_node.hpp"
 #include "core/block_prep.hpp"
-#include "core/compiler.hpp"
 #include "core/evaluator_v2/block_generator.hpp"
 #include "core/evaluator_v2/compile_program.hpp"
 #include "core/parser.hpp"

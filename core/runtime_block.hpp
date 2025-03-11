@@ -1,4 +1,4 @@
-#include "core/compiler.hpp"
+#include "core/ast_node.hpp"
 #include "core/error.hpp"
 #include "core/garbage_collector.hpp"
 #include "core/list.hpp"
@@ -22,7 +22,7 @@ public:
   public:
     FunctionValue()
         : m_binding_parent(SharedRuntimeBlockHandle_t()), m_arg_count(0) {}
-    FunctionValue(const Compiler::ASTNodeHandle expr,
+    FunctionValue(const ASTNodeHandle expr,
                   const SharedRuntimeBlockHandle_t &binding_parent,
                   const Index_t arg_count)
         : m_expr(expr), m_binding_parent(binding_parent),
@@ -36,7 +36,7 @@ public:
              m_binding_parent == other.m_binding_parent;
     }
 
-    Compiler::ASTNodeHandle m_expr;
+    ASTNodeHandle m_expr;
     SharedRuntimeBlockHandle_t m_binding_parent;
     Index_t m_arg_count;
   };
@@ -87,7 +87,7 @@ public:
 
   using RuntimeValueHandle_t = PortableMemPool::Handle<RuntimeValue>;
 
-  RuntimeBlock(const Compiler::ASTNodeHandle ast_node,
+  RuntimeBlock(const ASTNodeHandle ast_node,
                const SharedRuntimeBlockHandle_t &binding_parent,
                const SharedRuntimeBlockHandle_t &parent,
                const cl::sycl::accessor<
@@ -181,7 +181,7 @@ public:
     m_dep_tracker = dep_tracker;
   }
 
-  Compiler::ASTNode *GetASTNode() {
+  ASTNode *GetASTNode() {
     return m_mem_pool_device_acc[0].deref_handle(m_ast_node);
   }
 
@@ -213,11 +213,10 @@ public:
 
     auto ast_node = GetASTNode();
     switch (ast_node->node_type) {
-    case Compiler::ASTNode::Type::Bind:
-    case Compiler::ASTNode::Type::BindRec: {
-      const bool is_rec =
-          ast_node->node_type == Compiler::ASTNode::Type::BindRec;
-      auto bind_node = static_cast<Compiler::BindNode *>(ast_node);
+    case ASTNode::Type::Bind:
+    case ASTNode::Type::BindRec: {
+      const bool is_rec = ast_node->node_type == ASTNode::Type::BindRec;
+      auto bind_node = static_cast<BindNode *>(ast_node);
       auto garbage_collector =
           m_mem_pool_device_acc[0].deref_handle(m_garbage_collector_handle);
       if (m_num_bound == 0 && bind_node->m_bindings.get_count() > 0) {
@@ -256,8 +255,8 @@ public:
 
       break;
     }
-    case Compiler::ASTNode::Type::Call: {
-      auto call_node = static_cast<Compiler::CallNode *>(ast_node);
+    case ASTNode::Type::Call: {
+      auto call_node = static_cast<CallNode *>(ast_node);
       auto garbage_collector =
           m_mem_pool_device_acc[0].deref_handle(m_garbage_collector_handle);
       if (m_num_bound == 0) {
@@ -318,8 +317,8 @@ public:
 
       break;
     }
-    case Compiler::ASTNode::Type::If: {
-      auto if_node = static_cast<Compiler::IfNode *>(ast_node);
+    case ASTNode::Type::If: {
+      auto if_node = static_cast<IfNode *>(ast_node);
       auto garbage_collector =
           m_mem_pool_device_acc[0].deref_handle(m_garbage_collector_handle);
       if (m_num_bound == 0) {
@@ -351,7 +350,7 @@ public:
       }
       break;
     }
-    case Compiler::ASTNode::Type::Add: {
+    case ASTNode::Type::Add: {
       bool was_op_added;
       RETURN_IF_FAILURE(MaybeAddBinaryOp(was_op_added));
       if (!was_op_added) {
@@ -362,7 +361,7 @@ public:
       }
       break;
     }
-    case Compiler::ASTNode::Type::Sub: {
+    case ASTNode::Type::Sub: {
       bool was_op_added;
       RETURN_IF_FAILURE(MaybeAddBinaryOp(was_op_added));
       if (!was_op_added) {
@@ -373,7 +372,7 @@ public:
       }
       break;
     }
-    case Compiler::ASTNode::Type::Mul: {
+    case ASTNode::Type::Mul: {
       bool was_op_added;
       RETURN_IF_FAILURE(MaybeAddBinaryOp(was_op_added));
       if (!was_op_added) {
@@ -384,7 +383,7 @@ public:
       }
       break;
     }
-    case Compiler::ASTNode::Type::Div: {
+    case ASTNode::Type::Div: {
       bool was_op_added;
       RETURN_IF_FAILURE(MaybeAddBinaryOp(was_op_added));
       if (!was_op_added) {
@@ -395,7 +394,7 @@ public:
       }
       break;
     }
-    case Compiler::ASTNode::Type::Equal: {
+    case ASTNode::Type::Equal: {
       bool was_op_added;
       RETURN_IF_FAILURE(MaybeAddBinaryOp(was_op_added));
       if (!was_op_added) {
@@ -411,7 +410,7 @@ public:
       }
       break;
     }
-    case Compiler::ASTNode::Type::GreaterThan: {
+    case ASTNode::Type::GreaterThan: {
       bool was_op_added;
       RETURN_IF_FAILURE(MaybeAddBinaryOp(was_op_added));
       if (!was_op_added) {
@@ -422,7 +421,7 @@ public:
       }
       break;
     }
-    case Compiler::ASTNode::Type::Remainder: {
+    case ASTNode::Type::Remainder: {
       bool was_op_added;
       RETURN_IF_FAILURE(MaybeAddBinaryOp(was_op_added));
       if (!was_op_added) {
@@ -435,7 +434,7 @@ public:
       }
       break;
     }
-    case Compiler::ASTNode::Type::Expt: {
+    case ASTNode::Type::Expt: {
       bool was_op_added;
       RETURN_IF_FAILURE(MaybeAddBinaryOp(was_op_added));
       if (!was_op_added) {
@@ -448,7 +447,7 @@ public:
       }
       break;
     }
-    case Compiler::ASTNode::Type::Floor: {
+    case ASTNode::Type::Floor: {
       bool was_op_added;
       RETURN_IF_FAILURE(MaybeAddUnaryOp(was_op_added));
       if (!was_op_added) {
@@ -461,15 +460,15 @@ public:
       }
       break;
     }
-    case Compiler::ASTNode::Type::Number: {
-      auto num_node = static_cast<Compiler::NumberNode *>(ast_node);
+    case ASTNode::Type::Number: {
+      auto num_node = static_cast<NumberNode *>(ast_node);
       typename RuntimeValue::Data data;
       data.float_val = num_node->m_value;
       RETURN_IF_FAILURE(fill_dest_value(RuntimeValue::Type::Float_t, data));
       break;
     }
-    case Compiler::ASTNode::Type::Identifier: {
-      auto ident_node = static_cast<Compiler::IdentifierNode *>(ast_node);
+    case ASTNode::Type::Identifier: {
+      auto ident_node = static_cast<IdentifierNode *>(ast_node);
       Error error;
       const auto ident_val =
           GetRuntimeValueForIndex(ident_node->m_index, error);
@@ -478,8 +477,8 @@ public:
           fill_dest_value(ident_val->node_type, ident_val->m_data));
       break;
     }
-    case Compiler::ASTNode::Type::Lambda: {
-      auto lambda_node = static_cast<Compiler::LambdaNode *>(ast_node);
+    case ASTNode::Type::Lambda: {
+      auto lambda_node = static_cast<LambdaNode *>(ast_node);
       typename RuntimeValue::Data data_val;
       data_val.function_val =
           FunctionValue(lambda_node->m_child_expr, m_binding_parent,
@@ -528,7 +527,7 @@ private:
 
   Error MaybeAddUnaryOp(bool &added) {
     if (m_num_bound == 0) {
-      auto unary_op = static_cast<Compiler::UnaryOpNode *>(GetASTNode());
+      auto unary_op = static_cast<UnaryOpNode *>(GetASTNode());
       auto garbage_collector =
           m_mem_pool_device_acc[0].deref_handle(m_garbage_collector_handle);
       SharedRuntimeBlockHandle_t dependency_node;
@@ -549,7 +548,7 @@ private:
 
   Error MaybeAddBinaryOp(bool &added) {
     if (m_num_bound == 0) {
-      auto binary_op = static_cast<Compiler::BinaryOpNode *>(GetASTNode());
+      auto binary_op = static_cast<BinaryOpNode *>(GetASTNode());
       auto garbage_collector =
           m_mem_pool_device_acc[0].deref_handle(m_garbage_collector_handle);
       SharedRuntimeBlockHandle_t right_node_block;
@@ -643,7 +642,7 @@ private:
     return Error();
   }
 
-  Compiler::ASTNodeHandle m_ast_node;
+  ASTNodeHandle m_ast_node;
   PortableMemPool::ArrayHandle<RuntimeValue> m_runtime_values;
   SharedRuntimeBlockHandle_t m_binding_parent;
   SharedRuntimeBlockHandle_t m_parent;
