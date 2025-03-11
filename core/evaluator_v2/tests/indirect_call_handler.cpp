@@ -69,7 +69,7 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
       auto pre_allocated_rvs = RuntimeBlockType::pre_allocate_runtime_values<
           cl::sycl::access::target::device>(1, mem_pool_acc, tmp_program, 0);
       const auto mock_caller = mem_pool_acc[0].alloc<RuntimeBlockType>(
-          lambda_0.instructions, pre_allocated_rvs, 1);
+          lambda_0.instructions, *pre_allocated_rvs, 1);
       caller_acc[0] = mock_caller;
       const auto captures_acc = mem_pool_acc[0].alloc_array<RuntimeValue>(2);
       auto *captures_data = mem_pool_acc[0].deref_handle(captures_acc);
@@ -89,7 +89,7 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
               cl::sycl::access::target::device>(2, mem_pool_acc, tmp_program,
                                                 1);
       const auto reactivated_block = mem_pool_acc[0].alloc<RuntimeBlockType>(
-          lambda_1.instructions, pre_allocated_rvs_for_reactivated_block, 2);
+          lambda_1.instructions, *pre_allocated_rvs_for_reactivated_block, 2);
       reactivated_acc[0] = reactivated_block;
       indirect_call_acc[0].on_activate_block(mem_pool_acc, reactivated_block);
     });
@@ -169,9 +169,10 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
     auto pre_allocated_rvs = RuntimeBlockType::pre_allocate_runtime_values<
         cl::sycl::access::target::host_buffer>(1, mem_pool_acc, program, 0);
+    BOOST_REQUIRE(pre_allocated_rvs.has_value());
     caller = mem_pool_acc[0].alloc<RuntimeBlockType>(
         mem_pool_acc[0].deref_handle(program)[0].instructions,
-        pre_allocated_rvs, 1);
+        *pre_allocated_rvs, 1);
   }
   work_queue.submit([&](cl::sycl::handler &cgh) {
     auto indirect_call_acc =

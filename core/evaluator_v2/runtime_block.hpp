@@ -7,7 +7,7 @@
 #include "core/portable_mem_pool.hpp"
 #include "core/types.hpp"
 #include "core/visitor.hpp"
-#include <cstdint>
+#include <optional>
 
 namespace FunGPU::EvaluatorV2 {
 template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
@@ -57,7 +57,8 @@ public:
       ThreadsPerBlock>;
 
   template <cl::sycl::access::target ACCESS_TARGET>
-  static PreAllocatedRuntimeValuesPerThread pre_allocate_runtime_values(
+  static std::optional<PreAllocatedRuntimeValuesPerThread>
+  pre_allocate_runtime_values(
       Index_t num_threads,
       cl::sycl::accessor<PortableMemPool, 1, cl::sycl::access::mode::read_write,
                          ACCESS_TARGET>,
@@ -412,31 +413,44 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
         cl::sycl::accessor<PortableMemPool, 1,
                            cl::sycl::access::mode::read_write, ACCESS_TARGET>
             mem_pool_acc,
-        const Program program,
-        const Index_t lambda_idx) -> PreAllocatedRuntimeValuesPerThread {
+        const Program program, const Index_t lambda_idx)
+        -> std::optional<PreAllocatedRuntimeValuesPerThread> {
   const auto &instructions_data =
       mem_pool_acc[0].deref_handle(program)[lambda_idx];
 
   PreAllocatedRuntimeValuesPerThread pre_allocated_rvs;
 
   for (Index_t thread_idx = 0; thread_idx < num_threads; ++thread_idx) {
-    pre_allocated_rvs[thread_idx] =
+    const auto pre_allocated_rvs_handle =
         mem_pool_acc[0]
             .template alloc_array<PortableMemPool::ArrayHandle<RuntimeValue>>(
                 instructions_data.instruction_properties
                     .num_runtime_values_per_op.get_count());
+    if (pre_allocated_rvs_handle ==
+            PortableMemPool::ArrayHandle<
+                PortableMemPool::ArrayHandle<RuntimeValue>>() &&
+        instructions_data.instruction_properties.num_runtime_values_per_op
+                .get_count() != 0) {
+      return std::nullopt;
+    }
+    pre_allocated_rvs[thread_idx] = pre_allocated_rvs_handle;
     const auto *num_rvs_per_op = mem_pool_acc[0].deref_handle(
         instructions_data.instruction_properties.num_runtime_values_per_op);
     auto *pre_allocated_rv_data =
-        mem_pool_acc[0].deref_handle(pre_allocated_rvs[thread_idx]);
-    for (Index_t op_idx = 0; op_idx < pre_allocated_rvs[thread_idx].get_count();
+        mem_pool_acc[0].deref_handle(pre_allocated_rvs_handle);
+    for (Index_t op_idx = 0; op_idx < pre_allocated_rvs_handle.get_count();
          ++op_idx) {
-      pre_allocated_rv_data[op_idx] =
+      const auto pre_allocated_values_for_op =
           mem_pool_acc[0].template alloc_array<RuntimeValue>(
               num_rvs_per_op[op_idx]);
+      if (pre_allocated_values_for_op ==
+              PortableMemPool::ArrayHandle<RuntimeValue>() &&
+          num_rvs_per_op[op_idx] != 0) {
+        return std::nullopt;
+      }
+      pre_allocated_rv_data[op_idx] = pre_allocated_values_for_op;
     }
   }
   return pre_allocated_rvs;
 }
-
 } // namespace FunGPU::EvaluatorV2
