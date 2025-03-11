@@ -23,6 +23,10 @@ public:
   using HostAccessor_t =
       cl::sycl::accessor<PortableMemPool, 1, cl::sycl::access::mode::read_write,
                          cl::sycl::access::target::host_buffer>;
+  using HostReadOnlyAccessorType =
+      cl::sycl::accessor<PortableMemPool, 1, cl::sycl::access::mode::read,
+                         cl::sycl::access::target::host_buffer>;
+
   template <class T> class Handle {
   public:
     Handle() : m_distFromMemPoolBase(std::numeric_limits<Index_t>::max()) {}
@@ -168,6 +172,18 @@ public:
   template <class T> void dealloc_array(const ArrayHandle<T> &arrayHandle) {
     DeallocArrayImpl(arrayHandle, m_smallBin, m_mediumBin, m_largeBin,
                      m_extraLargeBin);
+  }
+
+  template <class T>
+  std::add_const_t<T> *deref_handle(const Handle<T> &handle) const {
+    return reinterpret_cast<std::add_const_t<T> *>(
+        reinterpret_cast<const std::byte *>(this) +
+        handle.get_dist_from_mem_pool_base());
+  }
+
+  template <class T>
+  const std::add_const_t<T> *deref_handle(const ArrayHandle<T> &handle) const {
+    return deref_handle(handle.m_handle);
   }
 
   template <class T> T *deref_handle(const Handle<T> &handle) {

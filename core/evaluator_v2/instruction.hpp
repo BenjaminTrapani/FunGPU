@@ -1,13 +1,13 @@
 #pragma once
 
-#include "core/evaluator_v2/runtime_value.hpp"
 #include "core/portable_mem_pool.hpp"
 #include "core/types.hpp"
+#include <cstdint>
 #include <string>
 #include <type_traits>
 
 namespace FunGPU::EvaluatorV2 {
-enum class InstructionType {
+enum class InstructionType : std::uint8_t {
   CREATE_LAMBDA,
   ASSIGN_CONSTANT,
   ASSIGN,
