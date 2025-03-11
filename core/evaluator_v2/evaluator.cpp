@@ -1,4 +1,5 @@
 #include "core/evaluator_v2/evaluator.hpp"
+#include "core/evaluator_v2/program.hpp"
 #include "core/evaluator_v2/runtime_block.hpp"
 #include "core/evaluator_v2/runtime_value.hpp"
 #include "core/portable_mem_pool.hpp"
@@ -7,16 +8,37 @@
 
 namespace FunGPU::EvaluatorV2 {
 Evaluator::Evaluator(cl::sycl::buffer<PortableMemPool> buffer)
-    : mem_pool_buffer_(buffer) {
+    : mem_pool_buffer_(buffer),
+      num_shared_memory_bytes_(
+          work_queue_.get_device()
+              .get_info<cl::sycl::info::device::local_mem_size>()) {
   std::cout << "Running on "
             << work_queue_.get_device().get_info<cl::sycl::info::device::name>()
-            << ", block size: " << sizeof(RuntimeBlockType)
-            << ", RuntimeBlockType::target_data size: "
-            << sizeof(RuntimeBlockType::target_data)
-            << ", runtime value size: " << sizeof(RuntimeValue) << std::endl;
+            << ", RuntimeBlockType size: " << sizeof(RuntimeBlockType)
+            << ", RuntimeValue size: " << sizeof(RuntimeValue)
+            << ", Instruction size: " << sizeof(Instruction)
+            << ", shared memory per block: " << num_shared_memory_bytes_
+            << std::endl;
+}
+
+void Evaluator::check_program_does_not_overflow_shared_memory(
+    const Program &program) {
+  const auto num_shared_memory_bytes_required_per_block =
+      static_cast<std::size_t>(max_num_instructions_in_program(
+          program,
+          mem_pool_buffer_.get_access<cl::sycl::access::mode::read>())) *
+          sizeof(Instruction) +
+      sizeof(RuntimeBlockType) + 1UZ;
+  if (num_shared_memory_bytes_required_per_block > num_shared_memory_bytes_) {
+    throw std::invalid_argument(
+        "Program may overflow shared memory: " +
+        std::to_string(num_shared_memory_bytes_required_per_block) + " > " +
+        std::to_string(num_shared_memory_bytes_));
+  }
 }
 
 RuntimeValue Evaluator::compute(const Program program) {
+  check_program_does_not_overflow_shared_memory(program);
   IndirectCallHandlerType::Buffers indirect_call_handler_buffers(
       program.get_count());
   const auto begin_time = std::chrono::high_resolution_clock::now();
@@ -151,107 +173,94 @@ auto Evaluator::schedule_next_batch(
 void Evaluator::run_eval_step(
     const RuntimeBlockType::BlockExecGroup block_group,
     IndirectCallHandlerType::Buffers &indirect_call_handler_buffers) {
-  constexpr Index_t MAX_NUM_BLOCKS_PER_LAUNCH = 64;
   // TODO: Even though max number of blocks per kernel launch is constrained,
   // the buffers in the memory pool and indirect call handler are shared across
   // invocations. Debug which ones are overflowing and consider using linked
   // list of blocks to more efficiently use memory. Add error reporting
   // mechanism for these failure modes.
-  for (Index_t num_launched = 0;
-       num_launched < block_group.block_descs.get_count();
-       num_launched += MAX_NUM_BLOCKS_PER_LAUNCH) {
-    const auto num_blocks_for_this_launch =
-        std::min(block_group.block_descs.get_count() - num_launched,
-                 MAX_NUM_BLOCKS_PER_LAUNCH);
-    const auto tmp_num_launched = num_launched;
-    work_queue_.submit([num_blocks_for_this_launch, block_group,
-                        tmp_num_launched, &indirect_call_handler_buffers,
-                        this](cl::sycl::handler &cgh) {
-      auto mem_pool_write =
-          mem_pool_buffer_.get_access<cl::sycl::access::mode::read_write>(cgh);
-      auto indirect_call_handler_acc =
-          indirect_call_handler_buffer_
-              .get_access<cl::sycl::access::mode::read_write>(cgh);
-      auto indirect_all_acc =
-          indirect_call_handler_buffers.indirect_call_requests_by_block
-              .get_access<cl::sycl::access::mode::read_write>(cgh);
-      cl::sycl::accessor<RuntimeBlockType, 1,
-                         cl::sycl::access::mode::read_write,
-                         cl::sycl::access::target::local>
-          local_block(cl::sycl::range<1>(1), cgh);
-      cl::sycl::accessor<bool, 1, cl::sycl::access::mode::read_write,
-                         cl::sycl::access::target::local>
-          any_threads_pending(cl::sycl::range<1>(1), cgh);
-      RuntimeBlockType::InstructionLocalMemAccessor local_instructions(
-          cl::sycl::range<2>(num_blocks_for_this_launch,
-                             block_group.max_num_instructions),
-          cgh);
-      cgh.parallel_for<class TestEvalLoop>(
-          cl::sycl::nd_range<1>(THREADS_PER_BLOCK * num_blocks_for_this_launch,
-                                THREADS_PER_BLOCK),
-          [mem_pool_write, block_group, local_block, local_instructions,
-           indirect_call_handler_acc, any_threads_pending, tmp_num_launched,
-           indirect_all_acc](cl::sycl::nd_item<1> itm) {
-            const auto thread_idx = itm.get_local_linear_id();
-            const auto block_idx = itm.get_group_linear_id() + tmp_num_launched;
-            const auto block_meta = mem_pool_write[0].deref_handle(
-                block_group.block_descs)[block_idx];
-            if (thread_idx == 0) {
-              local_block[0] =
-                  *mem_pool_write[0].deref_handle(block_meta.block);
-              any_threads_pending[0] = false;
+  work_queue_.submit([block_group, &indirect_call_handler_buffers,
+                      this](cl::sycl::handler &cgh) {
+    auto mem_pool_write =
+        mem_pool_buffer_.get_access<cl::sycl::access::mode::read_write>(cgh);
+    auto indirect_call_handler_acc =
+        indirect_call_handler_buffer_
+            .get_access<cl::sycl::access::mode::read_write>(cgh);
+    auto indirect_all_acc =
+        indirect_call_handler_buffers.indirect_call_requests_by_block
+            .get_access<cl::sycl::access::mode::read_write>(cgh);
+    cl::sycl::accessor<RuntimeBlockType, 1, cl::sycl::access::mode::read_write,
+                       cl::sycl::access::target::local>
+        local_block(cl::sycl::range<1>(1), cgh);
+    cl::sycl::accessor<bool, 1, cl::sycl::access::mode::read_write,
+                       cl::sycl::access::target::local>
+        any_threads_pending(cl::sycl::range<1>(1), cgh);
+    RuntimeBlockType::InstructionLocalMemAccessor local_instructions(
+        cl::sycl::range<2>(block_group.block_descs.get_count(),
+                           block_group.max_num_instructions),
+        cgh);
+    cgh.parallel_for<class TestEvalLoop>(
+        cl::sycl::nd_range<1>(THREADS_PER_BLOCK *
+                                  block_group.block_descs.get_count(),
+                              THREADS_PER_BLOCK),
+        [mem_pool_write, block_group, local_block, local_instructions,
+         indirect_call_handler_acc, any_threads_pending,
+         indirect_all_acc](cl::sycl::nd_item<1> itm) {
+          const auto thread_idx = itm.get_local_linear_id();
+          const auto block_idx = itm.get_group_linear_id();
+          const auto block_meta = mem_pool_write[0].deref_handle(
+              block_group.block_descs)[block_idx];
+          if (thread_idx == 0) {
+            local_block[0] = *mem_pool_write[0].deref_handle(block_meta.block);
+            any_threads_pending[0] = false;
+          }
+          const auto *instructions_global_data =
+              mem_pool_write[0].deref_handle(block_meta.instructions);
+          auto instructions_for_block =
+              local_instructions[itm.get_group_linear_id()];
+          for (auto idx = thread_idx; idx < block_meta.instructions.get_count();
+               idx += THREADS_PER_BLOCK) {
+            instructions_for_block[idx] = instructions_global_data[idx];
+          }
+          itm.barrier(cl::sycl::access::fence_space::local_space);
+          const RuntimeBlockType::Status status = local_block[0].evaluate(
+              itm.get_group_linear_id(), thread_idx, itm, mem_pool_write,
+              local_instructions, block_meta.instructions.get_count(),
+              block_meta.num_threads,
+              [indirect_call_handler_acc, mem_pool_write, indirect_all_acc](
+                  const auto block, const auto funv, const auto tid,
+                  const auto reg, const auto args) {
+                indirect_call_handler_acc[0].on_indirect_call(
+                    indirect_all_acc, block, funv, tid, reg, args);
+              },
+              [indirect_call_handler_acc, mem_pool_write](const auto block) {
+                indirect_call_handler_acc[0].on_activate_block(mem_pool_write,
+                                                               block);
+              });
+          switch (status) {
+          case RuntimeBlockType::Status::COMPLETE:
+            break;
+          case RuntimeBlockType::Status::STALLED:
+          case RuntimeBlockType::Status::READY:
+            any_threads_pending[0] = true;
+            break;
+          }
+          itm.barrier(cl::sycl::access::fence_space::local_space);
+          if (!any_threads_pending[0] && thread_idx < block_meta.num_threads) {
+            mem_pool_write[0]
+                .deref_handle(block_meta.block)
+                ->deallocate_runtime_values_array_for_thread(mem_pool_write,
+                                                             thread_idx);
+          }
+          cl::sycl::group_barrier(itm.get_group());
+          if (thread_idx == 0) {
+            if (!any_threads_pending[0]) {
+              mem_pool_write[0].dealloc(block_meta.block);
+            } else {
+              *mem_pool_write[0].deref_handle(block_meta.block) =
+                  local_block[0];
             }
-            const auto *instructions_global_data =
-                mem_pool_write[0].deref_handle(block_meta.instructions);
-            auto instructions_for_block =
-                local_instructions[itm.get_group_linear_id()];
-            for (auto idx = thread_idx;
-                 idx < block_meta.instructions.get_count();
-                 idx += THREADS_PER_BLOCK) {
-              instructions_for_block[idx] = instructions_global_data[idx];
-            }
-            itm.barrier(cl::sycl::access::fence_space::local_space);
-            const RuntimeBlockType::Status status = local_block[0].evaluate(
-                itm.get_group_linear_id(), thread_idx, itm, mem_pool_write,
-                local_instructions, block_meta.instructions.get_count(),
-                block_meta.num_threads,
-                [indirect_call_handler_acc, mem_pool_write, indirect_all_acc](
-                    const auto block, const auto funv, const auto tid,
-                    const auto reg, const auto args) {
-                  indirect_call_handler_acc[0].on_indirect_call(
-                      indirect_all_acc, block, funv, tid, reg, args);
-                },
-                [indirect_call_handler_acc, mem_pool_write](const auto block) {
-                  indirect_call_handler_acc[0].on_activate_block(mem_pool_write,
-                                                                 block);
-                });
-            switch (status) {
-            case RuntimeBlockType::Status::COMPLETE:
-              break;
-            case RuntimeBlockType::Status::STALLED:
-            case RuntimeBlockType::Status::READY:
-              any_threads_pending[0] = true;
-              break;
-            }
-            itm.barrier(cl::sycl::access::fence_space::local_space);
-            if (!any_threads_pending[0] &&
-                thread_idx < block_meta.num_threads) {
-              mem_pool_write[0]
-                  .deref_handle(block_meta.block)
-                  ->deallocate_runtime_values_array_for_thread(mem_pool_write,
-                                                               thread_idx);
-            }
-            cl::sycl::group_barrier(itm.get_group());
-            if (thread_idx == 0) {
-              if (!any_threads_pending[0]) {
-                mem_pool_write[0].dealloc(block_meta.block);
-              } else {
-                *mem_pool_write[0].deref_handle(block_meta.block) =
-                    local_block[0];
-              }
-            }
-          });
-    });
-  }
+          }
+        });
+  });
 }
 } // namespace FunGPU::EvaluatorV2
