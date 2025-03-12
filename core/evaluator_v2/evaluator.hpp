@@ -34,10 +34,6 @@ private:
 
   cl::sycl::buffer<PortableMemPool> mem_pool_buffer_;
   cl::sycl::buffer<bool> is_initial_block_ready_again_{cl::sycl::range<1>(1)};
-  std::shared_ptr<IndirectCallHandlerType> indirect_call_handler_data_ =
-      std::make_shared<IndirectCallHandlerType>();
-  cl::sycl::buffer<IndirectCallHandlerType> indirect_call_handler_buffer_{
-      indirect_call_handler_data_, cl::sycl::range<1>(1)};
   PortableMemPool::Handle<RuntimeBlockType> first_block_;
   cl::sycl::queue work_queue_;
   const size_t num_shared_memory_bytes_;

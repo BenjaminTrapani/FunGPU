@@ -30,10 +30,6 @@ struct Fixture {
                                                     cl::sycl::range<1>(1)};
   const Program program;
   IndirectCallHandlerType::Buffers buffers{program.get_count()};
-  std::shared_ptr<IndirectCallHandlerType> indirect_call_handler =
-      std::make_shared<IndirectCallHandlerType>();
-  cl::sycl::buffer<IndirectCallHandlerType> indirect_call_handler_buff{
-      indirect_call_handler, cl::sycl::range<1>(1)};
   cl::sycl::queue work_queue;
 };
 
@@ -47,9 +43,6 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
   cl::sycl::buffer<PortableMemPool::Handle<RuntimeBlockType>>
       reactivated_block_buf(cl::sycl::range<1>(1));
   work_queue.submit([&](cl::sycl::handler &cgh) {
-    auto indirect_call_acc =
-        indirect_call_handler_buff
-            .get_access<cl::sycl::access::mode::read_write>(cgh);
     auto mem_pool_acc =
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
     auto caller_acc =
@@ -57,13 +50,16 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
     auto reactivated_acc =
         reactivated_block_buf.get_access<cl::sycl::access::mode::discard_write>(
             cgh);
+    auto block_reactivation_buffer_ac =
+        buffers.block_reactivation_requests_by_block
+            .get_access<cl::sycl::access::mode::read_write>(cgh);
     auto ind_call_reqs_by_block_acc =
         buffers.indirect_call_requests_by_block
             .get_access<cl::sycl::access::mode::read_write>(cgh);
     const auto tmp_program = program;
-    cgh.single_task<class RequestIndirectCall>([indirect_call_acc, mem_pool_acc,
-                                                tmp_program, caller_acc,
-                                                reactivated_acc,
+    cgh.single_task<class RequestIndirectCall>([mem_pool_acc, tmp_program,
+                                                caller_acc, reactivated_acc,
+                                                block_reactivation_buffer_ac,
                                                 ind_call_reqs_by_block_acc] {
       const auto lambda_0 = mem_pool_acc[0].deref_handle(tmp_program)[0];
       auto pre_allocated_rvs = RuntimeBlockType::pre_allocate_runtime_values<
@@ -79,9 +75,9 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
       const auto test_args = mem_pool_acc[0].alloc_array<RuntimeValue>(1);
       RuntimeValue &arg_val = mem_pool_acc[0].deref_handle(test_args)[0];
       arg_val.data.float_val = 42;
-      indirect_call_acc[0].on_indirect_call(ind_call_reqs_by_block_acc,
-                                            mock_caller, function_value, 1, 2,
-                                            test_args);
+      IndirectCallHandlerType::on_indirect_call(ind_call_reqs_by_block_acc,
+                                                mock_caller, function_value, 1,
+                                                2, test_args);
 
       const auto lambda_1 = mem_pool_acc[0].deref_handle(tmp_program)[1];
       auto pre_allocated_rvs_for_reactivated_block =
@@ -91,13 +87,13 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
       const auto reactivated_block = mem_pool_acc[0].alloc<RuntimeBlockType>(
           lambda_1.instructions, *pre_allocated_rvs_for_reactivated_block, 2);
       reactivated_acc[0] = reactivated_block;
-      indirect_call_acc[0].on_activate_block(mem_pool_acc, reactivated_block);
+      IndirectCallHandlerType::on_activate_block(
+          mem_pool_acc, block_reactivation_buffer_ac, reactivated_block);
     });
   });
 
   const auto exec_group = IndirectCallHandlerType::create_block_exec_group(
-      work_queue, mem_pool_buffer, indirect_call_handler_buff, buffers,
-      program);
+      work_queue, mem_pool_buffer, buffers, program);
   BOOST_CHECK_EQUAL(2, exec_group.block_descs.get_count());
   BOOST_CHECK_EQUAL(3, exec_group.max_num_instructions);
   auto mem_pool_acc =
@@ -175,9 +171,6 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
         *pre_allocated_rvs, 1);
   }
   work_queue.submit([&](cl::sycl::handler &cgh) {
-    auto indirect_call_acc =
-        indirect_call_handler_buff
-            .get_access<cl::sycl::access::mode::read_write>(cgh);
     auto mem_pool_acc =
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
     const auto tmp_program = program;
@@ -186,7 +179,7 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
             .get_access<cl::sycl::access::mode::read_write>(cgh);
     cgh.parallel_for<class RequestIndirectCalls>(
         cl::sycl::range<2>(3, RuntimeBlockType::NumThreadsPerBlock * 4),
-        [indirect_call_acc, mem_pool_acc, tmp_program, caller,
+        [mem_pool_acc, tmp_program, caller,
          ind_call_reqs_by_block_acc](const cl::sycl::item<2> itm) {
           switch (itm.get_id(0)) {
           case 0:
@@ -219,15 +212,14 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
                 RuntimeValue(itm.get_id(0) + i + captures_acc.get_count());
           }
           FunctionValue function_value(itm.get_id(0) + 7, captures_acc);
-          indirect_call_acc[0].on_indirect_call(
+          IndirectCallHandlerType::on_indirect_call(
               ind_call_reqs_by_block_acc, caller, function_value, itm.get_id(0),
               itm.get_id(1), test_args);
         });
   });
 
   const auto exec_group = IndirectCallHandlerType::create_block_exec_group(
-      work_queue, mem_pool_buffer, indirect_call_handler_buff, buffers,
-      program);
+      work_queue, mem_pool_buffer, buffers, program);
   BOOST_CHECK_EQUAL(7, exec_group.block_descs.get_count());
   BOOST_CHECK_EQUAL(7, exec_group.max_num_instructions);
   auto mem_pool_acc =
