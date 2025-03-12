@@ -18,6 +18,7 @@ Evaluator::Evaluator(cl::sycl::buffer<PortableMemPool> buffer)
             << ", RuntimeValue size: " << sizeof(RuntimeValue)
             << ", Instruction size: " << sizeof(Instruction)
             << ", shared memory per block: " << num_shared_memory_bytes_
+            << ", max_blocks_scheduled_per_pass=" << IndirectCallHandlerType::MAX_BLOCKS_SCHEDULED_PER_PASS
             << std::endl;
 }
 
@@ -67,7 +68,6 @@ RuntimeValue Evaluator::compute(const Program program) {
     }
     ++num_steps;
     run_eval_step(*maybe_next_batch, indirect_call_handler_buffers);
-    cleanup(*maybe_next_batch);
   }
   const auto end_time = std::chrono::high_resolution_clock::now();
   std::cout << "num_steps: " << num_steps << std::endl;
@@ -77,16 +77,6 @@ RuntimeValue Evaluator::compute(const Program program) {
                    .count()
             << std::endl;
   return read_result(first_block_);
-}
-
-void Evaluator::cleanup(const RuntimeBlockType::BlockExecGroup exec_group) {
-  work_queue_.submit([&](cl::sycl::handler &cgh) {
-    auto mem_pool_acc =
-        mem_pool_buffer_.get_access<cl::sycl::access::mode::read_write>(cgh);
-    cgh.single_task([mem_pool_acc, exec_group] {
-      mem_pool_acc[0].dealloc_array(exec_group.block_descs);
-    });
-  });
 }
 
 auto Evaluator::construct_initial_block(const Program program)
@@ -135,38 +125,36 @@ RuntimeValue Evaluator::read_result(
 auto Evaluator::schedule_next_batch(
     const Program program,
     IndirectCallHandlerType::Buffers &indirect_call_handler_buffers)
-    -> std::optional<RuntimeBlockType::BlockExecGroup> {
-  const auto next_batch = IndirectCallHandlerType::create_block_exec_group(
+    -> std::optional<BlockExecGroup> {
+  const auto next_batch = IndirectCallHandlerType::populate_block_exec_group(
       work_queue_, mem_pool_buffer_, indirect_call_handler_buffers, program);
-  if (next_batch.block_descs.get_count() > 1) {
+  if (next_batch.num_blocks > 1) {
     return next_batch;
   }
-  if (next_batch.block_descs.get_count() != 1) {
+  if (next_batch.num_blocks != 1) {
     throw std::invalid_argument("Expected at least one block");
   }
   work_queue_.submit([&](cl::sycl::handler &cgh) {
-    auto mem_pool_acc =
-        mem_pool_buffer_.get_access<cl::sycl::access::mode::read_write>(cgh);
     auto result_acc =
         is_initial_block_ready_again_
             .get_access<cl::sycl::access::mode::discard_write>(cgh);
+    auto block_exec_acc = indirect_call_handler_buffers.block_exec_group
+        .get_access<cl::sycl::access::mode::read>(cgh);
     const auto first_block_tmp = first_block_;
-    cgh.single_task([mem_pool_acc, next_batch, first_block_tmp, result_acc] {
-      const auto &block_meta =
-          mem_pool_acc[0].deref_handle((next_batch.block_descs))[0];
+    cgh.single_task([block_exec_acc, next_batch, first_block_tmp, result_acc] {
+      const auto &block_meta = block_exec_acc[0];
       result_acc[0] = block_meta.block == first_block_tmp;
     });
   });
   if (is_initial_block_ready_again_
           .get_access<cl::sycl::access::mode::read>()[0]) {
-    cleanup(next_batch);
     return std::nullopt;
   }
   return next_batch;
 }
 
 void Evaluator::run_eval_step(
-    const RuntimeBlockType::BlockExecGroup block_group,
+    const BlockExecGroup block_group,
     IndirectCallHandlerType::Buffers &indirect_call_handler_buffers) {
   // TODO: Even though max number of blocks per kernel launch is constrained,
   // the buffers in the memory pool and indirect call handler are shared across
@@ -183,6 +171,8 @@ void Evaluator::run_eval_step(
     auto reactivate_block_acc =
         indirect_call_handler_buffers.block_reactivation_requests_by_block
             .get_access<cl::sycl::access::mode::read_write>(cgh);
+    auto block_exec_acc = indirect_call_handler_buffers.block_exec_group
+        .get_access<cl::sycl::access::mode::read>(cgh);
     cl::sycl::accessor<RuntimeBlockType, 1, cl::sycl::access::mode::read_write,
                        cl::sycl::access::target::local>
         local_block(cl::sycl::range<1>(1), cgh);
@@ -190,20 +180,19 @@ void Evaluator::run_eval_step(
                        cl::sycl::access::target::local>
         any_threads_pending(cl::sycl::range<1>(1), cgh);
     RuntimeBlockType::InstructionLocalMemAccessor local_instructions(
-        cl::sycl::range<2>(block_group.block_descs.get_count(),
+        cl::sycl::range<2>(block_group.num_blocks,
                            block_group.max_num_instructions),
         cgh);
     cgh.parallel_for<class TestEvalLoop>(
         cl::sycl::nd_range<1>(THREADS_PER_BLOCK *
-                                  block_group.block_descs.get_count(),
+                                  block_group.num_blocks,
                               THREADS_PER_BLOCK),
-        [mem_pool_write, block_group, local_block, local_instructions,
+        [mem_pool_write, local_block, local_instructions,
          any_threads_pending, indirect_all_acc,
-         reactivate_block_acc](cl::sycl::nd_item<1> itm) {
+         reactivate_block_acc, block_exec_acc](cl::sycl::nd_item<1> itm) {
           const auto thread_idx = itm.get_local_linear_id();
           const auto block_idx = itm.get_group_linear_id();
-          const auto block_meta = mem_pool_write[0].deref_handle(
-              block_group.block_descs)[block_idx];
+          const auto block_meta = block_exec_acc[block_idx];
           if (thread_idx == 0) {
             local_block[0] = *mem_pool_write[0].deref_handle(block_meta.block);
             any_threads_pending[0] = false;

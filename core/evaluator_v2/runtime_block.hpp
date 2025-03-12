@@ -8,6 +8,7 @@
 #include "core/types.hpp"
 #include "core/visitor.hpp"
 #include <optional>
+#include <cstdint>
 
 namespace FunGPU::EvaluatorV2 {
 template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
@@ -35,19 +36,7 @@ public:
     Index_t num_threads;
   };
 
-  struct BlockExecGroup {
-    BlockExecGroup(
-        const PortableMemPool::ArrayHandle<BlockMetadata> &block_descs,
-        const Index_t max_num_instructions)
-        : block_descs(block_descs), max_num_instructions(max_num_instructions) {
-    }
-    BlockExecGroup() = default;
-
-    PortableMemPool::ArrayHandle<BlockMetadata> block_descs;
-    Index_t max_num_instructions = 0;
-  };
-
-  enum class Status { READY, STALLED, COMPLETE };
+  enum class Status : std::uint8_t { READY, STALLED, COMPLETE };
 
   using InstructionLocalMemAccessor =
       cl::sycl::accessor<Instruction, 2, cl::sycl::access::mode::read_write,
@@ -63,6 +52,12 @@ public:
       cl::sycl::accessor<PortableMemPool, 1, cl::sycl::access::mode::read_write,
                          ACCESS_TARGET>,
       Program, Index_t lambda_idx);
+  template <cl::sycl::access::target ACCESS_TARGET>
+  static void deallocate_runtime_values_for_thread(
+      cl::sycl::accessor<PortableMemPool, 1, cl::sycl::access::mode::read_write,
+                         ACCESS_TARGET>,
+      const PreAllocatedRuntimeValuesPerThread &pre_allocated_runtime_values,
+      Index_t thread_idx);
 
   explicit RuntimeBlock(
       const PortableMemPool::ArrayHandle<Instruction> instructions,
@@ -407,6 +402,26 @@ void RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::fill_dependency(
 
 template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
 template <cl::sycl::access::target ACCESS_TARGET>
+void RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::deallocate_runtime_values_for_thread(
+      cl::sycl::accessor<PortableMemPool, 1,
+                           cl::sycl::access::mode::read_write, ACCESS_TARGET> mem_pool_acc,
+      const PreAllocatedRuntimeValuesPerThread &pre_allocated_runtime_values,
+      Index_t thread_idx) {
+    if (pre_allocated_runtime_values[thread_idx].get_count() == 0) {
+      return;
+    }
+    const auto *pre_allocated_rvs_data =
+        mem_pool_acc[0].deref_handle(pre_allocated_runtime_values[thread_idx]);
+    for (Index_t j = 0; j < pre_allocated_runtime_values[thread_idx].get_count(); ++j) {
+      if (pre_allocated_rvs_data[j].get_count() != 0) {
+        mem_pool_acc[0].dealloc_array(pre_allocated_rvs_data[j]);
+      }
+    }
+    mem_pool_acc[0].dealloc_array(pre_allocated_runtime_values[thread_idx]);
+}
+
+template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
+template <cl::sycl::access::target ACCESS_TARGET>
 auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
     pre_allocate_runtime_values(
         const Index_t num_threads,
@@ -420,6 +435,13 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
 
   PreAllocatedRuntimeValuesPerThread pre_allocated_rvs;
 
+  const auto deallocate_runtime_values_up_to_idx =
+      [&](const Index_t thread_idx) {
+        for (Index_t i = 0; i < thread_idx; ++i) {
+          deallocate_runtime_values_for_thread<ACCESS_TARGET>(mem_pool_acc, pre_allocated_rvs, i);
+        }
+      };
+
   for (Index_t thread_idx = 0; thread_idx < num_threads; ++thread_idx) {
     const auto pre_allocated_rvs_handle =
         mem_pool_acc[0]
@@ -431,6 +453,7 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
                 PortableMemPool::ArrayHandle<RuntimeValue>>() &&
         instructions_data.instruction_properties.num_runtime_values_per_op
                 .get_count() != 0) {
+      deallocate_runtime_values_up_to_idx(thread_idx);
       return std::nullopt;
     }
     pre_allocated_rvs[thread_idx] = pre_allocated_rvs_handle;
@@ -446,6 +469,7 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
       if (pre_allocated_values_for_op ==
               PortableMemPool::ArrayHandle<RuntimeValue>() &&
           num_rvs_per_op[op_idx] != 0) {
+        deallocate_runtime_values_up_to_idx(thread_idx + 1);
         return std::nullopt;
       }
       pre_allocated_rv_data[op_idx] = pre_allocated_values_for_op;
