@@ -1,4 +1,6 @@
 #define BOOST_TEST_MODULE RuntimeBlockTestsModule
+
+#include <boost/test/tools/context.hpp>
 #include "core/evaluator_v2/indirect_call_handler.hpp"
 #include "core/evaluator_v2/compile_program.hpp"
 #include "core/evaluator_v2/runtime_block.hpp"
@@ -92,16 +94,15 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
     });
   });
 
-  const auto exec_group = IndirectCallHandlerType::create_block_exec_group(
+  const auto exec_group = IndirectCallHandlerType::populate_block_exec_group(
       work_queue, mem_pool_buffer, buffers, program);
-  BOOST_CHECK_EQUAL(2, exec_group.block_descs.get_count());
+  BOOST_CHECK_EQUAL(2, exec_group.num_blocks);
   BOOST_CHECK_EQUAL(3, exec_group.max_num_instructions);
   auto mem_pool_acc =
       mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
-
+  auto block_descs = buffers.block_exec_group.get_access<cl::sycl::access::mode::read>();
   const auto validate_reactivation = [&](const auto block_idx) {
-    const auto &block_meta_for_reactivation =
-        mem_pool_acc[0].deref_handle(exec_group.block_descs)[block_idx];
+    const auto &block_meta_for_reactivation = block_descs[block_idx];
     BOOST_REQUIRE(block_meta_for_reactivation.instructions !=
                   PortableMemPool::ArrayHandle<Instruction>());
     BOOST_REQUIRE(block_meta_for_reactivation.block !=
@@ -115,8 +116,9 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
   };
 
   const auto validate_call = [&](const auto block_idx) {
+    auto block_descs = buffers.block_exec_group.get_access<cl::sycl::access::mode::read>();
     const auto &block_meta =
-        mem_pool_acc[0].deref_handle(exec_group.block_descs)[block_idx];
+        block_descs[block_idx];
     BOOST_REQUIRE(block_meta.instructions !=
                   PortableMemPool::ArrayHandle<Instruction>());
     BOOST_REQUIRE(block_meta.block !=
@@ -140,7 +142,7 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
                 target_data.block);
   };
 
-  if (mem_pool_acc[0].deref_handle(exec_group.block_descs)[0].instructions ==
+  if (block_descs[0].instructions ==
       mem_pool_acc[0].deref_handle(program)[0].instructions) {
     validate_call(0);
     validate_reactivation(1);
@@ -218,9 +220,9 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
         });
   });
 
-  const auto exec_group = IndirectCallHandlerType::create_block_exec_group(
+  const auto exec_group = IndirectCallHandlerType::populate_block_exec_group(
       work_queue, mem_pool_buffer, buffers, program);
-  BOOST_CHECK_EQUAL(7, exec_group.block_descs.get_count());
+  BOOST_CHECK_EQUAL(7, exec_group.num_blocks);
   BOOST_CHECK_EQUAL(7, exec_group.max_num_instructions);
   auto mem_pool_acc =
       mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
@@ -242,15 +244,19 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
       generate_set(RuntimeBlockType::NumThreadsPerBlock * 2);
   expected_target_regs_per_lambda[2] =
       generate_set(RuntimeBlockType::NumThreadsPerBlock * 3 + 1);
-  for (Index_t i = 0; i < exec_group.block_descs.get_count(); ++i) {
-    const auto &block_meta =
-        mem_pool_acc[0].deref_handle(exec_group.block_descs)[i];
+  // TODO determine why only the first 3
+  auto block_descs = buffers.block_exec_group.get_access<cl::sycl::access::mode::read>();
+  std::cout << "num blocks: " << exec_group.num_blocks << std::endl;
+  for (Index_t i = 0; i < exec_group.num_blocks; ++i) {
+    const auto &block_meta = block_descs[i];
+    BOOST_TEST_INFO_SCOPE("Block index " << i);
     BOOST_REQUIRE(block_meta.instructions !=
                   PortableMemPool::ArrayHandle<Instruction>());
     BOOST_REQUIRE(block_meta.block !=
                   PortableMemPool::Handle<RuntimeBlockType>());
     const auto *lambdas = mem_pool_acc[0].deref_handle(program);
     auto lambda_idx = 0;
+    BOOST_REQUIRE_NE(block_meta.instructions.get_count(), 0);
     if (block_meta.instructions == lambdas[7].instructions) {
       lambda_idx = 0;
     } else if (block_meta.instructions == lambdas[8].instructions) {
@@ -258,7 +264,15 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
     } else if (block_meta.instructions == lambdas[9].instructions) {
       lambda_idx = 2;
     } else {
-      BOOST_FAIL("Instructions not for one of expected lambdas");
+      std::optional<Index_t> lambda_idx_opt;
+      for (auto searched_lambda_idx = 0; searched_lambda_idx < program.get_count(); ++searched_lambda_idx) {
+        if (block_meta.instructions == lambdas[searched_lambda_idx].instructions) {
+          lambda_idx_opt = searched_lambda_idx;
+          break;
+        }
+      }
+      BOOST_FAIL("Instructions not for one of expected lambdas: " + (lambda_idx_opt.has_value() ? std::to_string(lambda_idx_opt.value()) : "nullopt") + " for block " + std::to_string(i)
+        << ", block thread count: " << block_meta.num_threads);
     }
     num_blocks_per_lambda_idx[lambda_idx]++;
     BOOST_CHECK(
