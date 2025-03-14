@@ -18,6 +18,7 @@ Evaluator::Evaluator(cl::sycl::buffer<PortableMemPool> buffer)
             << ", RuntimeValue size: " << sizeof(RuntimeValue)
             << ", Instruction size: " << sizeof(Instruction)
             << ", shared memory per block: " << num_shared_memory_bytes_
+            << ", max_blocks_scheduled_per_pass=" << IndirectCallHandlerType::MAX_BLOCKS_SCHEDULED_PER_PASS
             << std::endl;
 }
 

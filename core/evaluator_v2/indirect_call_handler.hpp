@@ -151,7 +151,7 @@ public:
   static void
   setup_block_for_lambda(PortableMemPool::DeviceAccessor_t,
                          typename Buffers::IndirectCallAccessorType,
-                         cl::sycl::accessor<typename RuntimeBlockType::BlockMetadata, 1, cl::sycl::access::mode::discard_write, cl::sycl::access::target::global_buffer>,
+                         cl::sycl::accessor<typename RuntimeBlockType::BlockMetadata, 1, cl::sycl::access::mode::write, cl::sycl::access::target::global_buffer>,
                          typename Buffers::MaxNumThreadsPerLambdaAccessorType,
                          typename Buffers::NumBlocksScheduledAccessorType,
                          typename Buffers::MaxNumInstructionsAccessorType,
@@ -159,7 +159,7 @@ public:
   static void setup_block_for_reactivation(
       PortableMemPool::DeviceAccessor_t,
       typename Buffers::BlockReactivationRequestAccessorType,
-      cl::sycl::accessor<typename RuntimeBlockType::BlockMetadata, 1, cl::sycl::access::mode::discard_write, cl::sycl::access::target::global_buffer>,
+      cl::sycl::accessor<typename RuntimeBlockType::BlockMetadata, 1, cl::sycl::access::mode::write, cl::sycl::access::target::global_buffer>,
       typename Buffers::NumBlocksScheduledAccessorType,
     typename Buffers::MaxNumInstructionsAccessorType);
 
@@ -190,7 +190,7 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
     setup_block_for_lambda(
         PortableMemPool::DeviceAccessor_t mem_pool_acc,
         const typename Buffers::IndirectCallAccessorType indirect_call_acc,
-        const cl::sycl::accessor<typename RuntimeBlockType::BlockMetadata, 1, cl::sycl::access::mode::discard_write, cl::sycl::access::target::global_buffer> block_exec_acc,
+        const cl::sycl::accessor<typename RuntimeBlockType::BlockMetadata, 1, cl::sycl::access::mode::write, cl::sycl::access::target::global_buffer> block_exec_acc,
         const typename Buffers::MaxNumThreadsPerLambdaAccessorType max_num_threads_per_lambda,
         const typename Buffers::NumBlocksScheduledAccessorType num_blocks_scheduled_acc,
         const typename Buffers::MaxNumInstructionsAccessorType max_num_instructions_acc,
@@ -260,7 +260,7 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
         PortableMemPool::DeviceAccessor_t mem_pool_acc,
         const typename Buffers::BlockReactivationRequestAccessorType
             block_reactivation_requests_by_block,
-        const cl::sycl::accessor<typename RuntimeBlockType::BlockMetadata, 1, cl::sycl::access::mode::discard_write, cl::sycl::access::target::global_buffer> block_exec_acc,
+        const cl::sycl::accessor<typename RuntimeBlockType::BlockMetadata, 1, cl::sycl::access::mode::write, cl::sycl::access::target::global_buffer> block_exec_acc,
         const typename Buffers::NumBlocksScheduledAccessorType num_blocks_scheduled_acc,
         const typename Buffers::MaxNumInstructionsAccessorType max_num_instructions_acc) {
   Index_t max_num_instructions = 0;
@@ -408,13 +408,13 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
   work_queue.submit([&](cl::sycl::handler &cgh) {
     auto max_num_threads_per_lambda_acc =
         buffers.max_num_threads_per_lambda
-            .template get_access<cl::sycl::access::mode::discard_write>(cgh);
+            .template get_access<cl::sycl::access::mode::write>(cgh);
     auto num_blocks_scheduled_acc =
         buffers.num_blocks_scheduled
-            .template get_access<cl::sycl::access::mode::discard_write>(cgh);
+            .template get_access<cl::sycl::access::mode::write>(cgh);
     auto max_num_instructions_acc =
         buffers.max_num_instructions
-            .template get_access<cl::sycl::access::mode::discard_write>(cgh);
+            .template get_access<cl::sycl::access::mode::write>(cgh);
     cgh.single_task<class ResetIndirectCallHandlerBuffers>([=] {
       max_num_threads_per_lambda_acc[0] = 0;
       max_num_instructions_acc[0] = 0;
@@ -427,7 +427,7 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
     auto block_exec_group_acc =
         buffers.block_exec_group
-            .template get_access<cl::sycl::access::mode::discard_write>(cgh);
+            .template get_access<cl::sycl::access::mode::write>(cgh);
     auto indirect_call_requests_by_block_acc =
         buffers.indirect_call_requests_by_block
             .template get_access<cl::sycl::access::mode::read_write>(cgh);
@@ -469,27 +469,26 @@ IndirectCallHandler<RuntimeBlockType, MaxNumIndirectCalls,
   const auto max_num_threads_per_lambda_val =
       buffers.max_num_threads_per_lambda
           .template get_access<cl::sycl::access::mode::read>()[0];
-  if (max_num_threads_per_lambda_val == 0) {
-    throw std::invalid_argument("No threads across any lambdas");
+  if (max_num_threads_per_lambda_val > 0) {
+    work_queue.submit([&](cl::sycl::handler &cgh) {
+        auto mem_pool_write =
+            mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
+        auto block_exec_group_acc =
+            buffers.block_exec_group
+                .template get_access<cl::sycl::access::mode::read>(cgh);
+        auto indirect_call_requests_by_block_acc =
+            buffers.indirect_call_requests_by_block
+                .template get_access<cl::sycl::access::mode::read_write>(cgh);
+        cgh.parallel_for<class InitBlocksPerThread>(
+            cl::sycl::range<2>(program.get_count(), max_num_threads_per_lambda_val),
+            [mem_pool_write, block_exec_group_acc,
+            indirect_call_requests_by_block_acc](const cl::sycl::item<2> itm) {
+            setup_block(mem_pool_write, indirect_call_requests_by_block_acc,
+                        block_exec_group_acc, itm.get_id(0),
+                        itm.get_id(1));
+            });
+    });
   }
-  work_queue.submit([&](cl::sycl::handler &cgh) {
-    auto mem_pool_write =
-        mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
-    auto block_exec_group_acc =
-        buffers.block_exec_group
-            .template get_access<cl::sycl::access::mode::read_write>(cgh);
-    auto indirect_call_requests_by_block_acc =
-        buffers.indirect_call_requests_by_block
-            .template get_access<cl::sycl::access::mode::read_write>(cgh);
-    cgh.parallel_for<class InitBlocksPerThread>(
-        cl::sycl::range<2>(program.get_count(), max_num_threads_per_lambda_val),
-        [mem_pool_write, block_exec_group_acc,
-         indirect_call_requests_by_block_acc](const cl::sycl::item<2> itm) {
-          setup_block(mem_pool_write, indirect_call_requests_by_block_acc,
-                      block_exec_group_acc, itm.get_id(0),
-                      itm.get_id(1));
-        });
-  });
 
   work_queue.submit([&](cl::sycl::handler &cgh) {
     auto mem_pool_acc =

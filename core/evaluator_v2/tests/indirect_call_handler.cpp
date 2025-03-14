@@ -14,7 +14,7 @@ namespace {
 struct Fixture {
   using RuntimeBlockType = RuntimeBlock<64, 32>;
   using IndirectCallHandlerType =
-      IndirectCallHandler<RuntimeBlockType, 128, 128>;
+      IndirectCallHandler<RuntimeBlockType, 512, 512>;
 
   Fixture(const std::string &program_path)
       : program(compile_program(
@@ -23,7 +23,10 @@ struct Fixture {
     std::cout
         << "Running on "
         << work_queue.get_device().get_info<cl::sycl::info::device::name>()
-        << ", block size: " << sizeof(RuntimeBlockType) << std::endl;
+        << ", block size: " << sizeof(RuntimeBlockType) << 
+         ", max_blocks_allocated_per_pass=" << IndirectCallHandlerType::MAX_BLOCKS_SCHEDULED_PER_PASS << 
+        ", max_blocks scheduled per pass=" << IndirectCallHandlerType::MAX_BLOCKS_SCHEDULED_PER_PASS << 
+        std::endl;
   }
 
   std::shared_ptr<PortableMemPool> mem_pool_data =
