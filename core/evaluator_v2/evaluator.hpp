@@ -25,11 +25,10 @@ private:
   PortableMemPool::Handle<RuntimeBlockType> construct_initial_block(Program);
   RuntimeValue read_result(PortableMemPool::Handle<RuntimeBlockType>);
 
-  void run_eval_step(RuntimeBlockType::BlockExecGroup,
+  void run_eval_step(BlockExecGroup,
                      IndirectCallHandlerType::Buffers &);
-  std::optional<RuntimeBlockType::BlockExecGroup>
+  std::optional<BlockExecGroup>
   schedule_next_batch(Program, IndirectCallHandlerType::Buffers &);
-  void cleanup(RuntimeBlockType::BlockExecGroup);
   void check_program_does_not_overflow_shared_memory(const Program &);
 
   cl::sycl::buffer<PortableMemPool> mem_pool_buffer_;
