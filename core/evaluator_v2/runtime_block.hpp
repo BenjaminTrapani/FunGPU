@@ -7,8 +7,8 @@
 #include "core/portable_mem_pool.hpp"
 #include "core/types.hpp"
 #include "core/visitor.hpp"
-#include <optional>
 #include <cstdint>
+#include <optional>
 
 namespace FunGPU::EvaluatorV2 {
 template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
@@ -402,22 +402,25 @@ void RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::fill_dependency(
 
 template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
 template <cl::sycl::access::target ACCESS_TARGET>
-void RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::deallocate_runtime_values_for_thread(
-      cl::sycl::accessor<PortableMemPool, 1,
-                           cl::sycl::access::mode::read_write, ACCESS_TARGET> mem_pool_acc,
-      const PreAllocatedRuntimeValuesPerThread &pre_allocated_runtime_values,
-      Index_t thread_idx) {
-    if (pre_allocated_runtime_values[thread_idx].get_count() == 0) {
-      return;
+void RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
+    deallocate_runtime_values_for_thread(
+        cl::sycl::accessor<PortableMemPool, 1,
+                           cl::sycl::access::mode::read_write, ACCESS_TARGET>
+            mem_pool_acc,
+        const PreAllocatedRuntimeValuesPerThread &pre_allocated_runtime_values,
+        Index_t thread_idx) {
+  if (pre_allocated_runtime_values[thread_idx].get_count() == 0) {
+    return;
+  }
+  const auto *pre_allocated_rvs_data =
+      mem_pool_acc[0].deref_handle(pre_allocated_runtime_values[thread_idx]);
+  for (Index_t j = 0; j < pre_allocated_runtime_values[thread_idx].get_count();
+       ++j) {
+    if (pre_allocated_rvs_data[j].get_count() != 0) {
+      mem_pool_acc[0].dealloc_array(pre_allocated_rvs_data[j]);
     }
-    const auto *pre_allocated_rvs_data =
-        mem_pool_acc[0].deref_handle(pre_allocated_runtime_values[thread_idx]);
-    for (Index_t j = 0; j < pre_allocated_runtime_values[thread_idx].get_count(); ++j) {
-      if (pre_allocated_rvs_data[j].get_count() != 0) {
-        mem_pool_acc[0].dealloc_array(pre_allocated_rvs_data[j]);
-      }
-    }
-    mem_pool_acc[0].dealloc_array(pre_allocated_runtime_values[thread_idx]);
+  }
+  mem_pool_acc[0].dealloc_array(pre_allocated_runtime_values[thread_idx]);
 }
 
 template <Index_t RegistersPerThread, Index_t ThreadsPerBlock>
@@ -438,7 +441,8 @@ auto RuntimeBlock<RegistersPerThread, ThreadsPerBlock>::
   const auto deallocate_runtime_values_up_to_idx =
       [&](const Index_t thread_idx) {
         for (Index_t i = 0; i < thread_idx; ++i) {
-          deallocate_runtime_values_for_thread<ACCESS_TARGET>(mem_pool_acc, pre_allocated_rvs, i);
+          deallocate_runtime_values_for_thread<ACCESS_TARGET>(
+              mem_pool_acc, pre_allocated_rvs, i);
         }
       };
 

@@ -18,7 +18,8 @@ Evaluator::Evaluator(cl::sycl::buffer<PortableMemPool> buffer)
             << ", RuntimeValue size: " << sizeof(RuntimeValue)
             << ", Instruction size: " << sizeof(Instruction)
             << ", shared memory per block: " << num_shared_memory_bytes_
-            << ", max_blocks_scheduled_per_pass=" << IndirectCallHandlerType::MAX_BLOCKS_SCHEDULED_PER_PASS
+            << ", max_blocks_scheduled_per_pass="
+            << IndirectCallHandlerType::MAX_BLOCKS_SCHEDULED_PER_PASS
             << std::endl;
 }
 
@@ -139,7 +140,7 @@ auto Evaluator::schedule_next_batch(
         is_initial_block_ready_again_
             .get_access<cl::sycl::access::mode::discard_write>(cgh);
     auto block_exec_acc = indirect_call_handler_buffers.block_exec_group
-        .get_access<cl::sycl::access::mode::read>(cgh);
+                              .get_access<cl::sycl::access::mode::read>(cgh);
     const auto first_block_tmp = first_block_;
     cgh.single_task([block_exec_acc, next_batch, first_block_tmp, result_acc] {
       const auto &block_meta = block_exec_acc[0];
@@ -172,7 +173,7 @@ void Evaluator::run_eval_step(
         indirect_call_handler_buffers.block_reactivation_requests_by_block
             .get_access<cl::sycl::access::mode::read_write>(cgh);
     auto block_exec_acc = indirect_call_handler_buffers.block_exec_group
-        .get_access<cl::sycl::access::mode::read>(cgh);
+                              .get_access<cl::sycl::access::mode::read>(cgh);
     cl::sycl::accessor<RuntimeBlockType, 1, cl::sycl::access::mode::read_write,
                        cl::sycl::access::target::local>
         local_block(cl::sycl::range<1>(1), cgh);
@@ -184,12 +185,11 @@ void Evaluator::run_eval_step(
                            block_group.max_num_instructions),
         cgh);
     cgh.parallel_for<class TestEvalLoop>(
-        cl::sycl::nd_range<1>(THREADS_PER_BLOCK *
-                                  block_group.num_blocks,
+        cl::sycl::nd_range<1>(THREADS_PER_BLOCK * block_group.num_blocks,
                               THREADS_PER_BLOCK),
-        [mem_pool_write, local_block, local_instructions,
-         any_threads_pending, indirect_all_acc,
-         reactivate_block_acc, block_exec_acc](cl::sycl::nd_item<1> itm) {
+        [mem_pool_write, local_block, local_instructions, any_threads_pending,
+         indirect_all_acc, reactivate_block_acc,
+         block_exec_acc](cl::sycl::nd_item<1> itm) {
           const auto thread_idx = itm.get_local_linear_id();
           const auto block_idx = itm.get_group_linear_id();
           const auto block_meta = block_exec_acc[block_idx];

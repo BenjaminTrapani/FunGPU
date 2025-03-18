@@ -1,10 +1,10 @@
 #include "core/evaluator_v2/block_exec_group.hpp"
 #define BOOST_TEST_MODULE RuntimeBlockTestsModule
-#include "core/evaluator_v2/runtime_block.hpp"
 #include "core/ast_node.hpp"
 #include "core/block_prep.hpp"
 #include "core/evaluator_v2/block_generator.hpp"
 #include "core/evaluator_v2/compile_program.hpp"
+#include "core/evaluator_v2/runtime_block.hpp"
 #include "core/parser.hpp"
 #include "core/visitor.hpp"
 #include <boost/test/tools/old/interface.hpp>
@@ -34,11 +34,11 @@ struct Fixture {
   }
 
   void check_block_evaluates_to_value(
-      const std::vector<float_t> vals,
-      const BlockExecGroup block_group,
-      const PortableMemPool::ArrayHandle<RuntimeBlockType::BlockMetadata> block_metadata_array) {
-    cl::sycl::buffer<RuntimeValue, 2> results(cl::sycl::range<2>(
-        block_group.num_blocks, THREADS_PER_BLOCK));
+      const std::vector<float_t> vals, const BlockExecGroup block_group,
+      const PortableMemPool::ArrayHandle<RuntimeBlockType::BlockMetadata>
+          block_metadata_array) {
+    cl::sycl::buffer<RuntimeValue, 2> results(
+        cl::sycl::range<2>(block_group.num_blocks, THREADS_PER_BLOCK));
     work_queue.submit([&](cl::sycl::handler &cgh) {
       auto mem_pool_write =
           mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
@@ -53,15 +53,14 @@ struct Fixture {
       auto results_acc =
           results.get_access<cl::sycl::access::mode::discard_write>(cgh);
       cgh.parallel_for<class TestEvalLoop>(
-          cl::sycl::nd_range<1>(THREADS_PER_BLOCK *
-                                    block_group.num_blocks,
+          cl::sycl::nd_range<1>(THREADS_PER_BLOCK * block_group.num_blocks,
                                 THREADS_PER_BLOCK),
           [mem_pool_write, block_group, local_block, local_instructions,
            results_acc, block_metadata_array](cl::sycl::nd_item<1> itm) {
             const auto thread_idx = itm.get_local_linear_id();
             const auto block_idx = itm.get_group_linear_id();
-            const auto block_meta = mem_pool_write[0].deref_handle(
-                block_metadata_array)[block_idx];
+            const auto block_meta =
+                mem_pool_write[0].deref_handle(block_metadata_array)[block_idx];
             if (thread_idx == 0) {
               local_block[0] =
                   *mem_pool_write[0].deref_handle(block_meta.block);
@@ -91,8 +90,8 @@ struct Fixture {
     {
       const auto result_acc =
           results.get_access<cl::sycl::access::mode::read>();
-      for (Index_t block_idx = 0;
-           block_idx < block_group.num_blocks; ++block_idx) {
+      for (Index_t block_idx = 0; block_idx < block_group.num_blocks;
+           ++block_idx) {
         for (Index_t i = 0; i < THREADS_PER_BLOCK; ++i) {
           const auto result_idx = cl::sycl::id<2>(block_idx, i);
           BOOST_CHECK_EQUAL(vals[block_idx],
@@ -122,12 +121,13 @@ struct Fixture {
           mem_pool_acc[0].deref_handle(block_metadata_array);
       block_meta_array_data[0] = RuntimeBlockType::BlockMetadata(
           block_handle, lambdas[0].instructions, THREADS_PER_BLOCK);
-      return std::pair(BlockExecGroup(
-          block_metadata_array.get_count(), lambdas[0].instructions.get_count()),
+      return std::pair(BlockExecGroup(block_metadata_array.get_count(),
+                                      lambdas[0].instructions.get_count()),
                        block_metadata_array);
     }();
 
-    check_block_evaluates_to_value({expected_val}, block_exec_group, block_metadata_array);
+    check_block_evaluates_to_value({expected_val}, block_exec_group,
+                                   block_metadata_array);
   }
 
   void check_coscheduled_blocks_work(
@@ -162,13 +162,15 @@ struct Fixture {
             max_instructions_per_block, lambdas[0].instructions.get_count());
       }
       return std::pair(BlockExecGroup(block_metadata_array.get_count(),
-                                              max_instructions_per_block), block_metadata_array);
+                                      max_instructions_per_block),
+                       block_metadata_array);
     }();
     std::vector<float_t> expected_values;
     for (const auto &[val, prog] : expected_value_per_program) {
       expected_values.emplace_back(val);
     }
-    check_block_evaluates_to_value(expected_values, block_exec_group, block_metadata_array);
+    check_block_evaluates_to_value(expected_values, block_exec_group,
+                                   block_metadata_array);
   }
 
   std::shared_ptr<PortableMemPool> mem_pool_data =

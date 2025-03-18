@@ -1,11 +1,11 @@
 #define BOOST_TEST_MODULE RuntimeBlockTestsModule
 
-#include <boost/test/tools/context.hpp>
 #include "core/evaluator_v2/indirect_call_handler.hpp"
 #include "core/evaluator_v2/compile_program.hpp"
 #include "core/evaluator_v2/runtime_block.hpp"
 #include "core/evaluator_v2/runtime_value.hpp"
 #include "core/portable_mem_pool.hpp"
+#include <boost/test/tools/context.hpp>
 #include <boost/test/unit_test.hpp>
 #include <unordered_set>
 
@@ -23,10 +23,11 @@ struct Fixture {
     std::cout
         << "Running on "
         << work_queue.get_device().get_info<cl::sycl::info::device::name>()
-        << ", block size: " << sizeof(RuntimeBlockType) << 
-         ", max_blocks_allocated_per_pass=" << IndirectCallHandlerType::MAX_BLOCKS_SCHEDULED_PER_PASS << 
-        ", max_blocks scheduled per pass=" << IndirectCallHandlerType::MAX_BLOCKS_SCHEDULED_PER_PASS << 
-        std::endl;
+        << ", block size: " << sizeof(RuntimeBlockType)
+        << ", max_blocks_allocated_per_pass="
+        << IndirectCallHandlerType::MAX_BLOCKS_SCHEDULED_PER_PASS
+        << ", max_blocks scheduled per pass="
+        << IndirectCallHandlerType::MAX_BLOCKS_SCHEDULED_PER_PASS << std::endl;
   }
 
   std::shared_ptr<PortableMemPool> mem_pool_data =
@@ -103,7 +104,8 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
   BOOST_CHECK_EQUAL(3, exec_group.max_num_instructions);
   auto mem_pool_acc =
       mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
-  auto block_descs = buffers.block_exec_group.get_access<cl::sycl::access::mode::read>();
+  auto block_descs =
+      buffers.block_exec_group.get_access<cl::sycl::access::mode::read>();
   const auto validate_reactivation = [&](const auto block_idx) {
     const auto &block_meta_for_reactivation = block_descs[block_idx];
     BOOST_REQUIRE(block_meta_for_reactivation.instructions !=
@@ -119,9 +121,9 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
   };
 
   const auto validate_call = [&](const auto block_idx) {
-    auto block_descs = buffers.block_exec_group.get_access<cl::sycl::access::mode::read>();
-    const auto &block_meta =
-        block_descs[block_idx];
+    auto block_descs =
+        buffers.block_exec_group.get_access<cl::sycl::access::mode::read>();
+    const auto &block_meta = block_descs[block_idx];
     BOOST_REQUIRE(block_meta.instructions !=
                   PortableMemPool::ArrayHandle<Instruction>());
     BOOST_REQUIRE(block_meta.block !=
@@ -248,7 +250,8 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
   expected_target_regs_per_lambda[2] =
       generate_set(RuntimeBlockType::NumThreadsPerBlock * 3 + 1);
   // TODO determine why only the first 3
-  auto block_descs = buffers.block_exec_group.get_access<cl::sycl::access::mode::read>();
+  auto block_descs =
+      buffers.block_exec_group.get_access<cl::sycl::access::mode::read>();
   std::cout << "num blocks: " << exec_group.num_blocks << std::endl;
   for (Index_t i = 0; i < exec_group.num_blocks; ++i) {
     const auto &block_meta = block_descs[i];
@@ -268,14 +271,20 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
       lambda_idx = 2;
     } else {
       std::optional<Index_t> lambda_idx_opt;
-      for (auto searched_lambda_idx = 0; searched_lambda_idx < program.get_count(); ++searched_lambda_idx) {
-        if (block_meta.instructions == lambdas[searched_lambda_idx].instructions) {
+      for (auto searched_lambda_idx = 0;
+           searched_lambda_idx < program.get_count(); ++searched_lambda_idx) {
+        if (block_meta.instructions ==
+            lambdas[searched_lambda_idx].instructions) {
           lambda_idx_opt = searched_lambda_idx;
           break;
         }
       }
-      BOOST_FAIL("Instructions not for one of expected lambdas: " + (lambda_idx_opt.has_value() ? std::to_string(lambda_idx_opt.value()) : "nullopt") + " for block " + std::to_string(i)
-        << ", block thread count: " << block_meta.num_threads);
+      BOOST_FAIL("Instructions not for one of expected lambdas: " +
+                     (lambda_idx_opt.has_value()
+                          ? std::to_string(lambda_idx_opt.value())
+                          : "nullopt") +
+                     " for block " + std::to_string(i)
+                 << ", block thread count: " << block_meta.num_threads);
     }
     num_blocks_per_lambda_idx[lambda_idx]++;
     BOOST_CHECK(
