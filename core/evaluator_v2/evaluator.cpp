@@ -61,6 +61,7 @@ RuntimeValue Evaluator::compute(const Program program) {
   });
 
   Index_t num_steps = 0;
+  Index_t max_num_blocks = 0;
   while (true) {
     const auto maybe_next_batch =
         schedule_next_batch(program, indirect_call_handler_buffers);
@@ -68,10 +69,12 @@ RuntimeValue Evaluator::compute(const Program program) {
       break;
     }
     ++num_steps;
+    max_num_blocks = std::max(max_num_blocks, maybe_next_batch->num_blocks);
     run_eval_step(*maybe_next_batch, indirect_call_handler_buffers);
   }
   const auto end_time = std::chrono::high_resolution_clock::now();
   std::cout << "num_steps: " << num_steps << std::endl;
+  std::cout << "max num blocks: " << max_num_blocks << std::endl;
   std::cout << "total time: "
             << std::chrono::duration_cast<std::chrono::milliseconds>(end_time -
                                                                      begin_time)
@@ -91,9 +94,8 @@ auto Evaluator::construct_initial_block(const Program program)
     auto mem_pool_acc =
         mem_pool_buffer_.get_access<cl::sycl::access::mode::read_write>(cgh);
     cgh.single_task([result_acc, mem_pool_acc, program] {
-      const auto &main_lambda = mem_pool_acc[0].deref_handle(program)[0];
       const auto block = mem_pool_acc[0].alloc<RuntimeBlockType>(
-          main_lambda.instructions,
+          program.element_handle(0),
           RuntimeBlockType::PreAllocatedRuntimeValuesPerThread(), 1);
       result_acc[0] = block;
       auto &block_data = *mem_pool_acc[0].deref_handle(block);
@@ -133,6 +135,7 @@ auto Evaluator::schedule_next_batch(
     return next_batch;
   }
   if (next_batch.num_blocks != 1) {
+    std::cout << "Expected at least one block, exiting" << std::endl;
     throw std::invalid_argument("Expected at least one block");
   }
   work_queue_.submit([&](cl::sycl::handler &cgh) {
@@ -197,18 +200,20 @@ void Evaluator::run_eval_step(
             local_block[0] = *mem_pool_write[0].deref_handle(block_meta.block);
             any_threads_pending[0] = false;
           }
+          const auto instructions_handle =
+              mem_pool_write[0].deref_handle(block_meta.lambda)->instructions;
           const auto *instructions_global_data =
-              mem_pool_write[0].deref_handle(block_meta.instructions);
+              mem_pool_write[0].deref_handle(instructions_handle);
           auto instructions_for_block =
               local_instructions[itm.get_group_linear_id()];
-          for (auto idx = thread_idx; idx < block_meta.instructions.get_count();
+          for (auto idx = thread_idx; idx < instructions_handle.get_count();
                idx += THREADS_PER_BLOCK) {
             instructions_for_block[idx] = instructions_global_data[idx];
           }
           itm.barrier(cl::sycl::access::fence_space::local_space);
           const RuntimeBlockType::Status status = local_block[0].evaluate(
               itm.get_group_linear_id(), thread_idx, itm, mem_pool_write,
-              local_instructions, block_meta.instructions.get_count(),
+              local_instructions, instructions_handle.get_count(),
               block_meta.num_threads,
               [mem_pool_write, indirect_all_acc, reactivate_block_acc](
                   const auto block, const auto funv, const auto tid,

@@ -1,7 +1,9 @@
 #define BOOST_TEST_MODULE RuntimeBlockTestsModule
 
 #include "core/evaluator_v2/indirect_call_handler.hpp"
+#include "core/evaluator_v2/block_exec_group.hpp"
 #include "core/evaluator_v2/compile_program.hpp"
+#include "core/evaluator_v2/lambda.hpp"
 #include "core/evaluator_v2/runtime_block.hpp"
 #include "core/evaluator_v2/runtime_value.hpp"
 #include "core/portable_mem_pool.hpp"
@@ -11,10 +13,13 @@
 
 namespace FunGPU::EvaluatorV2 {
 namespace {
+using RuntimeBlockType = RuntimeBlock<64, 32>;
+
+template <Index_t MAX_NUM_INDIRECT_CALLS, Index_t MAX_NUM_REACTIVATIONS>
 struct Fixture {
-  using RuntimeBlockType = RuntimeBlock<64, 32>;
   using IndirectCallHandlerType =
-      IndirectCallHandler<RuntimeBlockType, 512, 512>;
+      IndirectCallHandler<RuntimeBlockType, MAX_NUM_INDIRECT_CALLS,
+                          MAX_NUM_REACTIVATIONS>;
 
   Fixture(const std::string &program_path)
       : program(compile_program(
@@ -39,11 +44,16 @@ struct Fixture {
   cl::sycl::queue work_queue;
 };
 
-struct BasicFixture : public Fixture {
-  BasicFixture() : Fixture("./test_programs/SimpleCall.fgpu") {}
+template <Index_t MAX_NUM_INDIRECT_CALLS = 512,
+          Index_t MAX_NUM_REACTIVATIONS = 512>
+struct BasicFixture
+    : public Fixture<MAX_NUM_INDIRECT_CALLS, MAX_NUM_REACTIVATIONS> {
+  BasicFixture()
+      : Fixture<MAX_NUM_INDIRECT_CALLS, MAX_NUM_REACTIVATIONS>(
+            "./test_programs/SimpleCall.fgpu") {}
 };
 
-BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
+BOOST_FIXTURE_TEST_CASE(basic, BasicFixture<>) {
   cl::sycl::buffer<PortableMemPool::Handle<RuntimeBlockType>> caller_buf(
       cl::sycl::range<1>(1));
   cl::sycl::buffer<PortableMemPool::Handle<RuntimeBlockType>>
@@ -51,11 +61,9 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
   work_queue.submit([&](cl::sycl::handler &cgh) {
     auto mem_pool_acc =
         mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
-    auto caller_acc =
-        caller_buf.get_access<cl::sycl::access::mode::discard_write>(cgh);
+    auto caller_acc = caller_buf.get_access<cl::sycl::access::mode::write>(cgh);
     auto reactivated_acc =
-        reactivated_block_buf.get_access<cl::sycl::access::mode::discard_write>(
-            cgh);
+        reactivated_block_buf.get_access<cl::sycl::access::mode::write>(cgh);
     auto block_reactivation_buffer_ac =
         buffers.block_reactivation_requests_by_block
             .get_access<cl::sycl::access::mode::read_write>(cgh);
@@ -67,11 +75,10 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
                                                 caller_acc, reactivated_acc,
                                                 block_reactivation_buffer_ac,
                                                 ind_call_reqs_by_block_acc] {
-      const auto lambda_0 = mem_pool_acc[0].deref_handle(tmp_program)[0];
       auto pre_allocated_rvs = RuntimeBlockType::pre_allocate_runtime_values<
           cl::sycl::access::target::device>(1, mem_pool_acc, tmp_program, 0);
       const auto mock_caller = mem_pool_acc[0].alloc<RuntimeBlockType>(
-          lambda_0.instructions, *pre_allocated_rvs, 1);
+          tmp_program.element_handle(0), *pre_allocated_rvs, 1);
       caller_acc[0] = mock_caller;
       const auto captures_acc = mem_pool_acc[0].alloc_array<RuntimeValue>(2);
       auto *captures_data = mem_pool_acc[0].deref_handle(captures_acc);
@@ -85,13 +92,13 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
                                                 mock_caller, function_value, 1,
                                                 2, test_args);
 
-      const auto lambda_1 = mem_pool_acc[0].deref_handle(tmp_program)[1];
       auto pre_allocated_rvs_for_reactivated_block =
           RuntimeBlockType::pre_allocate_runtime_values<
               cl::sycl::access::target::device>(2, mem_pool_acc, tmp_program,
                                                 1);
       const auto reactivated_block = mem_pool_acc[0].alloc<RuntimeBlockType>(
-          lambda_1.instructions, *pre_allocated_rvs_for_reactivated_block, 2);
+          tmp_program.element_handle(1),
+          *pre_allocated_rvs_for_reactivated_block, 2);
       reactivated_acc[0] = reactivated_block;
       IndirectCallHandlerType::on_activate_block(
           mem_pool_acc, block_reactivation_buffer_ac, reactivated_block);
@@ -108,15 +115,16 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
       buffers.block_exec_group.get_access<cl::sycl::access::mode::read>();
   const auto validate_reactivation = [&](const auto block_idx) {
     const auto &block_meta_for_reactivation = block_descs[block_idx];
-    BOOST_REQUIRE(block_meta_for_reactivation.instructions !=
-                  PortableMemPool::ArrayHandle<Instruction>());
+    BOOST_REQUIRE(block_meta_for_reactivation.lambda !=
+                  PortableMemPool::Handle<Lambda>());
     BOOST_REQUIRE(block_meta_for_reactivation.block !=
                   PortableMemPool::Handle<RuntimeBlockType>());
     BOOST_CHECK(
         reactivated_block_buf.get_access<cl::sycl::access::mode::read>()[0] ==
         block_meta_for_reactivation.block);
-    BOOST_CHECK(mem_pool_acc[0].deref_handle(program)[1].instructions ==
-                block_meta_for_reactivation.instructions);
+    BOOST_CHECK(
+        &mem_pool_acc[0].deref_handle(program)[1] ==
+        mem_pool_acc[0].deref_handle(block_meta_for_reactivation.lambda));
     BOOST_CHECK_EQUAL(2, block_meta_for_reactivation.num_threads);
   };
 
@@ -124,8 +132,7 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
     auto block_descs =
         buffers.block_exec_group.get_access<cl::sycl::access::mode::read>();
     const auto &block_meta = block_descs[block_idx];
-    BOOST_REQUIRE(block_meta.instructions !=
-                  PortableMemPool::ArrayHandle<Instruction>());
+    BOOST_REQUIRE(block_meta.lambda != PortableMemPool::Handle<Lambda>());
     BOOST_REQUIRE(block_meta.block !=
                   PortableMemPool::Handle<RuntimeBlockType>());
     const auto &first_block = *mem_pool_acc[0].deref_handle(block_meta.block);
@@ -137,8 +144,8 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
       const auto expected_val = expected_captures_and_arg[i];
       BOOST_CHECK_EQUAL(expected_val.data.float_val, actual_val.data.float_val);
     }
-    BOOST_CHECK(block_meta.instructions ==
-                mem_pool_acc[0].deref_handle(program)[0].instructions);
+    BOOST_CHECK(mem_pool_acc[0].deref_handle(block_meta.lambda) ==
+                &mem_pool_acc[0].deref_handle(program)[0]);
     BOOST_CHECK_EQUAL(1, block_meta.num_threads);
     const auto &target_data = first_block.target_data[0];
     BOOST_CHECK_EQUAL(1, target_data.thread);
@@ -147,8 +154,7 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
                 target_data.block);
   };
 
-  if (block_descs[0].instructions ==
-      mem_pool_acc[0].deref_handle(program)[0].instructions) {
+  if (block_descs[0].lambda == program.element_handle(0)) {
     validate_call(0);
     validate_reactivation(1);
   } else {
@@ -157,7 +163,129 @@ BOOST_FIXTURE_TEST_CASE(basic, BasicFixture) {
   }
 }
 
-struct AdvancedFixture : public Fixture {
+using BasicFixtureBlockCountIndirectCallsLimitted = BasicFixture<128, 256>;
+BOOST_FIXTURE_TEST_CASE(extra_block_reactivations_buffered_until_next_pass,
+                        BasicFixtureBlockCountIndirectCallsLimitted) {
+  const auto tmp_program = program;
+  work_queue.submit([&](cl::sycl::handler &cgh) {
+    auto mem_pool_write =
+        mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
+    auto block_reactivation_buffer_ac =
+        buffers.block_reactivation_requests_by_block
+            .get_access<cl::sycl::access::mode::read_write>(cgh);
+    cgh.parallel_for<class ReactivateBlocks>(
+        cl::sycl::range<1>(
+            IndirectCallHandlerType::MAX_BLOCKS_SCHEDULED_PER_PASS + 1),
+        [=](const cl::sycl::item<1> itm) {
+          auto pre_allocated_rvs =
+              RuntimeBlockType::pre_allocate_runtime_values<
+                  cl::sycl::access::target::device>(1, mem_pool_write,
+                                                    tmp_program, 0);
+          const auto reactivated_block =
+              mem_pool_write[0].alloc<RuntimeBlockType>(
+                  tmp_program.element_handle(1), *pre_allocated_rvs,
+                  itm.get_linear_id());
+          IndirectCallHandlerType::on_activate_block(
+              mem_pool_write, block_reactivation_buffer_ac, reactivated_block);
+        });
+  });
+
+  const auto exec_group = IndirectCallHandlerType::populate_block_exec_group(
+      work_queue, mem_pool_buffer, buffers, program);
+  BOOST_CHECK_EQUAL(IndirectCallHandlerType::MAX_BLOCKS_SCHEDULED_PER_PASS,
+                    exec_group.num_blocks);
+  std::set<Index_t> observed_block_thread_counts;
+  const auto add_all_thread_counts_for_exec_group =
+      [&](const BlockExecGroup &block_exec_group) {
+        auto block_exec_group_acc =
+            buffers.block_exec_group.get_access<cl::sycl::access::mode::read>();
+        for (Index_t i = 0; i < block_exec_group.num_blocks; ++i) {
+          BOOST_CHECK(observed_block_thread_counts
+                          .emplace(block_exec_group_acc[i].num_threads)
+                          .second);
+        }
+      };
+  add_all_thread_counts_for_exec_group(exec_group);
+  const auto second_exec_group =
+      IndirectCallHandlerType::populate_block_exec_group(
+          work_queue, mem_pool_buffer, buffers, program);
+  BOOST_CHECK_EQUAL(1, second_exec_group.num_blocks);
+  add_all_thread_counts_for_exec_group(second_exec_group);
+  BOOST_CHECK_EQUAL(IndirectCallHandlerType::MAX_BLOCKS_SCHEDULED_PER_PASS + 1,
+                    observed_block_thread_counts.size());
+}
+
+using BasicFixtureBlockCountReactivationLimitted =
+    BasicFixture<512, 512 / RuntimeBlockType::NumThreadsPerBlock - 2>;
+BOOST_FIXTURE_TEST_CASE(extra_indirect_call_requests_buffered_until_next_pass,
+                        BasicFixtureBlockCountReactivationLimitted) {
+  const auto tmp_program = program;
+  static constexpr auto TOTAL_NUM_INDIRECT_CALLS =
+      IndirectCallHandlerType::MAX_BLOCKS_SCHEDULED_PER_PASS *
+          RuntimeBlockType::NumThreadsPerBlock +
+      1;
+  static_assert(TOTAL_NUM_INDIRECT_CALLS <=
+                IndirectCallHandlerType::MAX_NUM_INDIRECT_CALLS);
+  work_queue.submit([&](cl::sycl::handler &cgh) {
+    auto mem_pool_acc =
+        mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>(cgh);
+    auto ind_call_reqs_by_block_acc =
+        buffers.indirect_call_requests_by_block
+            .get_access<cl::sycl::access::mode::read_write>(cgh);
+    cgh.parallel_for<class QueueIndirectCalls>(
+        cl::sycl::range<1>(TOTAL_NUM_INDIRECT_CALLS),
+        [=](const cl::sycl::item<1> idx) {
+          auto pre_allocated_rvs =
+              RuntimeBlockType::pre_allocate_runtime_values<
+                  cl::sycl::access::target::device>(1, mem_pool_acc,
+                                                    tmp_program, 0);
+          const auto mock_caller = mem_pool_acc[0].alloc<RuntimeBlockType>(
+              tmp_program.element_handle(0), *pre_allocated_rvs, 1);
+          FunctionValue function_value(
+              1, PortableMemPool::ArrayHandle<RuntimeValue>());
+          const auto test_args = mem_pool_acc[0].alloc_array<RuntimeValue>(1);
+          IndirectCallHandlerType::on_indirect_call(
+              ind_call_reqs_by_block_acc, mock_caller, function_value,
+              idx.get_linear_id(), 2, test_args);
+        });
+  });
+
+  std::set<Index_t> observed_block_thread_indices;
+  const auto add_all_thread_indices_for_indirect_calls =
+      [&](const BlockExecGroup &block_exec_group) {
+        auto block_exec_group_acc =
+            buffers.block_exec_group.get_access<cl::sycl::access::mode::read>();
+        auto mem_pool_acc =
+            mem_pool_buffer.get_access<cl::sycl::access::mode::read_write>();
+        for (Index_t i = 0; i < block_exec_group.num_blocks; ++i) {
+          const auto &runtime_block =
+              *mem_pool_acc[0].deref_handle(block_exec_group_acc[i].block);
+          for (Index_t thread_idx = 0;
+               thread_idx < block_exec_group_acc[i].num_threads; ++thread_idx) {
+            BOOST_CHECK(
+                observed_block_thread_indices
+                    .emplace(runtime_block.target_data[thread_idx].thread)
+                    .second);
+          }
+        }
+      };
+  const auto first_block_exec_group =
+      IndirectCallHandlerType::populate_block_exec_group(
+          work_queue, mem_pool_buffer, buffers, program);
+  BOOST_CHECK_EQUAL(IndirectCallHandlerType::MAX_BLOCKS_SCHEDULED_PER_PASS,
+                    first_block_exec_group.num_blocks);
+  add_all_thread_indices_for_indirect_calls(first_block_exec_group);
+
+  const auto second_block_exec_group =
+      IndirectCallHandlerType::populate_block_exec_group(
+          work_queue, mem_pool_buffer, buffers, program);
+  BOOST_CHECK_EQUAL(1, second_block_exec_group.num_blocks);
+  add_all_thread_indices_for_indirect_calls(second_block_exec_group);
+  BOOST_CHECK_EQUAL(TOTAL_NUM_INDIRECT_CALLS,
+                    observed_block_thread_indices.size());
+}
+
+struct AdvancedFixture : public Fixture<512, 512> {
   AdvancedFixture() : Fixture("./test_programs/ListExample.fgpu") {}
 };
 
@@ -173,9 +301,8 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
     auto pre_allocated_rvs = RuntimeBlockType::pre_allocate_runtime_values<
         cl::sycl::access::target::host_buffer>(1, mem_pool_acc, program, 0);
     BOOST_REQUIRE(pre_allocated_rvs.has_value());
-    caller = mem_pool_acc[0].alloc<RuntimeBlockType>(
-        mem_pool_acc[0].deref_handle(program)[0].instructions,
-        *pre_allocated_rvs, 1);
+    caller = mem_pool_acc[0].alloc<RuntimeBlockType>(program.element_handle(0),
+                                                     *pre_allocated_rvs, 1);
   }
   work_queue.submit([&](cl::sycl::handler &cgh) {
     auto mem_pool_acc =
@@ -249,32 +376,30 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
       generate_set(RuntimeBlockType::NumThreadsPerBlock * 2);
   expected_target_regs_per_lambda[2] =
       generate_set(RuntimeBlockType::NumThreadsPerBlock * 3 + 1);
-  // TODO determine why only the first 3
   auto block_descs =
       buffers.block_exec_group.get_access<cl::sycl::access::mode::read>();
   std::cout << "num blocks: " << exec_group.num_blocks << std::endl;
   for (Index_t i = 0; i < exec_group.num_blocks; ++i) {
     const auto &block_meta = block_descs[i];
     BOOST_TEST_INFO_SCOPE("Block index " << i);
-    BOOST_REQUIRE(block_meta.instructions !=
-                  PortableMemPool::ArrayHandle<Instruction>());
+    BOOST_REQUIRE(block_meta.lambda != PortableMemPool::Handle<Lambda>());
     BOOST_REQUIRE(block_meta.block !=
                   PortableMemPool::Handle<RuntimeBlockType>());
     const auto *lambdas = mem_pool_acc[0].deref_handle(program);
     auto lambda_idx = 0;
-    BOOST_REQUIRE_NE(block_meta.instructions.get_count(), 0);
-    if (block_meta.instructions == lambdas[7].instructions) {
+    const auto &block_metadata_lambda =
+        *mem_pool_acc[0].deref_handle(block_meta.lambda);
+    if (&block_metadata_lambda == &lambdas[7]) {
       lambda_idx = 0;
-    } else if (block_meta.instructions == lambdas[8].instructions) {
+    } else if (&block_metadata_lambda == &lambdas[8]) {
       lambda_idx = 1;
-    } else if (block_meta.instructions == lambdas[9].instructions) {
+    } else if (&block_metadata_lambda == &lambdas[9]) {
       lambda_idx = 2;
     } else {
       std::optional<Index_t> lambda_idx_opt;
       for (auto searched_lambda_idx = 0;
            searched_lambda_idx < program.get_count(); ++searched_lambda_idx) {
-        if (block_meta.instructions ==
-            lambdas[searched_lambda_idx].instructions) {
+        if (&block_metadata_lambda == &lambdas[searched_lambda_idx]) {
           lambda_idx_opt = searched_lambda_idx;
           break;
         }
@@ -287,9 +412,8 @@ BOOST_FIXTURE_TEST_CASE(advanced, AdvancedFixture) {
                  << ", block thread count: " << block_meta.num_threads);
     }
     num_blocks_per_lambda_idx[lambda_idx]++;
-    BOOST_CHECK(
-        block_meta.instructions ==
-        mem_pool_acc[0].deref_handle(program)[lambda_idx + 7].instructions);
+    BOOST_CHECK(&block_metadata_lambda ==
+                &mem_pool_acc[0].deref_handle(program)[lambda_idx + 7]);
     const auto &first_block = *mem_pool_acc[0].deref_handle(block_meta.block);
     std::vector<RuntimeValue> expected_captures_and_args;
     for (Index_t j = 0; j < (lambda_idx + 4) + (lambda_idx + 1); j++) {

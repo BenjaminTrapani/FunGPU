@@ -1,16 +1,16 @@
-#include "core/evaluator_v2/block_exec_group.hpp"
 #define BOOST_TEST_MODULE RuntimeBlockTestsModule
+
+#include "core/evaluator_v2/runtime_block.hpp"
 #include "core/ast_node.hpp"
 #include "core/block_prep.hpp"
+#include "core/evaluator_v2/block_exec_group.hpp"
 #include "core/evaluator_v2/block_generator.hpp"
 #include "core/evaluator_v2/compile_program.hpp"
-#include "core/evaluator_v2/runtime_block.hpp"
 #include "core/parser.hpp"
 #include "core/visitor.hpp"
 #include <boost/test/tools/old/interface.hpp>
 #include <boost/test/unit_test.hpp>
 #include <cmath>
-#include <stdexcept>
 
 namespace FunGPU::EvaluatorV2 {
 namespace {
@@ -65,24 +65,26 @@ struct Fixture {
               local_block[0] =
                   *mem_pool_write[0].deref_handle(block_meta.block);
             }
+            const auto &lambda_data =
+                *mem_pool_write[0].deref_handle(block_meta.lambda);
             const auto *instructions_global_data =
-                mem_pool_write[0].deref_handle(block_meta.instructions);
+                mem_pool_write[0].deref_handle(lambda_data.instructions);
             auto instructions_for_block = local_instructions[block_idx];
             for (auto idx = thread_idx;
-                 idx < block_meta.instructions.get_count();
+                 idx < lambda_data.instructions.get_count();
                  idx += THREADS_PER_BLOCK) {
               instructions_for_block[idx] = instructions_global_data[idx];
             }
             itm.barrier(cl::sycl::access::fence_space::local_space);
             RuntimeBlockType::Status status = local_block[0].evaluate(
                 block_idx, thread_idx, itm, mem_pool_write, local_instructions,
-                block_meta.instructions.get_count(), block_meta.num_threads,
+                lambda_data.instructions.get_count(), block_meta.num_threads,
                 [](auto &&...) {}, [](const auto) {});
             if (status == RuntimeBlockType::Status::COMPLETE) {
               results_acc[cl::sycl::id<2>(block_idx, thread_idx)] =
                   local_block[0].result(block_idx, thread_idx,
                                         local_instructions,
-                                        block_meta.instructions.get_count());
+                                        lambda_data.instructions.get_count());
             }
           });
     });
@@ -114,13 +116,15 @@ struct Fixture {
               THREADS_PER_BLOCK, mem_pool_acc, no_bindings_program, 0);
       BOOST_REQUIRE(pre_allocated_rvs.has_value());
       const auto block_handle = mem_pool_acc[0].alloc<RuntimeBlockType>(
-          lambdas[0].instructions, *pre_allocated_rvs, THREADS_PER_BLOCK);
+          no_bindings_program.element_handle(0), *pre_allocated_rvs,
+          THREADS_PER_BLOCK);
       const auto block_metadata_array =
           mem_pool_acc[0].alloc_array<RuntimeBlockType::BlockMetadata>(1);
       auto *block_meta_array_data =
           mem_pool_acc[0].deref_handle(block_metadata_array);
       block_meta_array_data[0] = RuntimeBlockType::BlockMetadata(
-          block_handle, lambdas[0].instructions, THREADS_PER_BLOCK);
+          block_handle, no_bindings_program.element_handle(0),
+          THREADS_PER_BLOCK);
       return std::pair(BlockExecGroup(block_metadata_array.get_count(),
                                       lambdas[0].instructions.get_count()),
                        block_metadata_array);
@@ -152,12 +156,13 @@ struct Fixture {
                 THREADS_PER_BLOCK, mem_pool_acc, no_bindings_program, 0);
         BOOST_REQUIRE(pre_allocate_runtime_values.has_value());
         const auto block_handle = mem_pool_acc[0].alloc<RuntimeBlockType>(
-            lambdas[0].instructions, *pre_allocate_runtime_values,
+            no_bindings_program.element_handle(0), *pre_allocate_runtime_values,
             THREADS_PER_BLOCK);
         BOOST_REQUIRE(block_handle !=
                       PortableMemPool::Handle<RuntimeBlockType>());
         block_metadata_array_data[i++] = RuntimeBlockType::BlockMetadata(
-            block_handle, lambdas[0].instructions, THREADS_PER_BLOCK);
+            block_handle, no_bindings_program.element_handle(0),
+            THREADS_PER_BLOCK);
         max_instructions_per_block = std::max(
             max_instructions_per_block, lambdas[0].instructions.get_count());
       }
