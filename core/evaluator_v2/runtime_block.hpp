@@ -2,6 +2,7 @@
 
 #include "core/concepts.hpp"
 #include "core/evaluator_v2/instruction.hpp"
+#include "core/evaluator_v2/lambda.hpp"
 #include "core/evaluator_v2/program.hpp"
 #include "core/evaluator_v2/runtime_value.hpp"
 #include "core/portable_mem_pool.hpp"
@@ -26,13 +27,13 @@ public:
 
   struct BlockMetadata {
     BlockMetadata(const PortableMemPool::Handle<RuntimeBlock> block,
-                  const PortableMemPool::ArrayHandle<Instruction> instructions,
+                  const PortableMemPool::Handle<Lambda> lambda,
                   const Index_t num_threads)
-        : block(block), instructions(instructions), num_threads(num_threads) {}
+        : block(block), lambda(lambda), num_threads(num_threads) {}
     BlockMetadata() = default;
 
     PortableMemPool::Handle<RuntimeBlock> block;
-    PortableMemPool::ArrayHandle<Instruction> instructions;
+    PortableMemPool::Handle<Lambda> lambda;
     Index_t num_threads;
   };
 
@@ -60,10 +61,10 @@ public:
       Index_t thread_idx);
 
   explicit RuntimeBlock(
-      const PortableMemPool::ArrayHandle<Instruction> instructions,
+      const PortableMemPool::Handle<Lambda> lambda_ref,
       const PreAllocatedRuntimeValuesPerThread pre_allocated_runtime_values,
       const Index_t num_threads)
-      : instruction_ref(instructions),
+      : lambda_ref(lambda_ref),
         pre_allocated_runtime_values(pre_allocated_runtime_values),
         num_threads(num_threads) {}
 
@@ -93,13 +94,13 @@ public:
       PortableMemPool::DeviceAccessor_t mem_pool, Index_t thread);
 
   BlockMetadata block_metadata() const {
-    return BlockMetadata(m_handle, instruction_ref, num_threads);
+    return BlockMetadata(m_handle, lambda_ref, num_threads);
   }
 
   std::array<std::array<RuntimeValue, RegistersPerThread>, ThreadsPerBlock>
       registers;
   PortableMemPool::Handle<RuntimeBlock> m_handle;
-  PortableMemPool::ArrayHandle<Instruction> instruction_ref;
+  PortableMemPool::Handle<Lambda> lambda_ref;
   PreAllocatedRuntimeValuesPerThread pre_allocated_runtime_values;
   TargetAddress target_data[ThreadsPerBlock];
   Index_t num_threads;
