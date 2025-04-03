@@ -1,6 +1,7 @@
 #include "core/evaluator_v2/compile_program.hpp"
 #include "core/evaluator_v2/evaluator.hpp"
 #include "core/portable_mem_pool.hpp"
+#include <iomanip>
 #include <iostream>
 
 using namespace FunGPU;
@@ -34,7 +35,9 @@ int main(int argc, char **argv) {
           compile_program(*program_path, Evaluator::REGISTERS_PER_THREAD,
                           Evaluator::THREADS_PER_BLOCK, mem_pool_buffer);
       const auto result = evaluator.compute(program);
-      std::cout << "Result: " << result.data.float_val << std::endl;
+      std::cout << "Result: "
+                << std::setprecision(std::numeric_limits<float>::max_digits10)
+                << result.data.float_val << std::endl;
     }
   } catch (const cl::sycl::exception &e) {
     std::cerr << "Sycl exception in main: " << e.what() << std::endl;

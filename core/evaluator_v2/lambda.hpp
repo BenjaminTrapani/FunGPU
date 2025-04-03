@@ -8,7 +8,7 @@
 namespace FunGPU::EvaluatorV2 {
 struct Lambda {
   struct InstructionProperties {
-    Index_t total_num_indirect_calls;
+    Index_t total_num_indirect_calls = 0;
     PortableMemPool::ArrayHandle<Index_t> num_runtime_values_per_op;
   };
 

@@ -127,31 +127,45 @@ BOOST_FIXTURE_TEST_CASE(SimpleCall, Fixture) {
 BOOST_FIXTURE_TEST_CASE(SimpleLetRec, Fixture) {
   check_program_yields_result(5, "./test_programs/SimpleLetRec.fgpu");
 }
+
 BOOST_FIXTURE_TEST_CASE(MultiLetRec, Fixture) {
   check_program_yields_result(135, "./test_programs/MultiLetRec.fgpu");
 }
+
 BOOST_FIXTURE_TEST_CASE(ListExample, Fixture) {
   check_program_yields_result(6, "./test_programs/ListExample.fgpu");
 }
+
 BOOST_FIXTURE_TEST_CASE(MultiList, Fixture) {
   check_program_yields_result(3, "./test_programs/MultiList.fgpu");
 }
+
 BOOST_FIXTURE_TEST_CASE(MapExample, Fixture) {
   check_roundtripped_program_yields_same_result(
       1, "./test_programs/MapExample.fgpu");
 }
+
 BOOST_FIXTURE_TEST_CASE(MergeSort, Fixture) {
   check_roundtripped_program_yields_same_result(
       123456, "./test_programs/MergeSort.fgpu");
 }
+
 BOOST_FIXTURE_TEST_CASE(BranchInBinding, Fixture) {
   check_program_yields_result(130, "./test_programs/BranchInBinding.fgpu");
 }
+
 BOOST_FIXTURE_TEST_CASE(ConditionalLetRec, Fixture) {
   check_program_yields_result(120, "./test_programs/ConditionalLetRec.fgpu");
 }
+
 BOOST_FIXTURE_TEST_CASE(ExplicitFactorial, Fixture) {
   check_program_yields_result(120, "./test_programs/ExplicitFactorial.fgpu");
+}
+
+BOOST_FIXTURE_TEST_CASE(ConcurrentTransformEnsureExcessBlocksBuffered,
+                        Fixture) {
+  check_program_yields_result(134225920,
+                              "./test_programs/ConcurrentTransform.fgpu");
 }
 } // namespace
 } // namespace FunGPU::EvaluatorV2
